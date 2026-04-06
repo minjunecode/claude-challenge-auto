@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Max 챌린지 (Auto)</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 로그인 화면 -->
+    <div id="login-view" class="view active">
+      <div class="login-card">
+        <h1>Claude Max 챌린지</h1>
+        <p class="subtitle">자동으로 토큰 사용량을 추적합니다</p>
+        <form id="login-form">
+          <input type="text" id="login-nickname" placeholder="이니셜 or 닉네임" required autocomplete="username">
+          <input type="password" id="login-password" placeholder="비밀번호" required autocomplete="current-password">
+          <button type="submit" class="btn btn-primary">로그인</button>
+        </form>
+        <div id="login-error" class="error-msg"></div>
+        <button id="btn-show-init" class="btn-link">계정 만들기</button>
+        <div id="init-section" class="hidden">
+          <h3>계정 만들기</h3>
+          <p class="hint">챌린지에 참여할 계정을 만드세요.</p>
+          <input type="text" id="init-nickname" placeholder="이니셜 or 닉네임" autocomplete="off">
+          <input type="password" id="init-password" placeholder="비밀번호" autocomplete="off">
+          <button id="btn-init" class="btn btn-primary">가입하기</button>
+          <div id="init-msg" class="error-msg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 메인 화면 -->
+    <div id="main-view" class="view">
+      <header>
+        <h1>Claude Max 챌린지</h1>
+        <div class="header-right">
+          <span id="user-info"></span>
+          <button id="btn-logout" class="btn btn-small">로그아웃</button>
+        </div>
+      </header>
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="dashboard">대시보드</button>
+        <button class="tab" data-tab="token">토큰 설정</button>
+        <button class="tab admin-only" data-tab="admin">관리자</button>
+      </nav>
+
+      <!-- 대시보드 탭 -->
+      <div id="tab-dashboard" class="tab-content active">
+        <div class="dashboard-container">
+          <!-- 뷰 전환 -->
+          <div class="view-tabs">
+            <button class="view-tab active" data-view="weekly">주간</button>
+            <button class="view-tab" data-view="monthly">월간</button>
+          </div>
+
+          <!-- 주간 뷰 -->
+          <div id="view-weekly" class="cert-view active">
+            <div class="daily-nav-header">
+              <div class="daily-nav-buttons">
+                <button id="btn-daily-prev" class="daily-nav-btn">&larr;</button>
+                <span id="weekly-label" class="week-label"></span>
+                <button id="btn-daily-next" class="daily-nav-btn">&rarr;</button>
+              </div>
+            </div>
+            <div class="daily-table-wrapper">
+              <table id="daily-table" class="daily-table">
+                <thead><tr id="daily-header"></tr></thead>
+                <tbody id="daily-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 월간 뷰 -->
+          <div id="view-monthly" class="cert-view">
+            <div class="daily-nav-header">
+              <div class="daily-nav-buttons">
+                <button id="btn-month-prev" class="daily-nav-btn">&larr;</button>
+                <span id="month-label" class="month-label"></span>
+                <button id="btn-month-next" class="daily-nav-btn">&rarr;</button>
+              </div>
+            </div>
+            <div class="calendar-wrapper">
+              <div class="calendar-grid" id="calendar-grid"></div>
+            </div>
+          </div>
+
+          <!-- 내 현황 카드 -->
+          <div id="my-status-card" class="my-status-card">
+            <div class="my-status-left">
+              <div id="my-rank-badge" class="rank-badge">-</div>
+              <div class="my-status-info">
+                <div class="my-status-name" id="my-status-name">-</div>
+                <div class="my-status-level" id="my-status-level">-</div>
+              </div>
+            </div>
+            <div class="my-status-right">
+              <div class="my-stat">
+                <span class="my-stat-value" id="my-weekly-pts">0</span>
+                <span class="my-stat-label">이번 주</span>
+              </div>
+              <div class="my-stat">
+                <span class="my-stat-value" id="my-total-pts">0</span>
+                <span class="my-stat-label">누적</span>
+              </div>
+              <div class="my-stat">
+                <span class="my-stat-value" id="my-streak">0</span>
+                <span class="my-stat-label">연속</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 레벨 진행률 -->
+          <div class="level-progress-card">
+            <div class="level-progress-header">
+              <span id="level-current">-</span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span id="level-next">-</span>
+                <span class="info-icon" id="level-info-btn">i</span>
+              </div>
+            </div>
+            <div class="level-progress-bar">
+              <div class="level-progress-fill" id="level-progress-fill"></div>
+            </div>
+            <div class="level-progress-text" id="level-progress-text">-</div>
+            <div class="level-tooltip hidden" id="level-tooltip">
+              <div class="level-tooltip-title">레벨 시스템</div>
+              <div class="level-tooltip-list">
+                <div><span class="lt-name">Rookie</span><span class="lt-pts">0pt~</span></div>
+                <div><span class="lt-name">Beginner</span><span class="lt-pts">10pt~</span></div>
+                <div><span class="lt-name">Regular</span><span class="lt-pts">25pt~</span></div>
+                <div><span class="lt-name">Dedicated</span><span class="lt-pts">50pt~</span></div>
+                <div><span class="lt-name">Pro</span><span class="lt-pts">80pt~</span></div>
+                <div><span class="lt-name">Expert</span><span class="lt-pts">120pt~</span></div>
+                <div><span class="lt-name">Master</span><span class="lt-pts">170pt~</span></div>
+                <div><span class="lt-name">Legend</span><span class="lt-pts">250pt~</span></div>
+              </div>
+              <div class="level-tooltip-footer">세션 한도 도달 +1pt / 주간 한도 도달 +5pt</div>
+            </div>
+          </div>
+
+          <!-- TOP 3 -->
+          <h2 class="section-title">TOP 3</h2>
+          <div id="podium" class="podium"></div>
+          <div id="rest-ranking" class="rest-ranking"></div>
+
+          <!-- 최근 인증 -->
+          <h2 class="section-title" style="margin-top: 24px;">최근 인증</h2>
+          <div id="activity-list" class="activity-list"></div>
+        </div>
+      </div>
+
+      <!-- 토큰 설정 탭 -->
+      <div id="tab-token" class="tab-content">
+        <div class="token-card">
+          <h2>OAuth 토큰 설정</h2>
+          <p class="token-desc">토큰을 등록하면 사용량 한도 도달 시 자동으로 인증됩니다.</p>
+
+          <div id="token-status" class="token-status disconnected">
+            <span class="token-status-dot"></span>
+            <span id="token-status-text">토큰 미등록</span>
+          </div>
+
+          <div class="token-input-row">
+            <input type="password" id="token-input" placeholder="OAuth 토큰 붙여넣기">
+            <button id="btn-register-token" class="btn btn-primary" style="width:auto;padding:12px 20px;">등록</button>
+          </div>
+          <div id="token-msg" class="error-msg"></div>
+
+          <!-- 실시간 사용량 표시 -->
+          <div id="usage-display" class="usage-display hidden">
+            <div class="usage-item">
+              <div class="usage-item-header">
+                <span class="usage-item-label">5시간 사용량</span>
+                <span class="usage-item-value" id="usage-5h-value">0%</span>
+              </div>
+              <div class="usage-bar">
+                <div class="usage-bar-fill" id="usage-5h-bar" style="width:0%"></div>
+              </div>
+              <div class="usage-reset" id="usage-5h-reset"></div>
+            </div>
+            <div class="usage-item">
+              <div class="usage-item-header">
+                <span class="usage-item-label">7일 사용량</span>
+                <span class="usage-item-value" id="usage-7d-value">0%</span>
+              </div>
+              <div class="usage-bar">
+                <div class="usage-bar-fill" id="usage-7d-bar" style="width:0%"></div>
+              </div>
+              <div class="usage-reset" id="usage-7d-reset"></div>
+            </div>
+            <button id="btn-refresh-usage" class="btn btn-secondary" style="margin-top:12px;width:100%;">사용량 새로고침</button>
+          </div>
+
+          <!-- 토큰 찾는 법 가이드 -->
+          <div class="token-guide">
+            <div class="token-guide-title">토큰 찾는 법</div>
+            <strong>Windows/Linux:</strong><br>
+            파일 열기: <code>~/.claude/.credentials.json</code><br>
+            <code>"oauth_token"</code> 값을 복사하세요.<br><br>
+            <strong>macOS:</strong><br>
+            키체인 접근 > "Claude Code-credentials" 검색 > 암호 복사<br><br>
+            <strong>또는 터미널에서:</strong><br>
+            <code>cat ~/.claude/.credentials.json | grep oauth_token</code>
+          </div>
+        </div>
+      </div>
+
+      <!-- 관리자 탭 -->
+      <div id="tab-admin" class="tab-content">
+        <div class="admin-card">
+          <h2>멤버 관리</h2>
+          <div class="add-member-form">
+            <h3>멤버 추가</h3>
+            <input type="text" id="new-member-nickname" placeholder="닉네임" autocomplete="off">
+            <input type="password" id="new-member-password" placeholder="비밀번호" autocomplete="off">
+            <button id="btn-add-member" class="btn btn-primary">추가</button>
+            <div id="admin-msg" class="error-msg"></div>
+          </div>
+          <div class="member-list-section">
+            <h3>현재 멤버 목록</h3>
+            <ul id="member-list"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 이미지 팝업 -->
+    <div id="image-modal" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <button class="modal-close">&times;</button>
+        <h3 id="modal-title"></h3>
+        <img id="modal-image" alt="인증 스크린샷">
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
