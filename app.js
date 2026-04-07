@@ -1,6 +1,6 @@
 // ============================================
-// Claude Max 챌린지 (Auto) - 프론트엔드
-// OAuth 토큰으로 자동 사용량 수집
+// Claude Max 챌린지 - 프론트엔드
+// Hook 기반 자동 사용량 수집 (OAuth 불필요)
 // ============================================
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbwrErPYadxObqPoOH82jmNBr9uuv7KabV31YkMPKBh0Si7mWcTP24XdvFbCoj3nEp8vcw/exec';
@@ -13,12 +13,12 @@ let monthOffset = 0;
 // ── 레벨 시스템 ──
 const LEVELS = [
   { name: 'Rookie', min: 0 },
-  { name: 'Beginner', min: 10 },
-  { name: 'Regular', min: 25 },
-  { name: 'Dedicated', min: 50 },
-  { name: 'Pro', min: 80 },
-  { name: 'Expert', min: 120 },
-  { name: 'Master', min: 170 },
+  { name: 'Beginner', min: 5 },
+  { name: 'Regular', min: 15 },
+  { name: 'Dedicated', min: 30 },
+  { name: 'Pro', min: 60 },
+  { name: 'Expert', min: 100 },
+  { name: 'Master', min: 150 },
   { name: 'Legend', min: 250 },
 ];
 
@@ -65,29 +65,6 @@ function setupEventListeners() {
   document.getElementById('btn-month-prev').addEventListener('click', () => { monthOffset--; renderMonthlyCalendar(); });
   document.getElementById('btn-month-next').addEventListener('click', () => { monthOffset++; renderMonthlyCalendar(); });
 
-  // 수동 업로드
-  document.getElementById('session-file').addEventListener('change', (e) => handleFileSelect(e, 'session'));
-  document.getElementById('btn-upload-session').addEventListener('click', () => handleManualUpload('session'));
-  document.getElementById('weekly-file').addEventListener('change', (e) => handleFileSelect(e, 'weekly'));
-  document.getElementById('btn-upload-weekly').addEventListener('click', () => handleManualUpload('weekly'));
-  setupPasteSupport('session');
-  setupPasteSupport('weekly');
-
-  // 토큰 등록
-  document.getElementById('btn-register-token').addEventListener('click', handleRegisterToken);
-  document.getElementById('btn-refresh-usage').addEventListener('click', refreshUsage);
-  document.getElementById('btn-change-token').addEventListener('click', () => {
-    document.getElementById('token-form-section').classList.remove('hidden');
-    document.getElementById('btn-toggle-guide').classList.remove('hidden');
-    document.getElementById('btn-change-token').classList.add('hidden');
-  });
-  document.getElementById('btn-toggle-guide').addEventListener('click', () => {
-    const guide = document.getElementById('token-guide-section');
-    const btn = document.getElementById('btn-toggle-guide');
-    guide.classList.toggle('hidden');
-    btn.textContent = guide.classList.contains('hidden') ? '토큰 찾는 법 보기' : '가이드 접기';
-  });
-
   // 관리자
   document.getElementById('btn-add-member').addEventListener('click', handleAddMember);
 
@@ -120,7 +97,7 @@ async function handleLogin(e) {
   errorEl.textContent = '';
 
   if (API_URL === 'YOUR_APPS_SCRIPT_URL_HERE') {
-    currentUser = { nickname: nickname || 'Mj', isAdmin: true, hasToken: true };
+    currentUser = { nickname: nickname || 'Mj', isAdmin: true, hasAutoReport: true };
     localStorage.setItem('challengeUser', JSON.stringify(currentUser));
     showMain();
     return;
@@ -137,7 +114,7 @@ async function handleLogin(e) {
 
   if (!result) return;
   if (result.success) {
-    currentUser = { nickname: result.nickname, isAdmin: result.isAdmin, hasToken: result.hasToken };
+    currentUser = { nickname: result.nickname, isAdmin: result.isAdmin, hasAutoReport: result.hasAutoReport };
     localStorage.setItem('challengeUser', JSON.stringify(currentUser));
     showMain();
   } else { errorEl.textContent = result.error; }
@@ -146,6 +123,7 @@ async function handleLogin(e) {
 function handleLogout() {
   currentUser = null; dashboardData = null;
   localStorage.removeItem('challengeUser');
+  localStorage.removeItem('dashboardCache');
   document.getElementById('main-view').classList.remove('active');
   document.getElementById('login-view').classList.add('active');
 }
@@ -157,7 +135,6 @@ async function handleRegister() {
   if (!nickname || !password) { msgEl.textContent = '닉네임과 비밀번호를 입력하세요.'; return; }
   const regBtn = document.getElementById('btn-init');
   regBtn.disabled = true; regBtn.textContent = '가입 중...';
-  // 먼저 register 시도, 실패하면 init (첫 유저)으로 재시도
   let result = await apiCall('register', { nickname, password });
   if (result && !result.success && result.error && result.error.includes('초기 설정')) {
     result = await apiCall('init', { nickname, password });
@@ -184,106 +161,89 @@ function switchTab(tabName) {
   document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
   document.getElementById(`tab-${tabName}`).classList.add('active');
   if (tabName === 'dashboard') renderDashboard();
-  if (tabName === 'cert') { renderUploadTab(); renderTokenTab(); }
+  if (tabName === 'cert') { renderAutoStatus(); }
   if (tabName === 'admin') renderAdminTab();
 }
 
-// ── 토큰 등록 ──
-async function handleRegisterToken() {
-  const token = document.getElementById('token-input').value.trim();
-  const msgEl = document.getElementById('token-msg');
-  if (!token) { msgEl.textContent = '토큰을 입력하세요.'; return; }
+// ── 자동 리포팅 상태 ──
+function renderAutoStatus() {
+  if (!dashboardData) return;
+  const statusEl = document.getElementById('auto-status');
+  const statusText = document.getElementById('auto-status-text');
+  const usageDisplay = document.getElementById('auto-usage-display');
+  const today = getTodayStr();
 
-  msgEl.textContent = '토큰 확인 중...';
-  msgEl.classList.remove('success-msg', 'error-msg');
+  // 내 사용량 데이터 찾기
+  const myUsage = (dashboardData.usage || []).filter(u => u.nickname === currentUser.nickname);
+  const todayUsage = myUsage.find(u => u.date === today);
 
-  const result = await apiCall('registerToken', { nickname: currentUser.nickname, token });
-  if (!result) { msgEl.textContent = '데모 모드: API URL을 설정하세요.'; return; }
+  // 최근 보고 찾기 (가장 최근)
+  const sorted = [...myUsage].sort((a, b) => (b.reportedAt || '').localeCompare(a.reportedAt || ''));
+  const lastReport = sorted[0];
 
-  if (result.success) {
-    msgEl.textContent = result.message;
-    msgEl.classList.add('success-msg');
-    currentUser.hasToken = true;
-    localStorage.setItem('challengeUser', JSON.stringify(currentUser));
-    document.getElementById('token-input').value = '';
-    renderTokenTab();
-    if (result.usage) updateUsageDisplay(result.usage);
-  } else {
-    msgEl.textContent = result.error;
-    msgEl.classList.add('error-msg');
-  }
-}
+  if (lastReport) {
+    // 최근 3일 이내 보고가 있으면 "활성"
+    const lastDate = lastReport.date || '';
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    const cutoff = `${threeDaysAgo.getFullYear()}-${String(threeDaysAgo.getMonth()+1).padStart(2,'0')}-${String(threeDaysAgo.getDate()).padStart(2,'0')}`;
 
-async function refreshUsage() {
-  const result = await apiCall('checkUsage', { nickname: currentUser.nickname });
-  if (!result) {
-    // 데모 모드
-    updateUsageDisplay({ fiveHour: { utilization: 72, resetsAt: new Date(Date.now() + 3*3600*1000).toISOString() }, sevenDay: { utilization: 45, resetsAt: new Date(Date.now() + 3*86400*1000).toISOString() } });
-    return;
-  }
-  if (result.success) updateUsageDisplay(result.usage);
-  else document.getElementById('token-msg').textContent = result.error;
-}
+    if (lastDate >= cutoff) {
+      statusEl.className = 'token-status connected';
+      statusText.textContent = '자동 리포팅 활성';
+    } else {
+      statusEl.className = 'token-status disconnected';
+      statusText.textContent = '리포팅 중단됨 (3일 이상 미보고)';
+    }
 
-function updateUsageDisplay(usage) {
-  document.getElementById('usage-display').classList.remove('hidden');
+    usageDisplay.classList.remove('hidden');
 
-  // 5시간
-  const u5 = Math.round(usage.fiveHour.utilization);
-  document.getElementById('usage-5h-value').textContent = u5 + '%';
-  const bar5 = document.getElementById('usage-5h-bar');
-  bar5.style.width = Math.min(100, u5) + '%';
-  bar5.className = 'usage-bar-fill' + (u5 >= 95 ? ' full' : u5 >= 80 ? ' critical' : u5 >= 50 ? ' warn' : '');
-  if (usage.fiveHour.resetsAt) {
-    const reset = new Date(usage.fiveHour.resetsAt);
-    document.getElementById('usage-5h-reset').textContent = `리셋: ${reset.toLocaleString('ko-KR')}`;
-  }
+    // 오늘 토큰 (input+output 기준, cache 제외)
+    if (todayUsage) {
+      const ioTotal = (todayUsage.input_tokens || 0) + (todayUsage.output_tokens || 0);
+      document.getElementById('auto-today-tokens').textContent = formatTokens(ioTotal);
+      document.getElementById('auto-today-sessions').textContent = todayUsage.sessions || 0;
+    } else {
+      document.getElementById('auto-today-tokens').textContent = '-';
+      document.getElementById('auto-today-sessions').textContent = '-';
+    }
 
-  // 7일
-  const u7 = Math.round(usage.sevenDay.utilization);
-  document.getElementById('usage-7d-value').textContent = u7 + '%';
-  const bar7 = document.getElementById('usage-7d-bar');
-  bar7.style.width = Math.min(100, u7) + '%';
-  bar7.className = 'usage-bar-fill' + (u7 >= 95 ? ' full' : u7 >= 80 ? ' critical' : u7 >= 50 ? ' warn' : '');
-  if (usage.sevenDay.resetsAt) {
-    const reset = new Date(usage.sevenDay.resetsAt);
-    document.getElementById('usage-7d-reset').textContent = `리셋: ${reset.toLocaleString('ko-KR')}`;
-  }
-}
-
-function renderTokenTab() {
-  const statusEl = document.getElementById('token-status');
-  const statusText = document.getElementById('token-status-text');
-  const tokenForm = document.getElementById('token-form-section');
-  const guideBtn = document.getElementById('btn-toggle-guide');
-  const guideSection = document.getElementById('token-guide-section');
-
-  const changeBtn = document.getElementById('btn-change-token');
-
-  if (currentUser.hasToken) {
-    statusEl.className = 'token-status connected';
-    statusText.textContent = '자동 인증 활성';
-    // 토큰 입력 폼 숨기기, 변경 버튼 표시
-    if (tokenForm) tokenForm.classList.add('hidden');
-    if (guideBtn) guideBtn.classList.add('hidden');
-    if (guideSection) guideSection.classList.add('hidden');
-    if (changeBtn) changeBtn.classList.remove('hidden');
-    refreshUsage();
+    // 마지막 보고 시간
+    const reportTime = (lastReport.reportedAt || '').slice(11, 16);
+    const reportDate = (lastReport.reportedAt || '').slice(0, 10);
+    document.getElementById('auto-last-report').textContent = reportDate === today ? reportTime : reportDate;
   } else {
     statusEl.className = 'token-status disconnected';
-    statusText.textContent = '토큰 미등록';
-    if (tokenForm) tokenForm.classList.remove('hidden');
-    if (guideBtn) guideBtn.classList.remove('hidden');
-    if (changeBtn) changeBtn.classList.add('hidden');
-    document.getElementById('usage-display').classList.add('hidden');
+    statusText.textContent = '미설정';
+    usageDisplay.classList.add('hidden');
   }
+}
+
+function formatTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
+  return String(n);
 }
 
 // ── 대시보드 ──
 async function loadDashboard() {
+  // 1) 캐시에서 즉시 렌더
+  const cached = localStorage.getItem('dashboardCache');
+  if (cached) {
+    try {
+      dashboardData = JSON.parse(cached);
+      renderDashboard();
+    } catch { /* ignore */ }
+  }
+
+  // 2) API에서 최신 데이터 가져오기
   const result = await apiCall('dashboard');
-  if (result && result.success) dashboardData = result;
-  else if (!dashboardData) dashboardData = getDemoData();
+  if (result && result.success) {
+    dashboardData = result;
+    localStorage.setItem('dashboardCache', JSON.stringify(result));
+  } else if (!dashboardData) {
+    dashboardData = getDemoData();
+  }
   renderDashboard();
 }
 
@@ -330,15 +290,34 @@ function renderDailyTable(members, submissions) {
   const weekInMonth = Math.ceil(thursday.getDate() / 7);
   document.getElementById('weekly-label').textContent = `${thuMonth}월 ${weekInMonth}주차`;
 
-  // 멤버별 날짜별 세션 인증
+  // 멤버별 날짜별 인증 + 토큰
   const dailyMap = {};
-  members.forEach(m => { dailyMap[m.nickname] = new Set(); });
+  members.forEach(m => { dailyMap[m.nickname] = {}; });
+
+  // submissions에서 날짜별 인증 여부
   submissions.forEach(s => {
     if (s.type === 'session') {
       const dateStr = (s.submittedAt || '').slice(0, 10);
-      if (dateStr && dailyMap[s.nickname]) dailyMap[s.nickname].add(dateStr);
+      if (dateStr && dailyMap[s.nickname]) {
+        if (!dailyMap[s.nickname][dateStr]) dailyMap[s.nickname][dateStr] = { done: true, tokens: 0, source: s.source };
+        dailyMap[s.nickname][dateStr].done = true;
+        if (s.source === 'auto' && s.tokens) dailyMap[s.nickname][dateStr].tokens = s.tokens;
+      }
     }
   });
+
+  // usage 데이터에서 토큰 수 보강
+  if (dashboardData.usage) {
+    dashboardData.usage.forEach(u => {
+      if (dailyMap[u.nickname]) {
+        const ioTokens = (u.input_tokens || 0) + (u.output_tokens || 0);
+        const allTokens = ioTokens + (u.cache_tokens || 0);
+        if (!dailyMap[u.nickname][u.date]) dailyMap[u.nickname][u.date] = { done: false, tokens: 0, allTokens: 0, source: '' };
+        dailyMap[u.nickname][u.date].tokens = ioTokens;
+        dailyMap[u.nickname][u.date].allTokens = allTokens;
+      }
+    });
+  }
 
   const headerRow = document.getElementById('daily-header');
   headerRow.innerHTML = '<th></th>';
@@ -354,7 +333,7 @@ function renderDailyTable(members, submissions) {
 
   const tbody = document.getElementById('daily-body');
   tbody.innerHTML = '';
-  members.forEach((m, mIdx) => {
+  members.forEach((m) => {
     const tr = document.createElement('tr');
     const nameTd = document.createElement('td');
     const dot = document.createElement('span');
@@ -366,7 +345,7 @@ function renderDailyTable(members, submissions) {
     }
     nameTd.appendChild(dot);
     nameTd.appendChild(document.createTextNode(m.nickname));
-    if (m.hasToken) {
+    if (m.hasAutoReport) {
       const badge = document.createElement('span');
       badge.className = 'auto-badge';
       badge.textContent = 'auto';
@@ -376,14 +355,39 @@ function renderDailyTable(members, submissions) {
 
     days.forEach(d => {
       const td = document.createElement('td');
-      if (d.date > today) { td.classList.add('daily-td-future'); }
-      else if (d.date === today) {
-        td.classList.add(dailyMap[m.nickname].has(d.date) ? 'daily-td-done' : 'daily-td-pending');
-        td.textContent = dailyMap[m.nickname].has(d.date) ? 'O' : '-';
+      const info = dailyMap[m.nickname][d.date];
+      const tokens = info ? info.tokens : 0;
+      const TOKEN_THRESHOLD = 50000;
+
+      if (d.date > today) {
+        td.classList.add('daily-td-future');
+      } else if (d.date === today) {
         td.classList.add('daily-td-today');
+        if (tokens >= TOKEN_THRESHOLD) {
+          td.classList.add('daily-td-done');
+          td.textContent = 'O';
+        } else if (tokens > 0) {
+          td.classList.add('daily-td-partial');
+          td.textContent = formatTokens(tokens);
+        } else {
+          td.classList.add('daily-td-pending');
+          td.textContent = '-';
+        }
       } else {
-        td.classList.add(dailyMap[m.nickname].has(d.date) ? 'daily-td-done' : 'daily-td-miss');
-        td.textContent = dailyMap[m.nickname].has(d.date) ? 'O' : 'X';
+        if (tokens >= TOKEN_THRESHOLD) {
+          td.classList.add('daily-td-done');
+          td.textContent = 'O';
+        } else if (tokens > 0) {
+          td.classList.add('daily-td-partial');
+          td.textContent = formatTokens(tokens);
+        } else {
+          td.classList.add('daily-td-miss');
+          td.textContent = 'X';
+        }
+      }
+      if (tokens > 0) {
+        const all = info ? info.allTokens : 0;
+        td.title = `in+out: ${tokens.toLocaleString()}\ncache 포함: ${all.toLocaleString()}`;
       }
       tr.appendChild(td);
     });
@@ -426,16 +430,20 @@ function renderMonthlyCalendar() {
   const targetDate = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
   const year = targetDate.getFullYear();
   const month = targetDate.getMonth();
+  const TOKEN_THRESHOLD = 50000;
 
   document.getElementById('month-label').textContent = `${year}년 ${month + 1}월`;
 
-  const myDates = new Set();
-  dashboardData.submissions.forEach(s => {
-    if (s.nickname === currentUser.nickname && s.type === 'session') {
-      const dateStr = (s.submittedAt || '').slice(0, 10);
-      if (dateStr) myDates.add(dateStr);
-    }
-  });
+  // Build a map of date -> ioTokens from usage data
+  const tokenMap = {};
+  if (dashboardData.usage) {
+    dashboardData.usage.forEach(u => {
+      if (u.nickname === currentUser.nickname) {
+        const ioTokens = (u.input_tokens || 0) + (u.output_tokens || 0);
+        if (ioTokens > 0) tokenMap[u.date] = ioTokens;
+      }
+    });
+  }
 
   const grid = document.getElementById('calendar-grid');
   grid.innerHTML = '';
@@ -459,6 +467,8 @@ function renderMonthlyCalendar() {
     return `${thu.getMonth() + 1}월 ${Math.ceil(thu.getDate() / 7)}주차`;
   }
 
+  let monthlyTotal = 0;
+
   let dayNum = 1 - startOffset;
   while (dayNum <= daysInMonth) {
     const labelEl = document.createElement('div');
@@ -473,14 +483,30 @@ function renderMonthlyCalendar() {
       if (dayNum < 1 || dayNum > daysInMonth) { el.classList.add('empty'); }
       else {
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-        el.innerHTML = `<span class="cal-num">${dayNum}</span>`;
+        const tokens = tokenMap[dateStr] || 0;
+        if (tokens > 0) monthlyTotal += tokens;
+
+        let innerHtml = `<span class="cal-num">${dayNum}</span>`;
+        if (tokens > 0) innerHtml += `<span class="cal-tokens">${formatTokens(tokens)}</span>`;
+        el.innerHTML = innerHtml;
+
         if (dateStr > today) el.classList.add('future');
-        else if (dateStr === today) { el.classList.add('today'); el.classList.add(myDates.has(dateStr) ? 'done' : 'pending'); }
-        else el.classList.add(myDates.has(dateStr) ? 'done' : 'miss');
+        else if (dateStr === today) {
+          el.classList.add('today');
+          el.classList.add(tokens >= TOKEN_THRESHOLD ? 'done' : 'pending');
+        } else {
+          el.classList.add(tokens >= TOKEN_THRESHOLD ? 'done' : 'miss');
+        }
       }
       grid.appendChild(el);
       dayNum++;
     }
+  }
+
+  // Monthly total
+  const monthTotalEl = document.getElementById('month-total');
+  if (monthTotalEl) {
+    monthTotalEl.innerHTML = `${month + 1}월 총 사용량: <span class="month-total-value">${formatTokens(monthlyTotal)}</span> tokens`;
   }
 }
 
@@ -509,7 +535,7 @@ function renderDashboard() {
   });
   members.forEach(m => { scores[m.nickname].streak = getStreak(m.nickname, submissions, currentWeek, currentYear); });
 
-  const ranked = members.map(m => ({ nickname: m.nickname, hasToken: m.hasToken, ...scores[m.nickname] })).sort((a, b) => b.total - a.total);
+  const ranked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, ...scores[m.nickname] })).sort((a, b) => b.total - a.total);
 
   // 일간 테이블
   renderDailyTable(members, submissions);
@@ -593,148 +619,35 @@ function renderDashboard() {
     restRanking.appendChild(listEl);
   }
 
-  // 최근 인증
+  // 최근 활동
   const activityList = document.getElementById('activity-list');
   activityList.innerHTML = '';
   const recent = [...submissions].sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || '')).slice(0, 10);
-  if (recent.length === 0) { activityList.innerHTML = '<div class="activity-item" style="color:var(--text-muted);justify-content:center;">아직 인증 내역이 없습니다.</div>'; return; }
+  if (recent.length === 0) { activityList.innerHTML = '<div class="activity-item" style="color:var(--text-muted);justify-content:center;">아직 활동 내역이 없습니다.</div>'; return; }
   recent.forEach(s => {
     const pts = s.points || (s.type === 'weekly' ? 5 : 1);
     const typeLabel = s.type === 'weekly' ? '주간' : '세션';
     const typeClass = s.type === 'weekly' ? 'weekly' : 'session';
     const dateStr = (s.submittedAt || '').slice(0, 10);
     const timeStr = (s.submittedAt || '').slice(11, 16);
+    const tokens = s.tokens > 0 ? ` · ${formatTokens(s.tokens)}` : '';
     const item = document.createElement('div');
     item.className = 'activity-item';
     item.innerHTML = `
       <span class="activity-type ${typeClass}">${typeLabel}</span>
       <span class="activity-name">${escapeHtml(s.nickname)}</span>
       ${s.source === 'auto' ? '<span class="auto-badge">auto</span>' : '<span class="manual-badge">manual</span>'}
-      <span class="activity-date">${dateStr}${timeStr ? ' ' + timeStr : ''}</span>
+      <span class="activity-date">${dateStr}${timeStr ? ' ' + timeStr : ''}${tokens}</span>
       <span class="activity-points">+${pts}pt</span>
     `;
     activityList.appendChild(item);
   });
 }
 
-// ── 수동 업로드 ──
-const MIN_SESSION_INTERVAL_HOURS = 2;
-const uploadState = {
-  session: { base64: null, fileName: null, screenshotTime: null },
-  weekly: { base64: null, fileName: null, screenshotTime: null },
-};
-
-function setupPasteSupport(type) {
-  const card = document.getElementById(`${type}-card`);
-  card.addEventListener('paste', (e) => {
-    const items = e.clipboardData && e.clipboardData.items;
-    if (!items) return;
-    for (const item of items) {
-      if (item.type.startsWith('image/')) { e.preventDefault(); processFile(item.getAsFile(), type); return; }
-    }
-  });
-  card.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('drag-over'); });
-  card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
-  card.addEventListener('drop', (e) => {
-    e.preventDefault(); card.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) processFile(file, type);
-  });
-}
-
-function processFile(file, type) {
-  const now = Date.now();
-  const fileTime = file.lastModified || now;
-  const fileAge = now - fileTime;
-  const msgEl = document.getElementById(`${type}-msg`);
-  const screenshotDate = new Date(fileTime);
-  uploadState[type].screenshotTime = formatDateTime(screenshotDate);
-
-  if (fileAge > 24 * 60 * 60 * 1000) {
-    msgEl.textContent = `이 파일은 약 ${Math.round(fileAge / 3600000)}시간 전에 생성되었습니다.`;
-    msgEl.classList.remove('success-msg'); msgEl.classList.add('error-msg');
-  } else {
-    msgEl.textContent = `스크린샷 시각: ${uploadState[type].screenshotTime}`;
-    msgEl.classList.remove('error-msg'); msgEl.classList.add('success-msg');
-  }
-
-  const name = file.name || `paste_${new Date().toISOString().slice(0,19).replace(/[:.]/g,'-')}.png`;
-  document.getElementById(`${type}-file-name`).textContent = name;
-  uploadState[type].fileName = name;
-
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    uploadState[type].base64 = ev.target.result.split(',')[1];
-    document.getElementById(`${type}-preview`).src = ev.target.result;
-    document.getElementById(`${type}-preview-wrapper`).classList.remove('hidden');
-    const btn = document.getElementById(`btn-upload-${type}`);
-    if (btn.textContent !== '오늘 완료' && btn.textContent !== '이번 주 완료') btn.disabled = false;
-  };
-  reader.readAsDataURL(file);
-}
-
-function handleFileSelect(e, type) {
-  const file = e.target.files[0];
-  if (file) processFile(file, type);
-}
-
 function formatDateTime(date) {
   const y = date.getFullYear(), mo = String(date.getMonth()+1).padStart(2,'0'), d = String(date.getDate()).padStart(2,'0');
   const h = String(date.getHours()).padStart(2,'0'), mi = String(date.getMinutes()).padStart(2,'0'), s = String(date.getSeconds()).padStart(2,'0');
   return `${y}-${mo}-${d} ${h}:${mi}:${s}`;
-}
-
-function renderUploadTab() {
-  if (!dashboardData) return;
-  const week = getISOWeek(new Date()), year = new Date().getFullYear(), today = getTodayStr();
-  const mySubs = dashboardData.submissions.filter(s => s.nickname === currentUser.nickname);
-
-  const sessionToday = mySubs.filter(s => s.type === 'session' && s.source === 'manual' && (s.submittedAt || '').startsWith(today)).length;
-  const sessionLeft = Math.max(0, 3 - sessionToday);
-  const sessionStatus = document.getElementById('session-status');
-  sessionStatus.textContent = `오늘 ${sessionToday}/3회 사용`;
-  sessionStatus.classList.toggle('maxed', sessionLeft === 0);
-  const btnSession = document.getElementById('btn-upload-session');
-  if (sessionLeft === 0) { btnSession.disabled = true; btnSession.textContent = '오늘 완료'; }
-  else { btnSession.disabled = !uploadState.session.base64; btnSession.textContent = '업로드'; }
-
-  const weeklyDone = mySubs.some(s => s.type === 'weekly' && s.source === 'manual' && s.week === week && s.year === year);
-  const weeklyStatus = document.getElementById('weekly-status');
-  weeklyStatus.textContent = weeklyDone ? '이번 주 인증 완료' : '이번 주 0/1회';
-  weeklyStatus.classList.toggle('maxed', weeklyDone);
-  const btnWeekly = document.getElementById('btn-upload-weekly');
-  if (weeklyDone) { btnWeekly.disabled = true; btnWeekly.textContent = '이번 주 완료'; }
-  else { btnWeekly.disabled = !uploadState.weekly.base64; btnWeekly.textContent = '업로드'; }
-
-  document.getElementById('session-msg').textContent = '';
-  document.getElementById('weekly-msg').textContent = '';
-}
-
-async function handleManualUpload(type) {
-  if (!uploadState[type].base64) return;
-  const week = getISOWeek(new Date()), year = new Date().getFullYear();
-  const msgEl = document.getElementById(`${type}-msg`);
-  const progressEl = document.getElementById(`${type}-progress`);
-  const btn = document.getElementById(`btn-upload-${type}`);
-  const points = type === 'weekly' ? 5 : 1;
-
-  msgEl.textContent = ''; progressEl.classList.remove('hidden'); btn.disabled = true;
-
-  const result = await apiCall('upload', {
-    nickname: currentUser.nickname, week, year, type, points,
-    screenshotTime: uploadState[type].screenshotTime || formatDateTime(new Date()),
-    imageBase64: uploadState[type].base64, fileName: uploadState[type].fileName,
-  });
-
-  progressEl.classList.add('hidden');
-  if (result && result.success) {
-    msgEl.textContent = `+${points}pt 인증 완료!`; msgEl.classList.add('success-msg'); msgEl.classList.remove('error-msg');
-    uploadState[type] = { base64: null, fileName: null, screenshotTime: null };
-    document.getElementById(`${type}-file-name`).textContent = '선택된 파일 없음';
-    document.getElementById(`${type}-preview-wrapper`).classList.add('hidden');
-    await loadDashboard(); renderUploadTab();
-  } else if (result) { msgEl.textContent = result.error || '업로드 실패'; btn.disabled = false; }
-  else { msgEl.textContent = '데모 모드: API URL을 설정하세요.'; btn.disabled = false; }
 }
 
 // ── 관리자 ──
@@ -744,7 +657,7 @@ function renderAdminTab() {
   list.innerHTML = '';
   dashboardData.members.forEach(m => {
     const li = document.createElement('li');
-    li.innerHTML = `<span><span class="member-name">${escapeHtml(m.nickname)}</span>${m.isAdmin ? '<span class="member-badge">관리자</span>' : ''}${m.hasToken ? '<span class="auto-badge">auto</span>' : ''}</span>`;
+    li.innerHTML = `<span><span class="member-name">${escapeHtml(m.nickname)}</span>${m.isAdmin ? '<span class="member-badge">관리자</span>' : ''}${m.hasAutoReport ? '<span class="auto-badge">auto</span>' : ''}</span>`;
     if (!m.isAdmin) {
       const delBtn = document.createElement('button');
       delBtn.className = 'btn btn-danger btn-small';
@@ -796,53 +709,54 @@ function escapeHtml(str) { const div = document.createElement('div'); div.textCo
 function getDemoData() {
   const week = getISOWeek(new Date());
   const year = new Date().getFullYear();
-  const today = getTodayStr();
   const subs = [];
+  const usage = [];
 
   function addAuto(nick, daysAgo, hour, type, pts) {
     const d = new Date(); d.setDate(d.getDate() - daysAgo);
     const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const w = getISOWeek(d);
-    subs.push({ nickname: nick, week: w, year, type, points: pts, submittedAt: `${ds} ${String(hour).padStart(2,'0')}:00:00`, source: 'auto', utilization: 95 + Math.round(Math.random()*5), resetsAt: '' });
+    // 실제 비율 반영: input 1%, output 40~60%, cache가 대부분
+    const outputTokens = Math.round(5000 + Math.random() * 175000);
+    const inputTokens = Math.round(outputTokens * 0.01);
+    const cacheTokens = Math.round(outputTokens * (15 + Math.random() * 50));
+    const ioTokens = inputTokens + outputTokens;
+    subs.push({ nickname: nick, week: w, year, type, points: pts, submittedAt: `${ds} ${String(hour).padStart(2,'0')}:00:00`, source: 'auto', tokens: type === 'session' ? ioTokens : 0, resetsAt: '' });
+    if (type === 'session') {
+      usage.push({ nickname: nick, date: ds, input_tokens: inputTokens, output_tokens: outputTokens, cache_tokens: cacheTokens, sessions: 1 + Math.floor(Math.random()*4), reportedAt: `${ds} ${String(hour).padStart(2,'0')}:30:00` });
+    }
   }
 
-  // Mj: 매일 세션 (14일간) + 주간
   for (let i = 0; i < 14; i++) addAuto('Mj', i, 9 + (i % 8), 'session', 1);
   addAuto('Mj', 0, 20, 'weekly', 5);
   addAuto('Mj', 7, 20, 'weekly', 5);
 
-  // Dc: 10일 중 7일
   [0,1,2,4,5,7,8].forEach(i => addAuto('Dc', i, 11, 'session', 1));
   addAuto('Dc', 1, 21, 'weekly', 5);
 
-  // S: 5일
   [0,2,3,5,6].forEach(i => addAuto('S', i, 14, 'session', 1));
   addAuto('S', 3, 19, 'weekly', 5);
 
-  // L: 4일
   [0,1,3,6].forEach(i => addAuto('L', i, 10, 'session', 1));
-
-  // Jh: 2일
   [0,1].forEach(i => addAuto('Jh', i, 15, 'session', 1));
 
-  // Jc: 6일
   [0,1,2,3,5,6].forEach(i => addAuto('Jc', i, 13, 'session', 1));
   addAuto('Jc', 2, 22, 'weekly', 5);
 
-  // Dg: 3일
   [0,3,5].forEach(i => addAuto('Dg', i, 16, 'session', 1));
 
   return {
     success: true,
     members: [
-      { nickname: 'Mj', isAdmin: true, hasToken: true },
-      { nickname: 'Dc', isAdmin: false, hasToken: true },
-      { nickname: 'S', isAdmin: false, hasToken: true },
-      { nickname: 'L', isAdmin: false, hasToken: false },
-      { nickname: 'Jh', isAdmin: false, hasToken: false },
-      { nickname: 'Jc', isAdmin: false, hasToken: true },
-      { nickname: 'Dg', isAdmin: false, hasToken: false },
+      { nickname: 'Mj', isAdmin: true, hasAutoReport: true },
+      { nickname: 'Dc', isAdmin: false, hasAutoReport: true },
+      { nickname: 'S', isAdmin: false, hasAutoReport: true },
+      { nickname: 'L', isAdmin: false, hasAutoReport: false },
+      { nickname: 'Jh', isAdmin: false, hasAutoReport: false },
+      { nickname: 'Jc', isAdmin: false, hasAutoReport: true },
+      { nickname: 'Dg', isAdmin: false, hasAutoReport: false },
     ],
     submissions: subs,
+    usage: usage,
   };
 }

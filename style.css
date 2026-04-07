@@ -583,11 +583,17 @@ header h1 {
   font-weight: 500;
   color: var(--text-light);
   position: relative;
-  gap: 1px;
+  gap: 0;
+  padding: 3px;
 }
 
 .cal-day .cal-num {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-size: 0.6rem;
   line-height: 1;
+  opacity: 0.7;
 }
 
 .cal-day.empty {
@@ -620,9 +626,51 @@ header h1 {
   color: var(--border);
 }
 
+.cal-tokens {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-light);
+  margin-top: 2px;
+}
+
+.cal-day.done .cal-tokens { color: var(--success); }
+.cal-day.miss .cal-tokens { color: var(--text-muted); }
+
+.month-total {
+  text-align: center;
+  padding: 12px;
+  margin-top: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.month-total-value {
+  font-weight: 800;
+  font-size: 1.2rem;
+}
+
 .cal-day.pending {
   background: var(--border-light);
   color: var(--text-muted);
+}
+
+.daily-legend {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-align: right;
+  margin-bottom: 4px;
+}
+
+.daily-td-partial {
+  color: #f59e0b !important;
+  font-size: 0.7rem;
+  font-weight: 600;
 }
 
 .daily-th-today {
@@ -1550,6 +1598,37 @@ header h1 {
 
 .token-status.connected .token-status-dot { background: #22c55e; }
 .token-status.disconnected .token-status-dot { background: var(--text-muted); }
+
+/* 자동 리포팅 상태 */
+.auto-usage-display {
+  margin-top: 16px;
+}
+
+.auto-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.auto-usage-item {
+  background: var(--border-light);
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+}
+
+.auto-usage-label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.auto-usage-value {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
 
 .usage-display {
   margin-top: 20px;
