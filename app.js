@@ -175,15 +175,15 @@ function renderAutoStatus() {
 
   // 내 사용량 데이터 찾기
   const myUsage = (dashboardData.usage || []).filter(u => u.nickname === currentUser.nickname);
-  const todayUsage = myUsage.find(u => u.date === today);
+  const todayUsage = myUsage.find(u => normalizeDate(u.date) === today);
 
   // 최근 보고 찾기 (가장 최근)
-  const sorted = [...myUsage].sort((a, b) => (b.reportedAt || '').localeCompare(a.reportedAt || ''));
+  const sorted = [...myUsage].sort((a, b) => normalizeDate(b.reportedAt).localeCompare(normalizeDate(a.reportedAt)));
   const lastReport = sorted[0];
 
   if (lastReport) {
     // 최근 3일 이내 보고가 있으면 "활성"
-    const lastDate = lastReport.date || '';
+    const lastDate = normalizeDate(lastReport.date);
     const threeDaysAgo = new Date();
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
     const cutoff = `${threeDaysAgo.getFullYear()}-${String(threeDaysAgo.getMonth()+1).padStart(2,'0')}-${String(threeDaysAgo.getDate()).padStart(2,'0')}`;
@@ -209,9 +209,10 @@ function renderAutoStatus() {
     }
 
     // 마지막 보고 시간
-    const reportTime = (lastReport.reportedAt || '').slice(11, 16);
-    const reportDate = (lastReport.reportedAt || '').slice(0, 10);
-    document.getElementById('auto-last-report').textContent = reportDate === today ? reportTime : reportDate;
+    const normReported = normalizeDate(lastReport.reportedAt);
+    const rawReported = String(lastReport.reportedAt || '');
+    const reportTime = rawReported.includes(':') ? rawReported.match(/\d{2}:\d{2}/)?.[0] || '' : '';
+    document.getElementById('auto-last-report').textContent = normReported === today && reportTime ? reportTime : normReported;
   } else {
     statusEl.className = 'token-status disconnected';
     statusText.textContent = '미설정';
@@ -223,6 +224,20 @@ function formatTokens(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
   if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
   return String(n);
+}
+
+// 날짜 정규화: 어떤 형식이든 "YYYY-MM-DD"로 변환
+function normalizeDate(v) {
+  if (!v) return '';
+  const s = String(v);
+  // 이미 YYYY-MM-DD 형식이면 그대로
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0, 10);
+  // "Wed Apr 08 2026 ..." 같은 Date.toString() 형식
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  return s;
 }
 
 // ── 대시보드 ──
@@ -297,7 +312,7 @@ function renderDailyTable(members, submissions) {
   // submissions에서 날짜별 인증 여부
   submissions.forEach(s => {
     if (s.type === 'session') {
-      const dateStr = (s.submittedAt || '').slice(0, 10);
+      const dateStr = normalizeDate(s.submittedAt);
       if (dateStr && dailyMap[s.nickname]) {
         if (!dailyMap[s.nickname][dateStr]) dailyMap[s.nickname][dateStr] = { done: true, tokens: 0, source: s.source };
         dailyMap[s.nickname][dateStr].done = true;
@@ -310,11 +325,12 @@ function renderDailyTable(members, submissions) {
   if (dashboardData.usage) {
     dashboardData.usage.forEach(u => {
       if (dailyMap[u.nickname]) {
+        const uDate = normalizeDate(u.date);
         const ioTokens = (u.input_tokens || 0) + (u.output_tokens || 0);
         const allTokens = ioTokens + (u.cache_tokens || 0);
-        if (!dailyMap[u.nickname][u.date]) dailyMap[u.nickname][u.date] = { done: false, tokens: 0, allTokens: 0, source: '' };
-        dailyMap[u.nickname][u.date].tokens = ioTokens;
-        dailyMap[u.nickname][u.date].allTokens = allTokens;
+        if (!dailyMap[u.nickname][uDate]) dailyMap[u.nickname][uDate] = { done: false, tokens: 0, allTokens: 0, source: '' };
+        dailyMap[u.nickname][uDate].tokens = ioTokens;
+        dailyMap[u.nickname][uDate].allTokens = allTokens;
       }
     });
   }
@@ -440,7 +456,7 @@ function renderMonthlyCalendar() {
     dashboardData.usage.forEach(u => {
       if (u.nickname === currentUser.nickname) {
         const ioTokens = (u.input_tokens || 0) + (u.output_tokens || 0);
-        if (ioTokens > 0) tokenMap[u.date] = ioTokens;
+        if (ioTokens > 0) tokenMap[normalizeDate(u.date)] = ioTokens;
       }
     });
   }
