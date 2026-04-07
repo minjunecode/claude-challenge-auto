@@ -145,7 +145,13 @@
           </div>
 
           <!-- TOP 3 -->
-          <h2 class="section-title">TOP 3</h2>
+          <div class="rank-header">
+            <h2 class="section-title" style="margin-bottom:0;">TOP 3</h2>
+            <div class="rank-toggle">
+              <button class="rank-toggle-btn active" data-rank="points" onclick="switchRankView('points')">포인트</button>
+              <button class="rank-toggle-btn" data-rank="tokens" onclick="switchRankView('tokens')">월간 토큰</button>
+            </div>
+          </div>
           <div id="podium" class="podium"></div>
           <div id="rest-ranking" class="rest-ranking"></div>
 

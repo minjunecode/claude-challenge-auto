@@ -45,7 +45,7 @@ function handleLogin(params) {
 
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === nickname && data[i][1] === password) {
+    if (String(data[i][0]).trim() === nickname && String(data[i][1]).trim() === password) {
       var hasAutoReport = checkHasAutoReport(nickname);
       return { success: true, nickname: nickname, isAdmin: data[i][2] === true || data[i][2] === 'TRUE', hasAutoReport: hasAutoReport };
     }
@@ -127,14 +127,14 @@ function handleDashboard() {
     for (var j = 1; j < recordData.length; j++) {
       if (recordData[j][0]) {
         submissions.push({
-          nickname: recordData[j][0],
-          week: recordData[j][1],
-          year: recordData[j][2],
+          nickname: String(recordData[j][0]),
+          week: Number(recordData[j][1]),
+          year: Number(recordData[j][2]),
           type: recordData[j][3] || 'session',
-          points: recordData[j][4] || 1,
-          submittedAt: recordData[j][5],
+          points: Number(recordData[j][4]) || 1,
+          submittedAt: recordData[j][5] instanceof Date ? Utilities.formatDate(recordData[j][5], 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss') : String(recordData[j][5]),
           source: recordData[j][6] || 'auto',
-          tokens: recordData[j][7] || 0,
+          tokens: Number(recordData[j][7]) || 0,
           resetsAt: recordData[j][8] || ''
         });
       }
@@ -149,13 +149,13 @@ function handleDashboard() {
     for (var k = 1; k < usageData.length; k++) {
       if (usageData[k][0]) {
         usage.push({
-          nickname: usageData[k][0],
-          date: usageData[k][1],
-          input_tokens: usageData[k][2] || 0,
-          output_tokens: usageData[k][3] || 0,
-          cache_tokens: usageData[k][4] || 0,
-          sessions: usageData[k][5] || 0,
-          reportedAt: usageData[k][6] || ''
+          nickname: String(usageData[k][0]),
+          date: usageData[k][1] instanceof Date ? Utilities.formatDate(usageData[k][1], 'Asia/Seoul', 'yyyy-MM-dd') : String(usageData[k][1]),
+          input_tokens: Number(usageData[k][2]) || 0,
+          output_tokens: Number(usageData[k][3]) || 0,
+          cache_tokens: Number(usageData[k][4]) || 0,
+          sessions: Number(usageData[k][5]) || 0,
+          reportedAt: usageData[k][6] instanceof Date ? Utilities.formatDate(usageData[k][6], 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss') : String(usageData[k][6])
         });
       }
     }
@@ -184,7 +184,7 @@ function handleReportUsage(params) {
   var memberData = memberSheet.getDataRange().getValues();
   var authenticated = false;
   for (var i = 1; i < memberData.length; i++) {
-    if (memberData[i][0] === nickname && memberData[i][1] === password) {
+    if (String(memberData[i][0]).trim() === nickname && String(memberData[i][1]).trim() === password) {
       authenticated = true; break;
     }
   }
@@ -200,7 +200,8 @@ function handleReportUsage(params) {
   var usageData = usageSheet.getDataRange().getValues();
   var existingRow = -1;
   for (var j = 1; j < usageData.length; j++) {
-    if (String(usageData[j][0]) === nickname && String(usageData[j][1]) === date) {
+    var cellDate = usageData[j][1] instanceof Date ? Utilities.formatDate(usageData[j][1], 'Asia/Seoul', 'yyyy-MM-dd') : String(usageData[j][1]);
+    if (String(usageData[j][0]) === nickname && cellDate === date) {
       existingRow = j + 1; break;
     }
   }
@@ -214,14 +215,16 @@ function handleReportUsage(params) {
     usageSheet.appendRow([nickname, date, inputTokens, outputTokens, cacheTokens, sessions, now]);
   }
 
-  // 자동 인증: 사용량이 있으면 해당 날짜의 세션 인증 생성
-  if (totalTokens > 0) {
+  // 자동 인증: input+output 50K 이상이면 해당 날짜의 세션 인증 생성
+  var ioTokens = inputTokens + outputTokens;
+  if (ioTokens >= 50000) {
     var recordSheet = ss.getSheetByName('인증기록');
     if (recordSheet) {
       var records = recordSheet.getDataRange().getValues();
       var alreadyExists = false;
       for (var k = 1; k < records.length; k++) {
-        if (records[k][0] === nickname && records[k][6] === 'auto' && String(records[k][5]).substring(0, 10) === date) {
+        var recDate = records[k][5] instanceof Date ? Utilities.formatDate(records[k][5], 'Asia/Seoul', 'yyyy-MM-dd') : String(records[k][5]).substring(0, 10);
+        if (records[k][0] === nickname && records[k][6] === 'auto' && recDate === date) {
           // 기존 기록의 토큰 수 업데이트
           recordSheet.getRange(k + 1, 8).setValue(totalTokens);
           alreadyExists = true;

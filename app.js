@@ -553,6 +553,24 @@ function renderDashboard() {
 
   const ranked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, ...scores[m.nickname] })).sort((a, b) => b.total - a.total);
 
+  // 월간 토큰 순위 계산
+  const now2 = new Date();
+  const curMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
+  const monthlyTokens = {};
+  members.forEach(m => { monthlyTokens[m.nickname] = 0; });
+  if (dashboardData.usage) {
+    dashboardData.usage.forEach(u => {
+      if (normalizeDate(u.date).startsWith(curMonth) && monthlyTokens[u.nickname] !== undefined) {
+        monthlyTokens[u.nickname] += (u.input_tokens || 0) + (u.output_tokens || 0);
+      }
+    });
+  }
+  const tokenRanked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, monthTokens: monthlyTokens[m.nickname] || 0, ...scores[m.nickname] })).sort((a, b) => b.monthTokens - a.monthTokens);
+
+  // 저장 (renderPodium에서 사용)
+  dashboardData._ranked = ranked;
+  dashboardData._tokenRanked = tokenRanked;
+
   // 일간 테이블
   renderDailyTable(members, submissions);
 
@@ -580,60 +598,9 @@ function renderDashboard() {
     document.getElementById('level-progress-text').textContent = 'Maximum level reached';
   }
 
-  // TOP 3
-  const podium = document.getElementById('podium');
-  podium.innerHTML = '';
-  const medals = ['🥇', '🥈', '🥉'];
-  ranked.slice(0, 3).forEach((r, i) => {
-    const level = getLevel(r.total);
-    const card = document.createElement('div');
-    card.className = `podium-card${i === 0 ? ' first' : ''}`;
-    card.innerHTML = `
-      <div class="podium-medal">${medals[i]}</div>
-      <div class="podium-name">${escapeHtml(r.nickname)}</div>
-      <div class="podium-level">${level.name}</div>
-      <div class="podium-pts">${r.total}pt</div>
-      <div class="podium-weekly">this week +${r.weekly}</div>
-      ${r.streak > 0 ? `<span class="podium-streak${r.streak >= 3 ? ' hot' : ''}">${r.streak}w streak</span>` : ''}
-    `;
-    podium.appendChild(card);
-  });
-
-  // 나머지 순위
-  const restRanking = document.getElementById('rest-ranking');
-  restRanking.innerHTML = '';
-  const rest = ranked.slice(3);
-  if (rest.length > 0) {
-    const listEl = document.createElement('div');
-    listEl.className = 'rest-rank-list';
-    rest.forEach((r, i) => {
-      const level = getLevel(r.total);
-      const item = document.createElement('div');
-      item.className = 'rest-rank-item';
-      item.innerHTML = `
-        <span class="rest-rank-num">${i + 4}</span>
-        <div class="rest-rank-info">
-          <div class="rest-rank-name">${escapeHtml(r.nickname)}</div>
-          <div class="rest-rank-level">${level.name}${r.streak > 0 ? ` · ${r.streak}w streak` : ''}</div>
-        </div>
-        <span class="rest-rank-pts">${r.total}pt</span>
-      `;
-      listEl.appendChild(item);
-    });
-    const isExpanded = restRanking.dataset.expanded === 'true';
-    listEl.style.display = isExpanded ? '' : 'none';
-    const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'rest-rank-toggle';
-    toggleBtn.textContent = isExpanded ? '접기' : `${rest.length}명 더 보기`;
-    toggleBtn.addEventListener('click', () => {
-      const showing = listEl.style.display !== 'none';
-      listEl.style.display = showing ? 'none' : '';
-      toggleBtn.textContent = showing ? `${rest.length}명 더 보기` : '접기';
-      restRanking.dataset.expanded = !showing;
-    });
-    restRanking.appendChild(toggleBtn);
-    restRanking.appendChild(listEl);
-  }
+  // TOP 3 — 현재 선택된 뷰로 렌더
+  const activeView = document.querySelector('.rank-toggle-btn.active')?.dataset.rank || 'points';
+  renderPodium(activeView);
 
   // 최근 활동
   const activityList = document.getElementById('activity-list');
@@ -667,6 +634,75 @@ function formatDateTime(date) {
 }
 
 // ── 관리자 ──
+function switchRankView(view) {
+  document.querySelectorAll('.rank-toggle-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.rank-toggle-btn[data-rank="${view}"]`).classList.add('active');
+  renderPodium(view);
+}
+
+function renderPodium(view) {
+  if (!dashboardData) return;
+  const isTokens = view === 'tokens';
+  const ranked = isTokens ? (dashboardData._tokenRanked || []) : (dashboardData._ranked || []);
+
+  const podium = document.getElementById('podium');
+  podium.innerHTML = '';
+  const medals = ['🥇', '🥈', '🥉'];
+  ranked.slice(0, 3).forEach((r, i) => {
+    const level = getLevel(r.total);
+    const card = document.createElement('div');
+    card.className = `podium-card${i === 0 ? ' first' : ''}`;
+    const mainStat = isTokens
+      ? `<div class="podium-pts">${formatTokens(r.monthTokens)}</div><div class="podium-weekly">이번 달 토큰</div>`
+      : `<div class="podium-pts">${r.total}pt</div><div class="podium-weekly">this week +${r.weekly}</div>`;
+    card.innerHTML = `
+      <div class="podium-medal">${medals[i]}</div>
+      <div class="podium-name">${escapeHtml(r.nickname)}</div>
+      <div class="podium-level">${level.name}</div>
+      ${mainStat}
+      ${!isTokens && r.streak > 0 ? `<span class="podium-streak${r.streak >= 3 ? ' hot' : ''}">${r.streak}w streak</span>` : ''}
+    `;
+    podium.appendChild(card);
+  });
+
+  // 나머지 순위
+  const restRanking = document.getElementById('rest-ranking');
+  restRanking.innerHTML = '';
+  const rest = ranked.slice(3);
+  if (rest.length > 0) {
+    const listEl = document.createElement('div');
+    listEl.className = 'rest-rank-list';
+    rest.forEach((r, i) => {
+      const level = getLevel(r.total);
+      const item = document.createElement('div');
+      item.className = 'rest-rank-item';
+      const statText = isTokens ? formatTokens(r.monthTokens) : `${r.total}pt`;
+      item.innerHTML = `
+        <span class="rest-rank-num">${i + 4}</span>
+        <div class="rest-rank-info">
+          <div class="rest-rank-name">${escapeHtml(r.nickname)}</div>
+          <div class="rest-rank-level">${level.name}${!isTokens && r.streak > 0 ? ` · ${r.streak}w streak` : ''}</div>
+        </div>
+        <span class="rest-rank-pts">${statText}</span>
+      `;
+      listEl.appendChild(item);
+    });
+    const isExpanded = restRanking.dataset.expanded === 'true';
+    listEl.style.display = isExpanded ? '' : 'none';
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'rest-rank-toggle';
+    toggleBtn.textContent = isExpanded ? '접기' : `${rest.length}명 더 보기`;
+    toggleBtn.addEventListener('click', () => {
+      const showing = listEl.style.display !== 'none';
+      listEl.style.display = showing ? 'none' : '';
+      toggleBtn.textContent = showing ? `${rest.length}명 더 보기` : '접기';
+      restRanking.dataset.expanded = !showing;
+    });
+    restRanking.appendChild(toggleBtn);
+    restRanking.appendChild(listEl);
+  }
+}
+
 function renderAdminTab() {
   if (!dashboardData) return;
   const list = document.getElementById('member-list');
