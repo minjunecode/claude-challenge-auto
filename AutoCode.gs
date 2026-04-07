@@ -224,11 +224,16 @@ function handleReportUsage(params) {
       var records = recordSheet.getDataRange().getValues();
       var alreadyExists = false;
       for (var k = 1; k < records.length; k++) {
-        var recDate = records[k][5] instanceof Date ? Utilities.formatDate(records[k][5], 'Asia/Seoul', 'yyyy-MM-dd') : String(records[k][5]).substring(0, 10);
-        if (records[k][0] === nickname && records[k][6] === 'auto' && recDate === date) {
-          // 기존 기록의 토큰 수 + 포인트 업데이트
+        // resetsAt(col 8) 또는 submittedAt(col 5)에서 날짜 매칭
+        var storedDate = String(records[k][8] || '').substring(0, 10);
+        if (!storedDate || storedDate.length < 10) {
+          storedDate = records[k][5] instanceof Date ? Utilities.formatDate(records[k][5], 'Asia/Seoul', 'yyyy-MM-dd') : String(records[k][5]).substring(0, 10);
+        }
+        if (String(records[k][0]) === nickname && String(records[k][6]) === 'auto' && storedDate === date) {
+          // 기존 기록의 포인트 + 토큰 업데이트
           recordSheet.getRange(k + 1, 5).setValue(earnedPts);
           recordSheet.getRange(k + 1, 8).setValue(totalTokens);
+          recordSheet.getRange(k + 1, 9).setValue(date);
           alreadyExists = true;
           break;
         }
@@ -243,7 +248,7 @@ function handleReportUsage(params) {
         var week = Math.ceil(((utcD - yearStart) / 86400000 + 1) / 7);
         var year = d.getFullYear();
 
-        recordSheet.appendRow([nickname, week, year, 'session', earnedPts, now, 'auto', totalTokens, '']);
+        recordSheet.appendRow([nickname, week, year, 'session', earnedPts, now, 'auto', totalTokens, date]);
       }
     }
   }

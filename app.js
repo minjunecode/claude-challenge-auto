@@ -68,6 +68,11 @@ function setupEventListeners() {
   // 관리자
   document.getElementById('btn-add-member').addEventListener('click', handleAddMember);
 
+  // 순위 토글
+  document.querySelectorAll('.rank-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchRankView(btn.dataset.rank));
+  });
+
   // 레벨 툴팁
   const infoBtn = document.getElementById('level-info-btn');
   const tooltip = document.getElementById('level-tooltip');
