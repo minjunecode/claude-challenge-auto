@@ -153,7 +153,8 @@ function handleRegisterToken(params) {
 
   // 토큰 유효성 검증
   var usage = fetchUsage(token);
-  if (!usage) return { success: false, error: '유효하지 않은 토큰입니다. 토큰을 확인해주세요.' };
+  if (!usage) return { success: false, error: '토큰 검증 실패: 서버 연결 오류' };
+  if (usage.error) return { success: false, error: '유효하지 않은 토큰입니다. ' + usage.error };
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('토큰');
@@ -214,13 +215,13 @@ function fetchUsage(token) {
       method: 'GET',
       headers: {
         'Authorization': 'Bearer ' + token,
-        'anthropic-beta': 'oauth-2025-04-20',
-        'User-Agent': 'claude-challenge-auto/1.0'
+        'anthropic-beta': 'oauth-2025-04-20'
       },
       muteHttpExceptions: true
     });
 
-    if (response.getResponseCode() !== 200) return null;
+    var code = response.getResponseCode();
+    if (code !== 200) return { error: 'API 응답 코드: ' + code + ' - ' + response.getContentText().substring(0, 200) };
 
     var data = JSON.parse(response.getContentText());
     return {
