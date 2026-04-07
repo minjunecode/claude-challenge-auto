@@ -628,6 +628,8 @@ header h1 {
 .daily-th-today {
   color: var(--text) !important;
   font-weight: 700 !important;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* ── 내 현황 카드 ── */

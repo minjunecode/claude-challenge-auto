@@ -312,8 +312,9 @@ function renderDailyTable(members, submissions) {
   days.forEach(d => {
     const th = document.createElement('th');
     if (d.date === today) {
-      th.innerHTML = `${d.month}/${d.dayNum}(${d.label})<br><span style="font-size:0.65rem;">오늘</span>`;
+      th.textContent = `${d.month}/${d.dayNum}(${d.label})`;
       th.classList.add('daily-th-today');
+      th.title = '오늘';
     } else { th.textContent = `${d.month}/${d.dayNum}(${d.label})`; }
     headerRow.appendChild(th);
   });
