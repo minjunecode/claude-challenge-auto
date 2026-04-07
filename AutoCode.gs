@@ -24,6 +24,7 @@ function handleRequest(e) {
     case 'dashboard':   result = handleDashboard(); break;
     case 'registerToken': result = handleRegisterToken(params); break;
     case 'checkUsage':  result = handleCheckUsage(params); break;
+    case 'upload':      result = handleUpload(params); break;
     case 'addMember':   result = handleAddMember(params); break;
     case 'deleteMember': result = handleDeleteMember(params); break;
     default: result = { success: false, error: '알 수 없는 action: ' + action };
@@ -322,6 +323,70 @@ function setupAutoCheckTrigger() {
     .timeBased()
     .everyMinutes(30)
     .create();
+}
+
+// ── 수동 스크린샷 업로드 ──
+function handleUpload(params) {
+  var nickname = (params.nickname || '').trim();
+  var week = parseInt(params.week);
+  var year = parseInt(params.year);
+  var type = params.type || 'session';
+  var points = type === 'weekly' ? 5 : 1;
+  var screenshotTime = params.screenshotTime || '';
+  var imageBase64 = params.imageBase64 || '';
+  var fileName = params.fileName || 'screenshot.png';
+
+  if (!nickname || !week || !year || !imageBase64) {
+    return { success: false, error: '필수 파라미터가 누락되었습니다.' };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('인증기록');
+  if (!sheet) return { success: false, error: '"인증기록" 시트를 찾을 수 없습니다.' };
+
+  var now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
+  var today = now.substring(0, 10);
+  var data = sheet.getDataRange().getValues();
+
+  if (type === 'session') {
+    var todayCount = 0;
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] === nickname && data[i][3] === 'session' && data[i][6] === 'manual') {
+        var subDate = String(data[i][5]).substring(0, 10);
+        if (subDate === today) todayCount++;
+      }
+    }
+    if (todayCount >= 3) return { success: false, error: '오늘 수동 세션 인증 3회를 이미 사용했습니다.' };
+  } else if (type === 'weekly') {
+    for (var k = 1; k < data.length; k++) {
+      if (data[k][0] === nickname && data[k][1] === week && data[k][2] === year && data[k][3] === 'weekly' && data[k][6] === 'manual') {
+        return { success: false, error: '이번 주 수동 주간 인증을 이미 완료했습니다.' };
+      }
+    }
+  }
+
+  var folder = getOrCreateFolder(year, week);
+  var blob = Utilities.newBlob(Utilities.base64Decode(imageBase64), 'image/png', nickname + '_' + type + '_week' + week + '_' + fileName);
+  var file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  var imageUrl = 'https://drive.google.com/uc?id=' + file.getId();
+
+  // 인증기록 컬럼: nickname, week, year, type, points, submittedAt, source, utilization, resetsAt
+  sheet.appendRow([nickname, week, year, type, points, now, 'manual', 0, '']);
+
+  return { success: true, imageUrl: imageUrl, points: points };
+}
+
+function getOrCreateFolder(year, week) {
+  var rootFolderName = '챌린지_인증스크린샷';
+  var folders = DriveApp.getFoldersByName(rootFolderName);
+  var rootFolder = folders.hasNext() ? folders.next() : DriveApp.createFolder(rootFolderName);
+  var yearFolderName = String(year);
+  var yearFolders = rootFolder.getFoldersByName(yearFolderName);
+  var yearFolder = yearFolders.hasNext() ? yearFolders.next() : rootFolder.createFolder(yearFolderName);
+  var weekFolderName = 'week' + week;
+  var weekFolders = yearFolder.getFoldersByName(weekFolderName);
+  return weekFolders.hasNext() ? weekFolders.next() : yearFolder.createFolder(weekFolderName);
 }
 
 // ── 관리자 ──

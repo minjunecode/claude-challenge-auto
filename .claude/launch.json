@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "challenge-auto",
+      "runtimeExecutable": "npx",
+      "cwd": "C:/Users/kmjms/claude-challenge-auto",
+      "runtimeArgs": ["http-server", ".", "-p", "8081", "-c-1"],
+      "port": 8081
+    }
+  ]
+}

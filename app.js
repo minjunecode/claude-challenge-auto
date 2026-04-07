@@ -65,6 +65,14 @@ function setupEventListeners() {
   document.getElementById('btn-month-prev').addEventListener('click', () => { monthOffset--; renderMonthlyCalendar(); });
   document.getElementById('btn-month-next').addEventListener('click', () => { monthOffset++; renderMonthlyCalendar(); });
 
+  // 수동 업로드
+  document.getElementById('session-file').addEventListener('change', (e) => handleFileSelect(e, 'session'));
+  document.getElementById('btn-upload-session').addEventListener('click', () => handleManualUpload('session'));
+  document.getElementById('weekly-file').addEventListener('change', (e) => handleFileSelect(e, 'weekly'));
+  document.getElementById('btn-upload-weekly').addEventListener('click', () => handleManualUpload('weekly'));
+  setupPasteSupport('session');
+  setupPasteSupport('weekly');
+
   // 토큰 등록
   document.getElementById('btn-register-token').addEventListener('click', handleRegisterToken);
   document.getElementById('btn-refresh-usage').addEventListener('click', refreshUsage);
@@ -150,6 +158,7 @@ function switchTab(tabName) {
   document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
   document.getElementById(`tab-${tabName}`).classList.add('active');
   if (tabName === 'dashboard') renderDashboard();
+  if (tabName === 'upload') renderUploadTab();
   if (tabName === 'token') renderTokenTab();
   if (tabName === 'admin') renderAdminTab();
 }
@@ -561,12 +570,132 @@ function renderDashboard() {
     item.innerHTML = `
       <span class="activity-type ${typeClass}">${typeLabel}</span>
       <span class="activity-name">${escapeHtml(s.nickname)}</span>
-      ${s.source === 'auto' ? '<span class="auto-badge">auto</span>' : ''}
+      ${s.source === 'auto' ? '<span class="auto-badge">auto</span>' : '<span class="manual-badge">manual</span>'}
       <span class="activity-date">${dateStr}${timeStr ? ' ' + timeStr : ''}</span>
       <span class="activity-points">+${pts}pt</span>
     `;
     activityList.appendChild(item);
   });
+}
+
+// ── 수동 업로드 ──
+const MIN_SESSION_INTERVAL_HOURS = 2;
+const uploadState = {
+  session: { base64: null, fileName: null, screenshotTime: null },
+  weekly: { base64: null, fileName: null, screenshotTime: null },
+};
+
+function setupPasteSupport(type) {
+  const card = document.getElementById(`${type}-card`);
+  card.addEventListener('paste', (e) => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) { e.preventDefault(); processFile(item.getAsFile(), type); return; }
+    }
+  });
+  card.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('drag-over'); });
+  card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+  card.addEventListener('drop', (e) => {
+    e.preventDefault(); card.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) processFile(file, type);
+  });
+}
+
+function processFile(file, type) {
+  const now = Date.now();
+  const fileTime = file.lastModified || now;
+  const fileAge = now - fileTime;
+  const msgEl = document.getElementById(`${type}-msg`);
+  const screenshotDate = new Date(fileTime);
+  uploadState[type].screenshotTime = formatDateTime(screenshotDate);
+
+  if (fileAge > 24 * 60 * 60 * 1000) {
+    msgEl.textContent = `이 파일은 약 ${Math.round(fileAge / 3600000)}시간 전에 생성되었습니다.`;
+    msgEl.classList.remove('success-msg'); msgEl.classList.add('error-msg');
+  } else {
+    msgEl.textContent = `스크린샷 시각: ${uploadState[type].screenshotTime}`;
+    msgEl.classList.remove('error-msg'); msgEl.classList.add('success-msg');
+  }
+
+  const name = file.name || `paste_${new Date().toISOString().slice(0,19).replace(/[:.]/g,'-')}.png`;
+  document.getElementById(`${type}-file-name`).textContent = name;
+  uploadState[type].fileName = name;
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    uploadState[type].base64 = ev.target.result.split(',')[1];
+    document.getElementById(`${type}-preview`).src = ev.target.result;
+    document.getElementById(`${type}-preview-wrapper`).classList.remove('hidden');
+    const btn = document.getElementById(`btn-upload-${type}`);
+    if (btn.textContent !== '오늘 완료' && btn.textContent !== '이번 주 완료') btn.disabled = false;
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleFileSelect(e, type) {
+  const file = e.target.files[0];
+  if (file) processFile(file, type);
+}
+
+function formatDateTime(date) {
+  const y = date.getFullYear(), mo = String(date.getMonth()+1).padStart(2,'0'), d = String(date.getDate()).padStart(2,'0');
+  const h = String(date.getHours()).padStart(2,'0'), mi = String(date.getMinutes()).padStart(2,'0'), s = String(date.getSeconds()).padStart(2,'0');
+  return `${y}-${mo}-${d} ${h}:${mi}:${s}`;
+}
+
+function renderUploadTab() {
+  if (!dashboardData) return;
+  const week = getISOWeek(new Date()), year = new Date().getFullYear(), today = getTodayStr();
+  const mySubs = dashboardData.submissions.filter(s => s.nickname === currentUser.nickname);
+
+  const sessionToday = mySubs.filter(s => s.type === 'session' && s.source === 'manual' && (s.submittedAt || '').startsWith(today)).length;
+  const sessionLeft = Math.max(0, 3 - sessionToday);
+  const sessionStatus = document.getElementById('session-status');
+  sessionStatus.textContent = `오늘 ${sessionToday}/3회 사용`;
+  sessionStatus.classList.toggle('maxed', sessionLeft === 0);
+  const btnSession = document.getElementById('btn-upload-session');
+  if (sessionLeft === 0) { btnSession.disabled = true; btnSession.textContent = '오늘 완료'; }
+  else { btnSession.disabled = !uploadState.session.base64; btnSession.textContent = '업로드'; }
+
+  const weeklyDone = mySubs.some(s => s.type === 'weekly' && s.source === 'manual' && s.week === week && s.year === year);
+  const weeklyStatus = document.getElementById('weekly-status');
+  weeklyStatus.textContent = weeklyDone ? '이번 주 인증 완료' : '이번 주 0/1회';
+  weeklyStatus.classList.toggle('maxed', weeklyDone);
+  const btnWeekly = document.getElementById('btn-upload-weekly');
+  if (weeklyDone) { btnWeekly.disabled = true; btnWeekly.textContent = '이번 주 완료'; }
+  else { btnWeekly.disabled = !uploadState.weekly.base64; btnWeekly.textContent = '업로드'; }
+
+  document.getElementById('session-msg').textContent = '';
+  document.getElementById('weekly-msg').textContent = '';
+}
+
+async function handleManualUpload(type) {
+  if (!uploadState[type].base64) return;
+  const week = getISOWeek(new Date()), year = new Date().getFullYear();
+  const msgEl = document.getElementById(`${type}-msg`);
+  const progressEl = document.getElementById(`${type}-progress`);
+  const btn = document.getElementById(`btn-upload-${type}`);
+  const points = type === 'weekly' ? 5 : 1;
+
+  msgEl.textContent = ''; progressEl.classList.remove('hidden'); btn.disabled = true;
+
+  const result = await apiCall('upload', {
+    nickname: currentUser.nickname, week, year, type, points,
+    screenshotTime: uploadState[type].screenshotTime || formatDateTime(new Date()),
+    imageBase64: uploadState[type].base64, fileName: uploadState[type].fileName,
+  });
+
+  progressEl.classList.add('hidden');
+  if (result && result.success) {
+    msgEl.textContent = `+${points}pt 인증 완료!`; msgEl.classList.add('success-msg'); msgEl.classList.remove('error-msg');
+    uploadState[type] = { base64: null, fileName: null, screenshotTime: null };
+    document.getElementById(`${type}-file-name`).textContent = '선택된 파일 없음';
+    document.getElementById(`${type}-preview-wrapper`).classList.add('hidden');
+    await loadDashboard(); renderUploadTab();
+  } else if (result) { msgEl.textContent = result.error || '업로드 실패'; btn.disabled = false; }
+  else { msgEl.textContent = '데모 모드: API URL을 설정하세요.'; btn.disabled = false; }
 }
 
 // ── 관리자 ──

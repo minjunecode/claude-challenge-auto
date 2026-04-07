@@ -44,6 +44,7 @@
 
       <nav class="tabs">
         <button class="tab active" data-tab="dashboard">대시보드</button>
+        <button class="tab" data-tab="upload">인증 업로드</button>
         <button class="tab" data-tab="token">토큰 설정</button>
         <button class="tab admin-only" data-tab="admin">관리자</button>
       </nav>
@@ -150,6 +151,61 @@
           <!-- 최근 인증 -->
           <h2 class="section-title" style="margin-top: 24px;">최근 인증</h2>
           <div id="activity-list" class="activity-list"></div>
+        </div>
+      </div>
+
+      <!-- 인증 업로드 탭 -->
+      <div id="tab-upload" class="tab-content">
+        <div class="upload-grid">
+          <!-- 세션 인증 카드 -->
+          <div class="upload-card" id="session-card">
+            <div class="upload-card-header">
+              <h2>세션 인증</h2>
+              <span class="point-badge">+1pt</span>
+            </div>
+            <p class="upload-desc">세션 1개 사용량 한도 인증</p>
+            <p id="session-status" class="upload-limit"></p>
+            <div class="file-input-wrapper">
+              <label for="session-file" class="btn btn-secondary">스크린샷 선택</label>
+              <input type="file" id="session-file" accept="image/*">
+              <span id="session-file-name" class="file-name-label">선택된 파일 없음</span>
+            </div>
+            <p class="paste-hint">Ctrl+V로 붙여넣기 또는 드래그 앤 드롭 가능</p>
+            <div id="session-preview-wrapper" class="hidden">
+              <img id="session-preview" class="image-preview" alt="미리보기">
+            </div>
+            <button id="btn-upload-session" class="btn btn-primary" disabled>업로드</button>
+            <div id="session-msg" class="error-msg"></div>
+            <div id="session-progress" class="upload-progress hidden">
+              <div class="spinner"></div>
+              <span>업로드 중...</span>
+            </div>
+          </div>
+
+          <!-- 주간 인증 카드 -->
+          <div class="upload-card" id="weekly-card">
+            <div class="upload-card-header">
+              <h2>주간 인증</h2>
+              <span class="point-badge point-badge-lg">+5pt</span>
+            </div>
+            <p class="upload-desc">주간 사용량 한도 인증</p>
+            <p id="weekly-status" class="upload-limit"></p>
+            <div class="file-input-wrapper">
+              <label for="weekly-file" class="btn btn-secondary">스크린샷 선택</label>
+              <input type="file" id="weekly-file" accept="image/*">
+              <span id="weekly-file-name" class="file-name-label">선택된 파일 없음</span>
+            </div>
+            <p class="paste-hint">Ctrl+V로 붙여넣기 또는 드래그 앤 드롭 가능</p>
+            <div id="weekly-preview-wrapper" class="hidden">
+              <img id="weekly-preview" class="image-preview" alt="미리보기">
+            </div>
+            <button id="btn-upload-weekly" class="btn btn-primary" disabled>업로드</button>
+            <div id="weekly-msg" class="error-msg"></div>
+            <div id="weekly-progress" class="upload-progress hidden">
+              <div class="spinner"></div>
+              <span>업로드 중...</span>
+            </div>
+          </div>
         </div>
       </div>
 

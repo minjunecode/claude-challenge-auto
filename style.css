@@ -1513,6 +1513,18 @@ header h1 {
   font-family: monospace;
 }
 
+.manual-badge {
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--border-light);
+  color: var(--text-muted);
+  margin-left: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
 .auto-badge {
   font-size: 0.6rem;
   font-weight: 600;
