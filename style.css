@@ -1367,6 +1367,11 @@ header h1 {
   border-radius: 10px;
 }
 
+.cert-container {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
 /* ── 인증 섹션 레이아웃 ── */
 .cert-section {
   margin-bottom: 8px;
