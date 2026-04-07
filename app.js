@@ -3,7 +3,7 @@
 // OAuth 토큰으로 자동 사용량 수집
 // ============================================
 
-const API_URL = 'YOUR_APPS_SCRIPT_URL_HERE';
+const API_URL = 'https://script.google.com/macros/s/AKfycbwrErPYadxObqPoOH82jmNBr9uuv7KabV31YkMPKBh0Si7mWcTP24XdvFbCoj3nEp8vcw/exec';
 
 let currentUser = null;
 let dashboardData = null;
