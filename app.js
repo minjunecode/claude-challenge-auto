@@ -373,13 +373,14 @@ function renderDailyTable(members, submissions) {
       const td = document.createElement('td');
       const info = dailyMap[m.nickname][d.date];
       const tokens = info ? info.tokens : 0;
-      const TOKEN_THRESHOLD = 50000;
-
       if (d.date > today) {
         td.classList.add('daily-td-future');
       } else if (d.date === today) {
         td.classList.add('daily-td-today');
-        if (tokens >= TOKEN_THRESHOLD) {
+        if (tokens >= 100000) {
+          td.classList.add('daily-td-done');
+          td.textContent = 'OO';
+        } else if (tokens >= 50000) {
           td.classList.add('daily-td-done');
           td.textContent = 'O';
         } else if (tokens > 0) {
@@ -390,7 +391,10 @@ function renderDailyTable(members, submissions) {
           td.textContent = '-';
         }
       } else {
-        if (tokens >= TOKEN_THRESHOLD) {
+        if (tokens >= 100000) {
+          td.classList.add('daily-td-done');
+          td.textContent = 'OO';
+        } else if (tokens >= 50000) {
           td.classList.add('daily-td-done');
           td.textContent = 'O';
         } else if (tokens > 0) {
@@ -446,7 +450,6 @@ function renderMonthlyCalendar() {
   const targetDate = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
   const year = targetDate.getFullYear();
   const month = targetDate.getMonth();
-  const TOKEN_THRESHOLD = 50000;
 
   document.getElementById('month-label').textContent = `${year}년 ${month + 1}월`;
 
@@ -509,9 +512,9 @@ function renderMonthlyCalendar() {
         if (dateStr > today) el.classList.add('future');
         else if (dateStr === today) {
           el.classList.add('today');
-          el.classList.add(tokens >= TOKEN_THRESHOLD ? 'done' : 'pending');
+          el.classList.add(tokens >= 50000 ? 'done' : 'pending');
         } else {
-          el.classList.add(tokens >= TOKEN_THRESHOLD ? 'done' : 'miss');
+          el.classList.add(tokens >= 50000 ? 'done' : 'miss');
         }
       }
       grid.appendChild(el);

@@ -215,9 +215,10 @@ function handleReportUsage(params) {
     usageSheet.appendRow([nickname, date, inputTokens, outputTokens, cacheTokens, sessions, now]);
   }
 
-  // 자동 인증: input+output 50K 이상이면 해당 날짜의 세션 인증 생성
+  // 자동 인증: 50K → 1pt, 100K → 2pt (하루 최대 2pt)
   var ioTokens = inputTokens + outputTokens;
-  if (ioTokens >= 50000) {
+  var earnedPts = ioTokens >= 100000 ? 2 : (ioTokens >= 50000 ? 1 : 0);
+  if (earnedPts > 0) {
     var recordSheet = ss.getSheetByName('인증기록');
     if (recordSheet) {
       var records = recordSheet.getDataRange().getValues();
@@ -225,7 +226,8 @@ function handleReportUsage(params) {
       for (var k = 1; k < records.length; k++) {
         var recDate = records[k][5] instanceof Date ? Utilities.formatDate(records[k][5], 'Asia/Seoul', 'yyyy-MM-dd') : String(records[k][5]).substring(0, 10);
         if (records[k][0] === nickname && records[k][6] === 'auto' && recDate === date) {
-          // 기존 기록의 토큰 수 업데이트
+          // 기존 기록의 토큰 수 + 포인트 업데이트
+          recordSheet.getRange(k + 1, 5).setValue(earnedPts);
           recordSheet.getRange(k + 1, 8).setValue(totalTokens);
           alreadyExists = true;
           break;
@@ -241,7 +243,7 @@ function handleReportUsage(params) {
         var week = Math.ceil(((utcD - yearStart) / 86400000 + 1) / 7);
         var year = d.getFullYear();
 
-        recordSheet.appendRow([nickname, week, year, 'session', 1, now, 'auto', totalTokens, '']);
+        recordSheet.appendRow([nickname, week, year, 'session', earnedPts, now, 'auto', totalTokens, '']);
       }
     }
   }
