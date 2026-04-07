@@ -121,7 +121,15 @@ async function handleLogin(e) {
     return;
   }
 
+  const loginBtn = document.querySelector('#login-form .btn-primary');
+  loginBtn.disabled = true;
+  loginBtn.textContent = '로그인 중...';
+
   const result = await apiCall('login', { nickname, password });
+
+  loginBtn.disabled = false;
+  loginBtn.textContent = '로그인';
+
   if (!result) return;
   if (result.success) {
     currentUser = { nickname: result.nickname, isAdmin: result.isAdmin, hasToken: result.hasToken };
@@ -142,9 +150,16 @@ async function handleRegister() {
   const password = document.getElementById('init-password').value.trim();
   const msgEl = document.getElementById('init-msg');
   if (!nickname || !password) { msgEl.textContent = '닉네임과 비밀번호를 입력하세요.'; return; }
-  const result = await apiCall('register', { nickname, password });
+  const regBtn = document.getElementById('btn-init');
+  regBtn.disabled = true; regBtn.textContent = '가입 중...';
+  // 먼저 register 시도, 실패하면 init (첫 유저)으로 재시도
+  let result = await apiCall('register', { nickname, password });
+  if (result && !result.success && result.error && result.error.includes('초기 설정')) {
+    result = await apiCall('init', { nickname, password });
+  }
+  regBtn.disabled = false; regBtn.textContent = '가입하기';
   if (!result) { msgEl.textContent = '데모 모드: API URL을 설정하세요.'; return; }
-  if (result.success) { msgEl.textContent = '가입 완료! 로그인해주세요.'; msgEl.classList.add('success-msg'); }
+  if (result.success) { msgEl.textContent = result.message || '가입 완료! 로그인해주세요.'; msgEl.classList.add('success-msg'); }
   else { msgEl.textContent = result.error; msgEl.classList.remove('success-msg'); }
 }
 
