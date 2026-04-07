@@ -1472,7 +1472,7 @@ header h1 {
 
 /* ── 토큰 등록 & 사용량 ── */
 .token-card {
-  max-width: 480px;
+  max-width: 100%;
   margin: 0 auto;
   background: white;
   padding: 32px 28px;
