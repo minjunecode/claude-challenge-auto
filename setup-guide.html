@@ -112,16 +112,6 @@
     .data-ex .k { color: #818cf8; }
     .data-ex .v { color: #34d399; }
 
-    /* Compare */
-    .cmp { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .cmp th {
-      text-align: left; padding: 6px 10px; background: #111114;
-      color: #71717a; font-size: 11px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: 0.04em;
-    }
-    .cmp td { padding: 6px 10px; border-top: 1px solid #1e1e24; color: #a1a1aa; font-size: 12px; }
-    .g { color: #34d399; } .r { color: #f87171; } .y { color: #fbbf24; }
-
     /* Alert */
     .alert {
       border-radius: 10px; padding: 14px 16px; margin: 12px 0;
@@ -186,17 +176,6 @@
 { <span class="k">"nickname"</span>: <span class="v">"minjune"</span>, <span class="k">"date"</span>: <span class="v">"2026-04-08"</span>, <span class="k">"input_tokens"</span>: <span class="v">1007</span>, <span class="k">"output_tokens"</span>: <span class="v">181207</span>, <span class="k">"sessions"</span>: <span class="v">3</span> }
     </div>
     <div class="note" style="margin-top:4px;">대화 내용, 코드, 비밀번호, API 토큰 — 전송되지 않습니다.</div>
-  </section>
-
-  <!-- 비교 -->
-  <section>
-    <h2>기존 방식 vs 자동 리포트</h2>
-    <table class="cmp">
-      <tr><th></th><th>OAuth 토큰</th><th>자동 리포트 (신규)</th></tr>
-      <tr><td>로그인 정보</td><td class="y">OAuth 토큰</td><td class="g">없음</td></tr>
-      <tr><td>API 접근 / 소진 위험</td><td class="r">있음</td><td class="g">없음</td></tr>
-      <tr><td>설정</td><td>토큰 복사+붙여넣기</td><td>스크립트 1회 실행</td></tr>
-    </table>
   </section>
 
   <!-- 설정 가이드 -->
