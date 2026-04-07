@@ -33,7 +33,7 @@ function setMemberColor(n, c) { const s = JSON.parse(localStorage.getItem('membe
 
 // ── 초기화 ──
 document.addEventListener('DOMContentLoaded', () => {
-  const saved = sessionStorage.getItem('challengeUser');
+  const saved = localStorage.getItem('challengeUser');
   if (saved) { currentUser = JSON.parse(saved); showMain(); }
   setupEventListeners();
 });
@@ -116,7 +116,7 @@ async function handleLogin(e) {
 
   if (API_URL === 'YOUR_APPS_SCRIPT_URL_HERE') {
     currentUser = { nickname: nickname || 'Mj', isAdmin: true, hasToken: true };
-    sessionStorage.setItem('challengeUser', JSON.stringify(currentUser));
+    localStorage.setItem('challengeUser', JSON.stringify(currentUser));
     showMain();
     return;
   }
@@ -133,14 +133,14 @@ async function handleLogin(e) {
   if (!result) return;
   if (result.success) {
     currentUser = { nickname: result.nickname, isAdmin: result.isAdmin, hasToken: result.hasToken };
-    sessionStorage.setItem('challengeUser', JSON.stringify(currentUser));
+    localStorage.setItem('challengeUser', JSON.stringify(currentUser));
     showMain();
   } else { errorEl.textContent = result.error; }
 }
 
 function handleLogout() {
   currentUser = null; dashboardData = null;
-  sessionStorage.removeItem('challengeUser');
+  localStorage.removeItem('challengeUser');
   document.getElementById('main-view').classList.remove('active');
   document.getElementById('login-view').classList.add('active');
 }
@@ -199,7 +199,7 @@ async function handleRegisterToken() {
     msgEl.textContent = result.message;
     msgEl.classList.add('success-msg');
     currentUser.hasToken = true;
-    sessionStorage.setItem('challengeUser', JSON.stringify(currentUser));
+    localStorage.setItem('challengeUser', JSON.stringify(currentUser));
     document.getElementById('token-input').value = '';
     renderTokenTab();
     if (result.usage) updateUsageDisplay(result.usage);
@@ -249,14 +249,23 @@ function updateUsageDisplay(usage) {
 function renderTokenTab() {
   const statusEl = document.getElementById('token-status');
   const statusText = document.getElementById('token-status-text');
+  const tokenForm = document.getElementById('token-form-section');
+  const guideBtn = document.getElementById('btn-toggle-guide');
+  const guideSection = document.getElementById('token-guide-section');
 
   if (currentUser.hasToken) {
     statusEl.className = 'token-status connected';
     statusText.textContent = '자동 인증 활성';
+    // 토큰 입력 폼 숨기기
+    if (tokenForm) tokenForm.classList.add('hidden');
+    if (guideBtn) guideBtn.classList.add('hidden');
+    if (guideSection) guideSection.classList.add('hidden');
     refreshUsage();
   } else {
     statusEl.className = 'token-status disconnected';
     statusText.textContent = '토큰 미등록';
+    if (tokenForm) tokenForm.classList.remove('hidden');
+    if (guideBtn) guideBtn.classList.remove('hidden');
     document.getElementById('usage-display').classList.add('hidden');
   }
 }
