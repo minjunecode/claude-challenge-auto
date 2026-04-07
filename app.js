@@ -76,6 +76,11 @@ function setupEventListeners() {
   // 토큰 등록
   document.getElementById('btn-register-token').addEventListener('click', handleRegisterToken);
   document.getElementById('btn-refresh-usage').addEventListener('click', refreshUsage);
+  document.getElementById('btn-change-token').addEventListener('click', () => {
+    document.getElementById('token-form-section').classList.remove('hidden');
+    document.getElementById('btn-toggle-guide').classList.remove('hidden');
+    document.getElementById('btn-change-token').classList.add('hidden');
+  });
   document.getElementById('btn-toggle-guide').addEventListener('click', () => {
     const guide = document.getElementById('token-guide-section');
     const btn = document.getElementById('btn-toggle-guide');
@@ -253,19 +258,23 @@ function renderTokenTab() {
   const guideBtn = document.getElementById('btn-toggle-guide');
   const guideSection = document.getElementById('token-guide-section');
 
+  const changeBtn = document.getElementById('btn-change-token');
+
   if (currentUser.hasToken) {
     statusEl.className = 'token-status connected';
     statusText.textContent = '자동 인증 활성';
-    // 토큰 입력 폼 숨기기
+    // 토큰 입력 폼 숨기기, 변경 버튼 표시
     if (tokenForm) tokenForm.classList.add('hidden');
     if (guideBtn) guideBtn.classList.add('hidden');
     if (guideSection) guideSection.classList.add('hidden');
+    if (changeBtn) changeBtn.classList.remove('hidden');
     refreshUsage();
   } else {
     statusEl.className = 'token-status disconnected';
     statusText.textContent = '토큰 미등록';
     if (tokenForm) tokenForm.classList.remove('hidden');
     if (guideBtn) guideBtn.classList.remove('hidden');
+    if (changeBtn) changeBtn.classList.add('hidden');
     document.getElementById('usage-display').classList.add('hidden');
   }
 }
