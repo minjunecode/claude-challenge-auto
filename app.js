@@ -76,6 +76,12 @@ function setupEventListeners() {
   // 토큰 등록
   document.getElementById('btn-register-token').addEventListener('click', handleRegisterToken);
   document.getElementById('btn-refresh-usage').addEventListener('click', refreshUsage);
+  document.getElementById('btn-toggle-guide').addEventListener('click', () => {
+    const guide = document.getElementById('token-guide-section');
+    const btn = document.getElementById('btn-toggle-guide');
+    guide.classList.toggle('hidden');
+    btn.textContent = guide.classList.contains('hidden') ? '토큰 찾는 법 보기' : '가이드 접기';
+  });
 
   // 관리자
   document.getElementById('btn-add-member').addEventListener('click', handleAddMember);
@@ -158,8 +164,7 @@ function switchTab(tabName) {
   document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
   document.getElementById(`tab-${tabName}`).classList.add('active');
   if (tabName === 'dashboard') renderDashboard();
-  if (tabName === 'upload') renderUploadTab();
-  if (tabName === 'token') renderTokenTab();
+  if (tabName === 'cert') { renderUploadTab(); renderTokenTab(); }
   if (tabName === 'admin') renderAdminTab();
 }
 
