@@ -14,7 +14,7 @@ if sys.platform == "win32":
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ── 설정 ──
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwrErPYadxObqPoOH82jmNBr9uuv7KabV31YkMPKBh0Si7mWcTP24XdvFbCoj3nEp8vcw/exec"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbys_MSZz16yoH9065nSLtsl4n9N0IMTYGECsvqzKIoD3EgZ30VlVxLjzOciq-8a6a8_KA/exec"
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude", "challenge-config.json")
 KST = timezone(timedelta(hours=9))
 

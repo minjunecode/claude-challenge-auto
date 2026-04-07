@@ -3,7 +3,7 @@
 // Hook 기반 자동 사용량 수집 (OAuth 불필요)
 // ============================================
 
-const API_URL = 'https://script.google.com/macros/s/AKfycbwrErPYadxObqPoOH82jmNBr9uuv7KabV31YkMPKBh0Si7mWcTP24XdvFbCoj3nEp8vcw/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbys_MSZz16yoH9065nSLtsl4n9N0IMTYGECsvqzKIoD3EgZ30VlVxLjzOciq-8a6a8_KA/exec';
 
 let currentUser = null;
 let dashboardData = null;
