@@ -72,6 +72,15 @@ function migrateSheetIfNeeded_() {
   }
 }
 
+/** 셀 값을 안전한 정수로 변환 (Date 객체 → 0, 문자열 → 0) */
+function safeInt(v) {
+  if (!v) return 0;
+  if (v instanceof Date) return 0;
+  var n = Number(v);
+  if (isNaN(n) || n > 10000000000) return 0; // 10B 초과 = 비정상 (epoch 등)
+  return Math.round(n);
+}
+
 function doGet(e) { return handleRequest(e); }
 function doPost(e) { return handleRequest(e); }
 
@@ -244,15 +253,13 @@ function handleDashboard(params) {
     var usageHasScore = usageData[0].length >= 9;
     for (var k = 1; k < usageData.length; k++) {
       if (usageData[k][0]) {
-        var uInp = Number(usageData[k][2]) || 0;
-        var uOut = Number(usageData[k][3]) || 0;
-        var uCC = usageHasScore ? (Number(usageData[k][4]) || 0) : 0;
-        var uCR = usageHasScore ? (Number(usageData[k][5]) || 0) : 0;
-        var uScore = usageHasScore ? (Number(usageData[k][6]) || 0) : 0;
-        // 이전 데이터 호환: score가 0이면 가중치 공식으로 계산
-        if (!uScore) {
-          uScore = Math.round((uInp * 1) + (uOut * 5) + (uCC * 1.25) + (uCR * 0.1));
-        }
+        var uInp = safeInt(usageData[k][2]);
+        var uOut = safeInt(usageData[k][3]);
+        var uCC = usageHasScore ? safeInt(usageData[k][4]) : 0;
+        var uCR = usageHasScore ? safeInt(usageData[k][5]) : 0;
+        var uScore = usageHasScore ? safeInt(usageData[k][6]) : 0;
+        // score 항상 공식으로 재계산 (Date→epoch 오염 방지)
+        uScore = Math.round((uInp * 1) + (uOut * 5) + (uCC * 1.25) + (uCR * 0.1));
         usage.push({
           nickname: String(usageData[k][0]),
           date: toDateStr(usageData[k][1]),
@@ -261,7 +268,7 @@ function handleDashboard(params) {
           cache_creation_tokens: uCC,
           cache_read_tokens: uCR,
           score: uScore,
-          sessions: Number(usageHasScore ? usageData[k][7] : usageData[k][5]) || 0,
+          sessions: safeInt(usageHasScore ? usageData[k][7] : usageData[k][5]),
           reportedAt: toDateTimeStr(usageHasScore ? usageData[k][8] : usageData[k][6])
         });
       }
@@ -290,25 +297,23 @@ function handleDashboard(params) {
         var rawHasNewFmt = (rawRows[0].length >= 10) || (String(rawRows[0][4] || '').indexOf('cache_creation') >= 0);
         for (var r = 1; r < rawRows.length; r++) {
           if (String(rawRows[r][0]).trim() === reqNickname) {
-            var rInp = Number(rawRows[r][2]) || 0;
-            var rOut = Number(rawRows[r][3]) || 0;
+            var rInp = safeInt(rawRows[r][2]);
+            var rOut = safeInt(rawRows[r][3]);
             var rCC, rCR, rScore, rSess, rAt, rHourlyStr;
             if (rawHasNewFmt) {
-              rCC = Number(rawRows[r][4]) || 0;
-              rCR = Number(rawRows[r][5]) || 0;
-              rScore = Number(rawRows[r][6]) || 0;
-              rSess = Number(rawRows[r][7]) || 0;
+              rCC = safeInt(rawRows[r][4]);
+              rCR = safeInt(rawRows[r][5]);
+              rSess = safeInt(rawRows[r][7]);
               rAt = rawRows[r][8];
               rHourlyStr = rawRows[r][9] || '';
             } else {
-              rCC = 0; rCR = 0; rScore = 0;
-              rSess = Number(rawRows[r][5]) || 0;
+              rCC = 0; rCR = 0;
+              rSess = safeInt(rawRows[r][5]);
               rAt = rawRows[r][6];
               rHourlyStr = rawRows[r][7] || '';
             }
-            if (!rScore) {
-              rScore = Math.round((rInp * 1) + (rOut * 5) + (rCC * 1.25) + (rCR * 0.1));
-            }
+            // 항상 컴포넌트에서 재계산 (Date→epoch 오염 방지)
+            rScore = Math.round((rInp * 1) + (rOut * 5) + (rCC * 1.25) + (rCR * 0.1));
             var hourly = null;
             if (rHourlyStr) { try { hourly = JSON.parse(rHourlyStr); } catch(e) {} }
             rawData.push({
@@ -581,13 +586,13 @@ function handlePersonalStats(params) {
     var hasScore = rawHeaders.length >= 10; // 새 형식 (score 컬럼 있음)
     for (var r = 1; r < rows.length; r++) {
       if (String(rows[r][0]).trim() === nickname) {
-        var prInp = Number(rows[r][2]) || 0;
-        var prOut = Number(rows[r][3]) || 0;
+        var prInp = safeInt(rows[r][2]);
+        var prOut = safeInt(rows[r][3]);
         var prCC, prCR, prScore, prSess, prAt, prHourlyStr;
         if (hasScore) {
-          prCC = Number(rows[r][4]) || 0;
-          prCR = Number(rows[r][5]) || 0;
-          prScore = Number(rows[r][6]) || 0;
+          prCC = safeInt(rows[r][4]);
+          prCR = safeInt(rows[r][5]);
+          prScore = safeInt(rows[r][6]);
           prSess = Number(rows[r][7]) || 0;
           prAt = rows[r][8];
           prHourlyStr = rows[r][9] || '';
@@ -597,9 +602,8 @@ function handlePersonalStats(params) {
           prAt = rows[r][6];
           prHourlyStr = rows[r][7] || '';
         }
-        if (!prScore) {
-          prScore = Math.round((prInp * 1) + (prOut * 5) + (prCC * 1.25) + (prCR * 0.1));
-        }
+        // score 항상 공식으로 재계산
+        prScore = Math.round((prInp * 1) + (prOut * 5) + (prCC * 1.25) + (prCR * 0.1));
         var hourly = null;
         if (prHourlyStr) { try { hourly = JSON.parse(prHourlyStr); } catch(e) {} }
         rawData.push({
@@ -628,14 +632,12 @@ function handlePersonalStats(params) {
     var hasUsageScore = usageHeaders.length >= 9;
     for (var u = 1; u < uRows.length; u++) {
       if (String(uRows[u][0]).trim() === nickname) {
-        var pdInp = Number(uRows[u][2]) || 0;
-        var pdOut = Number(uRows[u][3]) || 0;
-        var pdCC = hasUsageScore ? (Number(uRows[u][4]) || 0) : 0;
-        var pdCR = hasUsageScore ? (Number(uRows[u][5]) || 0) : 0;
-        var pdScore = hasUsageScore ? (Number(uRows[u][6]) || 0) : 0;
-        if (!pdScore) {
-          pdScore = Math.round((pdInp * 1) + (pdOut * 5) + (pdCC * 1.25) + (pdCR * 0.1));
-        }
+        var pdInp = safeInt(uRows[u][2]);
+        var pdOut = safeInt(uRows[u][3]);
+        var pdCC = hasUsageScore ? safeInt(uRows[u][4]) : 0;
+        var pdCR = hasUsageScore ? safeInt(uRows[u][5]) : 0;
+        // 항상 컴포넌트에서 재계산 (Date→epoch 오염 방지)
+        var pdScore = Math.round((pdInp * 1) + (pdOut * 5) + (pdCC * 1.25) + (pdCR * 0.1));
         dailyData.push({
           date: toDateStr(uRows[u][1]),
           input_tokens: pdInp,
@@ -643,7 +645,7 @@ function handlePersonalStats(params) {
           cache_creation_tokens: pdCC,
           cache_read_tokens: pdCR,
           score: pdScore,
-          sessions: Number(hasUsageScore ? uRows[u][7] : uRows[u][5]) || 0,
+          sessions: safeInt(hasUsageScore ? uRows[u][7] : uRows[u][5]),
           reportedAt: toDateTimeStr(hasUsageScore ? uRows[u][8] : uRows[u][6])
         });
       }

@@ -284,12 +284,20 @@ function formatTokens(n) {
 
 // 가중치 스코어: score 필드 있으면 사용, 없으면 가중치 공식 적용
 function getScore(d) {
-  if (d.score) return d.score;
+  // 항상 컴포넌트에서 직접 계산 (Date→epoch 오염 방지)
   const inp = d.input_tokens || 0;
   const out = d.output_tokens || 0;
   const cc = d.cache_creation_tokens || 0;
   const cr = d.cache_read_tokens || 0;
-  return Math.round((inp * 1) + (out * 5) + (cc * 1.25) + (cr * 0.1));
+  // 컴포넌트가 있으면 공식으로 계산
+  if (inp > 0 || out > 0) {
+    return Math.round((inp * 1) + (out * 5) + (cc * 1.25) + (cr * 0.1));
+  }
+  // 컴포넌트 없고 score만 있는 경우 — 10B 이하만 신뢰
+  if (d.score && typeof d.score === 'number' && d.score < 10000000000) {
+    return d.score;
+  }
+  return 0;
 }
 // 포인트 기준 (가중 스코어 기반)
 const POINT_1_THRESHOLD = 300000;   // 1pt: 300K
