@@ -134,6 +134,12 @@ function handleInit(params) {
     usageSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt']);
   }
 
+  var rawSheet = ss.getSheetByName('사용량_raw');
+  if (!rawSheet) {
+    rawSheet = ss.insertSheet('사용량_raw');
+    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt']);
+  }
+
   return { success: true, message: '초기 설정 완료!' };
 }
 
@@ -227,7 +233,18 @@ function handleReportUsage(params) {
   }
   if (!authenticated) return { success: false, error: '인증 실패.' };
 
-  // 사용량 시트에 upsert
+  var now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
+  var totalTokens = inputTokens + outputTokens + cacheTokens;
+
+  // ① 사용량_raw: 모든 보고를 append (원본 보존)
+  var rawSheet = ss.getSheetByName('사용량_raw');
+  if (!rawSheet) {
+    rawSheet = ss.insertSheet('사용량_raw');
+    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt']);
+  }
+  rawSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheTokens, sessions, now]);
+
+  // ② 사용량: 일별 최종값만 upsert (프론트 표시용)
   var usageSheet = ss.getSheetByName('사용량');
   if (!usageSheet) {
     usageSheet = ss.insertSheet('사용량');
@@ -241,9 +258,6 @@ function handleReportUsage(params) {
       existingRow = j + 1; break;
     }
   }
-
-  var now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
-  var totalTokens = inputTokens + outputTokens + cacheTokens;
 
   if (existingRow > 0) {
     usageSheet.getRange(existingRow, 3, 1, 5).setValues([[inputTokens, outputTokens, cacheTokens, sessions, now]]);
