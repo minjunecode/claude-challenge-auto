@@ -150,7 +150,7 @@ function handleDashboard() {
       if (usageData[k][0]) {
         usage.push({
           nickname: String(usageData[k][0]),
-          date: usageData[k][1] instanceof Date ? Utilities.formatDate(usageData[k][1], 'Asia/Seoul', 'yyyy-MM-dd') : String(usageData[k][1]),
+          date: (function(v){ var s = v instanceof Date ? Utilities.formatDate(v,'Asia/Seoul','yyyy-MM-dd') : String(v); var m = s.match(/\d{4}-\d{2}-\d{2}/); return m ? m[0] : s; })(usageData[k][1]),
           input_tokens: Number(usageData[k][2]) || 0,
           output_tokens: Number(usageData[k][3]) || 0,
           cache_tokens: Number(usageData[k][4]) || 0,
@@ -200,7 +200,10 @@ function handleReportUsage(params) {
   var usageData = usageSheet.getDataRange().getValues();
   var existingRow = -1;
   for (var j = 1; j < usageData.length; j++) {
-    var cellDate = usageData[j][1] instanceof Date ? Utilities.formatDate(usageData[j][1], 'Asia/Seoul', 'yyyy-MM-dd') : String(usageData[j][1]);
+    var rawD = usageData[j][1];
+    var cellDate = rawD instanceof Date ? Utilities.formatDate(rawD, 'Asia/Seoul', 'yyyy-MM-dd') : String(rawD);
+    var dm = cellDate.match(/\d{4}-\d{2}-\d{2}/);
+    cellDate = dm ? dm[0] : cellDate;
     if (String(usageData[j][0]) === nickname && cellDate === date) {
       existingRow = j + 1; break;
     }
@@ -212,7 +215,7 @@ function handleReportUsage(params) {
   if (existingRow > 0) {
     usageSheet.getRange(existingRow, 3, 1, 5).setValues([[inputTokens, outputTokens, cacheTokens, sessions, now]]);
   } else {
-    usageSheet.appendRow([nickname, date, inputTokens, outputTokens, cacheTokens, sessions, now]);
+    usageSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheTokens, sessions, now]);
   }
 
   // 자동 인증: 50K → 1pt, 100K → 2pt (하루 최대 2pt)
