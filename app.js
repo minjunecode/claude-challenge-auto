@@ -1210,7 +1210,7 @@ function renderActivityPattern(raw) {
     const dow = jsDay === 0 ? 6 : jsDay - 1; // 0=Mon
     r.hourly.forEach(item => {
       if (item.h >= 0 && item.h < 24) {
-        grid[dow][item.h] += (item.in || 0) + (item.out || 0);
+        grid[dow][item.h] += ((item.in || 0) * 1) + ((item.out || 0) * 5);
       }
     });
   });

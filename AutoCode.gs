@@ -148,20 +148,20 @@ function handleInit(params) {
   var usageSheet = ss.getSheetByName('사용량');
   if (!usageSheet) {
     usageSheet = ss.insertSheet('사용량');
-    usageSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt']);
+    usageSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt']);
   }
 
   var rawSheet = ss.getSheetByName('사용량_raw');
   if (!rawSheet) {
     rawSheet = ss.insertSheet('사용량_raw');
-    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt', 'hourly']);
+    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt', 'hourly']);
   }
 
   return { success: true, message: '초기 설정 완료!' };
 }
 
 // ── 대시보드 ──
-function handleDashboard() {
+function handleDashboard(params) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   var memberSheet = ss.getSheetByName('멤버');
@@ -543,17 +543,36 @@ function handlePersonalStats(params) {
     var hasScore = rawHeaders.length >= 10; // 새 형식 (score 컬럼 있음)
     for (var r = 1; r < rows.length; r++) {
       if (String(rows[r][0]).trim() === nickname) {
-        var hourlyStr = hasScore ? (rows[r][9] || '') : (rows[r][7] || '');
+        var prInp = Number(rows[r][2]) || 0;
+        var prOut = Number(rows[r][3]) || 0;
+        var prCC, prCR, prScore, prSess, prAt, prHourlyStr;
+        if (hasScore) {
+          prCC = Number(rows[r][4]) || 0;
+          prCR = Number(rows[r][5]) || 0;
+          prScore = Number(rows[r][6]) || 0;
+          prSess = Number(rows[r][7]) || 0;
+          prAt = rows[r][8];
+          prHourlyStr = rows[r][9] || '';
+        } else {
+          prCC = 0; prCR = 0; prScore = 0;
+          prSess = Number(rows[r][5]) || 0;
+          prAt = rows[r][6];
+          prHourlyStr = rows[r][7] || '';
+        }
+        if (!prScore) {
+          prScore = Math.round((prInp * 1) + (prOut * 5) + (prCC * 1.25) + (prCR * 0.1));
+        }
         var hourly = null;
-        if (hourlyStr) { try { hourly = JSON.parse(hourlyStr); } catch(e) {} }
-        var rowScore = hasScore ? (Number(rows[r][6]) || 0) : 0;
+        if (prHourlyStr) { try { hourly = JSON.parse(prHourlyStr); } catch(e) {} }
         rawData.push({
           date: toDateStr(rows[r][1]),
-          input_tokens: Number(rows[r][2]) || 0,
-          output_tokens: Number(rows[r][3]) || 0,
-          score: rowScore,
-          sessions: Number(hasScore ? rows[r][7] : rows[r][5]) || 0,
-          reportedAt: toDateTimeStr(hasScore ? rows[r][8] : rows[r][6]),
+          input_tokens: prInp,
+          output_tokens: prOut,
+          cache_creation_tokens: prCC,
+          cache_read_tokens: prCR,
+          score: prScore,
+          sessions: prSess,
+          reportedAt: toDateTimeStr(prAt),
           hourly: hourly
         });
       }
@@ -571,12 +590,21 @@ function handlePersonalStats(params) {
     var hasUsageScore = usageHeaders.length >= 9;
     for (var u = 1; u < uRows.length; u++) {
       if (String(uRows[u][0]).trim() === nickname) {
-        var uScore = hasUsageScore ? (Number(uRows[u][6]) || 0) : 0;
+        var pdInp = Number(uRows[u][2]) || 0;
+        var pdOut = Number(uRows[u][3]) || 0;
+        var pdCC = hasUsageScore ? (Number(uRows[u][4]) || 0) : 0;
+        var pdCR = hasUsageScore ? (Number(uRows[u][5]) || 0) : 0;
+        var pdScore = hasUsageScore ? (Number(uRows[u][6]) || 0) : 0;
+        if (!pdScore) {
+          pdScore = Math.round((pdInp * 1) + (pdOut * 5) + (pdCC * 1.25) + (pdCR * 0.1));
+        }
         dailyData.push({
           date: toDateStr(uRows[u][1]),
-          input_tokens: Number(uRows[u][2]) || 0,
-          output_tokens: Number(uRows[u][3]) || 0,
-          score: uScore,
+          input_tokens: pdInp,
+          output_tokens: pdOut,
+          cache_creation_tokens: pdCC,
+          cache_read_tokens: pdCR,
+          score: pdScore,
           sessions: Number(hasUsageScore ? uRows[u][7] : uRows[u][5]) || 0,
           reportedAt: toDateTimeStr(hasUsageScore ? uRows[u][8] : uRows[u][6])
         });
