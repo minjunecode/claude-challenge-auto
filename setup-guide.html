@@ -233,19 +233,20 @@
       <div class="step">
         <div class="step-num">1</div>
         <div class="step-body">
-          <div class="step-title">스크립트 다운로드</div>
+          <div class="step-title">파일 2개 다운로드</div>
           <div class="step-desc">
-            아래 버튼을 눌러 파일을 다운로드한 뒤, <strong>.claude</strong> 폴더에 넣어주세요.
+            아래 <strong>두 파일을 모두</strong> 다운로드한 뒤, <strong>.claude</strong> 폴더에 넣어주세요.
           </div>
 
-          <div style="margin:12px 0;">
-            <a href="challenge-report.py" download style="display:inline-block;padding:10px 24px;background:#818cf8;color:#fff;border-radius:8px;font-weight:700;font-size:14px;text-decoration:none;">challenge-report.py 다운로드</a>
+          <div style="margin:12px 0;display:flex;gap:8px;flex-wrap:wrap;">
+            <a href="challenge-report.py" download style="display:inline-block;padding:10px 20px;background:#818cf8;color:#fff;border-radius:8px;font-weight:700;font-size:13px;text-decoration:none;">challenge-report.py</a>
+            <a href="setup-scheduler.bat" download style="display:inline-block;padding:10px 20px;background:#34d399;color:#000;border-radius:8px;font-weight:700;font-size:13px;text-decoration:none;">setup-scheduler.bat</a>
           </div>
 
           <div class="substep">
             <div class="substep-num">a</div>
             <div class="substep-body">
-              <strong>파일 탐색기</strong>를 열고, 주소창에 아래를 붙여넣기하세요:
+              <strong>파일 탐색기</strong>를 열고, 주소창에 아래를 붙여넣기 &rarr; <span class="key">Enter</span>
               <div class="code" style="margin-top:6px;">
                 <button class="copy-btn" onclick="copyText('%USERPROFILE%\\.claude')">복사</button>
                 %USERPROFILE%\.claude
@@ -256,7 +257,7 @@
           <div class="substep">
             <div class="substep-num">b</div>
             <div class="substep-body">
-              <strong>.claude</strong> 폴더가 열리면, 다운로드 받은 <strong>challenge-report.py</strong> 파일을 이 폴더 안에 넣어주세요.
+              <strong>.claude</strong> 폴더가 열리면, 다운로드한 파일 <strong>2개 모두</strong> 이 폴더에 넣어주세요.
             </div>
           </div>
 
@@ -265,69 +266,16 @@
             <span class="arrow">&gt;</span>
             <span class="folder">.claude</span>
             <span class="arrow">&gt;</span>
-            <span class="file">challenge-report.py</span>
-            &nbsp;&larr; 여기에 있으면 OK
+            <span class="file">challenge-report.py</span> + <span class="file">setup-scheduler.bat</span>
           </div>
         </div>
       </div>
 
-      <!-- Step 2: Python 경로 확인 -->
+      <!-- Step 2: 닉네임 등록 -->
       <div class="step">
         <div class="step-num">2</div>
         <div class="step-body">
-          <div class="step-title">내 Python 경로 확인하기</div>
-          <div class="step-desc">
-            자동 실행 등록에 필요한 Python 설치 위치를 찾습니다.
-          </div>
-
-          <div class="substep">
-            <div class="substep-num">a</div>
-            <div class="substep-body">
-              키보드에서 <span class="key">Win</span> 키를 누른 뒤 <strong>"cmd"</strong> 라고 입력하세요.
-            </div>
-          </div>
-
-          <div class="substep">
-            <div class="substep-num">b</div>
-            <div class="substep-body">
-              <strong>"명령 프롬프트"</strong> 가 검색되면 클릭해서 열어주세요.<br>
-              <span style="color:#52525b;font-size:12px;">검은 배경에 흰 글씨가 나오는 창이 열립니다.</span>
-            </div>
-          </div>
-
-          <div class="substep">
-            <div class="substep-num">c</div>
-            <div class="substep-body">
-              아래를 복사해서 <strong>그대로 붙여넣기</strong> 한 뒤 <span class="key">Enter</span> 를 누르세요.
-              <div class="code" style="margin-top:6px;">
-                <button class="copy-btn" onclick="copyText('where python')">복사</button>
-                where python
-              </div>
-            </div>
-          </div>
-
-          <div class="substep">
-            <div class="substep-num">d</div>
-            <div class="substep-body">
-              아래처럼 <strong>경로가 출력</strong>됩니다. 이 경로를 <strong>드래그로 선택 → 마우스 우클릭으로 복사</strong>해두세요.<br>
-              <span style="color:#52525b;font-size:12px;">(여러 줄이 나오면 첫 번째 줄만 복사)</span>
-              <div class="expected">
-                <span class="ok">C:\Users\<span class="val">내이름</span>\AppData\Local\Programs\Python\Python312\python.exe</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="alert alert-yellow">
-            이 경로를 <strong>Step 3, 4에서 사용</strong>합니다. 메모장에 붙여넣어 두면 편합니다.
-          </div>
-        </div>
-      </div>
-
-      <!-- Step 3: 최초 실행 -->
-      <div class="step">
-        <div class="step-num">3</div>
-        <div class="step-body">
-          <div class="step-title">최초 실행 — 닉네임 등록</div>
+          <div class="step-title">닉네임 등록 (1회)</div>
           <div class="step-desc">
             챌린지 닉네임/비밀번호를 등록합니다. <strong>딱 한 번만</strong> 하면 됩니다.
           </div>
@@ -335,23 +283,17 @@
           <div class="substep">
             <div class="substep-num">a</div>
             <div class="substep-body">
-              아까 열어둔 <strong>명령 프롬프트(cmd)</strong>를 그대로 사용합니다.<br>
-              아래 순서대로 명령어를 만들어서 입력하세요.
+              키보드에서 <span class="key">Win</span> 키를 누르고 <strong>"cmd"</strong> 입력 &rarr; <strong>명령 프롬프트</strong> 클릭
             </div>
           </div>
 
           <div class="substep">
             <div class="substep-num">b</div>
             <div class="substep-body">
-              <strong>메모장</strong>을 열고 (또는 cmd 창에 바로) 이렇게 조합하세요:<br><br>
-              <span style="font-size:13px;">
-                ① Step 2에서 복사한 <strong>내 Python 경로</strong>를 붙여넣고<br>
-                ② <strong>한 칸 띄우고</strong><br>
-                ③ 그 뒤에 아래 텍스트를 이어 붙이세요:
-              </span>
+              아래를 복사 &rarr; 붙여넣기 &rarr; <span class="key">Enter</span>
               <div class="code" style="margin-top:6px;">
-                <button class="copy-btn" onclick="copyText('%USERPROFILE%\\.claude\\challenge-report.py')">복사</button>
-                %USERPROFILE%\.claude\challenge-report.py
+                <button class="copy-btn" onclick="copyText('python %USERPROFILE%\\.claude\\challenge-report.py')">복사</button>
+                python %USERPROFILE%\.claude\challenge-report.py
               </div>
             </div>
           </div>
@@ -359,33 +301,13 @@
           <div class="substep">
             <div class="substep-num">c</div>
             <div class="substep-body">
-              완성하면 이런 모양이 됩니다:
-              <div class="code" style="margin-top:6px;">
-                <span class="hl">C:\Users\홍길동\AppData\Local\...\python.exe</span> <span style="color:#a1a1aa;">%USERPROFILE%\.claude\challenge-report.py</span>
-              </div>
-              <div style="margin-top:6px;font-size:12px;color:#52525b;">
-                <span style="color:#34d399;">초록색</span> = 내 Python 경로 (사람마다 다름) &nbsp;|&nbsp; 회색 = 그대로 복사한 부분
-              </div>
-            </div>
-          </div>
-
-          <div class="substep">
-            <div class="substep-num">d</div>
-            <div class="substep-body">
-              완성된 명령어를 <strong>명령 프롬프트(cmd)에 붙여넣기</strong> 하고 <span class="key">Enter</span> 를 누르세요.
-            </div>
-          </div>
-
-          <div class="substep">
-            <div class="substep-num">e</div>
-            <div class="substep-body">
               닉네임과 비밀번호를 물어봅니다. <strong>챌린지 사이트 계정 정보</strong>를 입력하세요.
               <div class="expected" style="margin-top:6px;">
                 <span class="prompt">=== Claude Max 챌린지 — 초기 설정 ===</span><br><br>
                 챌린지 닉네임: <span class="val">내닉네임</span><br>
                 챌린지 비밀번호: <span class="val">내비밀번호</span><br><br>
                 <span class="ok">설정 저장 완료: C:\Users\...\challenge-config.json</span><br>
-                <span class="ok">[14:30] 내닉네임 | 2026-04-08 | 182,214 tokens | 3 sessions | OK</span>
+                <span class="ok">[14:30] 내닉네임 | 2026-04-08 | 50,570,055 tokens | 1 sessions | OK</span>
               </div>
             </div>
           </div>
@@ -397,91 +319,38 @@
         </div>
       </div>
 
-      <!-- Step 4: 자동 실행 등록 -->
+      <!-- Step 3: 자동 실행 등록 -->
       <div class="step">
-        <div class="step-num">4</div>
+        <div class="step-num">3</div>
         <div class="step-body">
-          <div class="step-title">1시간마다 자동 실행 등록</div>
+          <div class="step-title">자동 실행 등록</div>
           <div class="step-desc">
-            PC가 켜져 있으면 <strong>매 시간 자동으로</strong> 사용량을 보고하도록 등록합니다.<br>
-            <span style="color:#52525b;font-size:12px;">노트북 배터리 모드에서도 정상 작동합니다.</span>
+            Step 1에서 넣어둔 <strong>setup-scheduler.bat</strong> 파일을 실행합니다.
           </div>
 
           <div class="substep">
             <div class="substep-num">a</div>
             <div class="substep-body">
-              <strong>PowerShell 열기:</strong><br>
-              키보드에서 <span class="key">Win</span> 키를 누르고 <strong>"powershell"</strong> 이라고 입력하세요.
+              .claude 폴더에 있는 <strong>setup-scheduler.bat</strong> 파일을 찾아 <strong>우클릭</strong> &rarr; <strong>"관리자 권한으로 실행"</strong> 을 클릭하세요.
             </div>
           </div>
 
           <div class="substep">
             <div class="substep-num">b</div>
             <div class="substep-body">
-              검색 결과에서 <strong>"Windows PowerShell"</strong>을 찾아 <strong>"관리자 권한으로 실행"</strong>을 클릭하세요.<br>
-              <span style="color:#52525b;font-size:12px;">(우클릭하면 나오거나, 오른쪽에 바로 보입니다)</span>
+              <strong>"이 앱이 변경을 허용하시겠습니까?"</strong> &rarr; <strong>"예"</strong> 클릭
             </div>
           </div>
 
           <div class="substep">
             <div class="substep-num">c</div>
             <div class="substep-body">
-              <strong>"이 앱이 변경을 허용하시겠습니까?"</strong> 라고 물으면 <strong>"예"</strong>를 클릭하세요.<br>
-              <span style="color:#52525b;font-size:12px;">파란 배경의 창이 열립니다. 이게 PowerShell입니다.</span>
-            </div>
-          </div>
-
-          <div class="substep">
-            <div class="substep-num">d</div>
-            <div class="substep-body">
-              아래 코드 블록에서 <strong>첫 번째 줄만</strong> 수정하면 됩니다.<br><br>
-              <span style="font-size:13px;">
-                ① 아래 <span style="color:#fbbf24;font-weight:700;">노란색 글씨</span>를 <strong>클릭</strong>하세요 — 입력창이 뜹니다<br>
-                ② Step 2에서 복사한 <strong>내 Python 경로</strong>를 붙여넣고 확인<br>
-                ③ 경로가 <span style="color:#34d399;">초록색</span>으로 바뀌면 <strong>"복사"</strong> 버튼을 누르세요
-              </span>
-              <div class="code" style="margin-top:10px;">
-                <button class="copy-btn" id="ps-copy-btn" onclick="copyPS()">복사</button>
-                <span class="cm"># 첫 줄의 경로만 내 것으로 바꾸세요 (클릭!)</span><br><br>
-                <span class="acc">$py</span> = "<span class="warn" id="py-path-placeholder" style="cursor:pointer;border-bottom:2px dashed #fbbf24;padding-bottom:1px;" title="클릭해서 내 Python 경로를 입력하세요">여기를_클릭해서_내_Python_경로_입력</span>"<br><br>
-
-                <span class="cm"># 아래는 수정하지 마세요 ─────────────</span><br>
-                <span class="acc">$action</span> = New-ScheduledTaskAction -Execute <span class="acc">$py</span> -Argument "$env:USERPROFILE\.claude\challenge-report.py"<br>
-                <span class="acc">$trigger</span> = New-ScheduledTaskTrigger -Once -At "00:00" -RepetitionInterval (New-TimeSpan -Hours 1)<br>
-                <span class="acc">$settings</span> = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10)<br>
-                Register-ScheduledTask -TaskName "ClaudeChallenge" -Action <span class="acc">$action</span> -Trigger <span class="acc">$trigger</span> -Settings <span class="acc">$settings</span> -Force
-              </div>
-
-              <div style="margin-top:8px;font-size:12px;color:#52525b;">
-                완성 예시 (첫 줄만 다릅니다):<br>
-                <code style="color:#34d399;">$py = "C:\Users\홍길동\AppData\Local\Programs\Python\Python312\python.exe"</code>
-              </div>
-            </div>
-          </div>
-
-          <div class="substep">
-            <div class="substep-num">e</div>
-            <div class="substep-body">
-              PowerShell 창(파란 화면)에서 <strong>마우스 우클릭</strong>하면 자동으로 붙여넣기가 됩니다.<br>
-              <span style="color:#52525b;font-size:12px;">(Ctrl+V는 안 될 수 있습니다. 반드시 <strong>우클릭</strong>으로 붙여넣기)</span>
-            </div>
-          </div>
-
-          <div class="substep">
-            <div class="substep-num">f</div>
-            <div class="substep-body">
-              붙여넣기가 되었으면 <span class="key">Enter</span> 를 누르세요.
-            </div>
-          </div>
-
-          <div class="substep">
-            <div class="substep-num">g</div>
-            <div class="substep-body">
-              아래처럼 나오면 <strong>성공</strong>입니다! PowerShell 창을 닫아도 됩니다.
+              자동으로 Python을 찾고, 스케줄러를 등록합니다. 아래처럼 나오면 <strong>성공!</strong>
               <div class="expected" style="margin-top:6px;">
-                <span class="ok">TaskPath  TaskName          State</span><br>
-                <span class="ok">--------  --------          -----</span><br>
-                <span class="ok">\         ClaudeChallenge   Ready</span>
+                <span class="ok">[확인] Python 경로: C:\Users\...\python.exe</span><br>
+                <span class="ok">[확인] 스크립트: C:\Users\...\challenge-report.py</span><br>
+                <span class="ok">[진행] 1시간마다 자동 실행 등록 중...</span><br>
+                <span class="ok">[완료] 자동 실행 등록 성공!</span>
               </div>
             </div>
           </div>
@@ -492,7 +361,7 @@
       <div class="step">
         <div class="step-num done">&#10003;</div>
         <div class="step-body">
-          <div class="step-title">끝! 설정 완료</div>
+          <div class="step-title">끝!</div>
           <div class="step-desc">
             이제 Claude Code를 사용하면, <strong>매 정각</strong> 사용량이 자동으로 챌린지 사이트에 반영됩니다.<br>
             PC를 껐다 켜도 자동 실행은 유지됩니다. 더 이상 할 일이 없습니다!
@@ -506,8 +375,8 @@
       <!-- 해제 방법 -->
       <div class="alert alert-dim">
         <strong>혹시 자동 실행을 해제하고 싶다면:</strong><br>
-        <span class="key">Win</span> &rarr; "powershell" 검색 &rarr; 관리자 권한으로 실행 &rarr; 아래 입력 후 Enter<br>
-        <code style="color:#818cf8;">Unregister-ScheduledTask -TaskName "ClaudeChallenge" -Confirm:$false</code>
+        <span class="key">Win</span> &rarr; "cmd" 검색 &rarr; 명령 프롬프트 열기 &rarr; 아래 입력 후 Enter<br>
+        <code style="color:#818cf8;">schtasks /delete /tn "ClaudeChallenge" /f</code>
       </div>
     </div>
 
@@ -674,40 +543,6 @@ function copyText(text) {
     setTimeout(() => btn.textContent = '복사', 1200);
   });
 }
-function copyPS() {
-  const path = document.getElementById('py-path-placeholder').textContent;
-  if (path === '여기를_클릭해서_내_Python_경로_입력') {
-    alert('먼저 Python 경로를 입력해주세요!\\n\\n위 노란색 글씨를 클릭한 뒤, Step 2에서 확인한 경로를 붙여넣기 하세요.');
-    return;
-  }
-  const cmd = `$py = "${path}"\n$action = New-ScheduledTaskAction -Execute $py -Argument "$env:USERPROFILE\\.claude\\challenge-report.py"\n$trigger = New-ScheduledTaskTrigger -Once -At "00:00" -RepetitionInterval (New-TimeSpan -Hours 1)\n$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10)\nRegister-ScheduledTask -TaskName "ClaudeChallenge" -Action $action -Trigger $trigger -Settings $settings -Force`;
-  navigator.clipboard.writeText(cmd).then(() => {
-    const btn = document.getElementById('ps-copy-btn');
-    btn.textContent = 'OK!';
-    setTimeout(() => btn.textContent = '복사', 1200);
-  });
-}
-
-// Make Python path editable (click to input)
-document.addEventListener('DOMContentLoaded', function() {
-  const placeholder = document.getElementById('py-path-placeholder');
-  if (placeholder) {
-    placeholder.addEventListener('click', function() {
-      const current = this.textContent;
-      const input = prompt(
-        'Step 2에서 확인한 Python 경로를 붙여넣기 하세요:\n\n' +
-        '예시: C:\\Users\\홍길동\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
-        current === '여기를_클릭해서_내_Python_경로_입력' ? '' : current
-      );
-      if (input && input.trim()) {
-        this.textContent = input.trim();
-        this.style.color = '#34d399';
-        this.style.borderBottom = '2px solid #34d399';
-        this.style.borderBottomStyle = 'solid';
-      }
-    });
-  }
-});
 </script>
 </body>
 </html>
