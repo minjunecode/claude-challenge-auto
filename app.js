@@ -1141,12 +1141,12 @@ function renderDailyTrendChart(daily) {
   // Threshold lines container (positioned over the track area)
   html += '<div style="position:relative;margin-left:58px;margin-right:56px;height:0;pointer-events:none;z-index:2;">';
   if (pct1pt <= 100) {
-    html += `<div style="position:absolute;left:${pct1pt}%;top:0;bottom:0;width:0;border-left:1px dashed rgba(129,140,248,0.35);height:${sorted.length * 26}px;">
-      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--primary);opacity:0.6;">${formatTokens(POINT_1_THRESHOLD)} (1pt)</span></div>`;
+    html += `<div style="position:absolute;left:${pct1pt}%;top:0;bottom:0;width:0;border-left:1.5px dashed rgba(129,140,248,0.5);height:${sorted.length * 26 + 4}px;z-index:5;">
+      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--primary);opacity:0.8;white-space:nowrap;">${formatTokens(POINT_1_THRESHOLD)} (1pt)</span></div>`;
   }
   if (pct2pt <= 100) {
-    html += `<div style="position:absolute;left:${pct2pt}%;top:0;bottom:0;width:0;border-left:1px dashed rgba(52,211,153,0.35);height:${sorted.length * 26}px;">
-      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--accent);opacity:0.6;">${formatTokens(POINT_2_THRESHOLD)} (2pt)</span></div>`;
+    html += `<div style="position:absolute;left:${pct2pt}%;top:0;bottom:0;width:0;border-left:1.5px dashed rgba(234,88,12,0.5);height:${sorted.length * 26 + 4}px;z-index:5;">
+      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:rgba(234,88,12,0.8);opacity:1;white-space:nowrap;">${formatTokens(POINT_2_THRESHOLD)} (2pt)</span></div>`;
   }
   html += '</div>';
 

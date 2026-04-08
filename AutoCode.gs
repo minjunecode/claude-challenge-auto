@@ -250,18 +250,41 @@ function handleDashboard() {
       var rawSheet = ss.getSheetByName('사용량_raw');
       if (rawSheet && rawSheet.getLastRow() > 1) {
         var rawRows = rawSheet.getDataRange().getValues();
+        // 새 형식(10열): nickname,date,input,output,cache_creation,cache_read,score,sessions,reportedAt,hourly
+        // 구 형식(8열): nickname,date,input,output,cache_tokens,sessions,reportedAt,hourly
+        var rawHasNewFmt = (rawRows[0].length >= 10) || (String(rawRows[0][4] || '').indexOf('cache_creation') >= 0);
         for (var r = 1; r < rawRows.length; r++) {
           if (String(rawRows[r][0]).trim() === reqNickname) {
-            var hourlyStr = rawRows[r][7] || '';
+            var rInp = Number(rawRows[r][2]) || 0;
+            var rOut = Number(rawRows[r][3]) || 0;
+            var rCC, rCR, rScore, rSess, rAt, rHourlyStr;
+            if (rawHasNewFmt) {
+              rCC = Number(rawRows[r][4]) || 0;
+              rCR = Number(rawRows[r][5]) || 0;
+              rScore = Number(rawRows[r][6]) || 0;
+              rSess = Number(rawRows[r][7]) || 0;
+              rAt = rawRows[r][8];
+              rHourlyStr = rawRows[r][9] || '';
+            } else {
+              rCC = 0; rCR = 0; rScore = 0;
+              rSess = Number(rawRows[r][5]) || 0;
+              rAt = rawRows[r][6];
+              rHourlyStr = rawRows[r][7] || '';
+            }
+            if (!rScore) {
+              rScore = Math.round((rInp * 1) + (rOut * 5) + (rCC * 1.25) + (rCR * 0.1));
+            }
             var hourly = null;
-            if (hourlyStr) { try { hourly = JSON.parse(hourlyStr); } catch(e) {} }
+            if (rHourlyStr) { try { hourly = JSON.parse(rHourlyStr); } catch(e) {} }
             rawData.push({
               date: toDateStr(rawRows[r][1]),
-              input_tokens: Number(rawRows[r][2]) || 0,
-              output_tokens: Number(rawRows[r][3]) || 0,
-              cache_tokens: Number(rawRows[r][4]) || 0,
-              sessions: Number(rawRows[r][5]) || 0,
-              reportedAt: toDateTimeStr(rawRows[r][6]),
+              input_tokens: rInp,
+              output_tokens: rOut,
+              cache_creation_tokens: rCC,
+              cache_read_tokens: rCR,
+              score: rScore,
+              sessions: rSess,
+              reportedAt: toDateTimeStr(rAt),
               hourly: hourly
             });
           }
