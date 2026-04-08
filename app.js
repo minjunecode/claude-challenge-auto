@@ -416,7 +416,7 @@ function renderDailyTable(members, submissions) {
     if (s.type === 'session') {
       const dateStr = normalizeDate(s.submittedAt);
       if (dateStr && dailyMap[s.nickname]) {
-        if (!dailyMap[s.nickname][dateStr]) dailyMap[s.nickname][dateStr] = { done: true, tokens: 0, source: s.source };
+        if (!dailyMap[s.nickname][dateStr]) dailyMap[s.nickname][dateStr] = { done: true, tokens: 0, allTokens: 0, source: s.source };
         dailyMap[s.nickname][dateStr].done = true;
         if (s.source === 'auto' && s.tokens) dailyMap[s.nickname][dateStr].tokens = s.tokens;
       }
@@ -508,8 +508,8 @@ function renderDailyTable(members, submissions) {
         }
       }
       if (tokens > 0) {
-        const all = info ? info.allTokens : 0;
-        td.title = `in+out: ${tokens.toLocaleString()}\ncache 포함: ${all.toLocaleString()}`;
+        const all = (info && info.allTokens) ? info.allTokens : 0;
+        td.title = `가중 스코어: ${tokens.toLocaleString()}`;
       }
       tr.appendChild(td);
     });
