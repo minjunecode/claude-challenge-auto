@@ -203,9 +203,9 @@ function renderAutoStatus() {
 
     usageDisplay.classList.remove('hidden');
 
-    // 오늘 토큰 (input+output 기준, cache 제외)
+    // 오늘 토큰
     if (todayUsage) {
-      const ioTotal = (todayUsage.input_tokens || 0) + (todayUsage.output_tokens || 0);
+      const ioTotal = (todayUsage.input_tokens || 0) + (todayUsage.output_tokens || 0) + (todayUsage.cache_tokens || 0);
       document.getElementById('auto-today-tokens').textContent = formatTokens(ioTotal);
       document.getElementById('auto-today-sessions').textContent = todayUsage.sessions || 0;
     } else {
@@ -331,11 +331,9 @@ function renderDailyTable(members, submissions) {
     dashboardData.usage.forEach(u => {
       if (dailyMap[u.nickname]) {
         const uDate = normalizeDate(u.date);
-        const ioTokens = (u.input_tokens || 0) + (u.output_tokens || 0);
-        const allTokens = ioTokens + (u.cache_tokens || 0);
-        if (!dailyMap[u.nickname][uDate]) dailyMap[u.nickname][uDate] = { done: false, tokens: 0, allTokens: 0, source: '' };
-        dailyMap[u.nickname][uDate].tokens = ioTokens;
-        dailyMap[u.nickname][uDate].allTokens = allTokens;
+        const totalTokens = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_tokens || 0);
+        if (!dailyMap[u.nickname][uDate]) dailyMap[u.nickname][uDate] = { done: false, tokens: 0, source: '' };
+        dailyMap[u.nickname][uDate].tokens = totalTokens;
       }
     });
   }
@@ -411,8 +409,7 @@ function renderDailyTable(members, submissions) {
         }
       }
       if (tokens > 0) {
-        const all = info ? info.allTokens : 0;
-        td.title = `in+out: ${tokens.toLocaleString()}\ncache 포함: ${all.toLocaleString()}`;
+        td.title = `${tokens.toLocaleString()} tokens`;
       }
       tr.appendChild(td);
     });
@@ -463,7 +460,7 @@ function renderMonthlyCalendar() {
   if (dashboardData.usage) {
     dashboardData.usage.forEach(u => {
       if (u.nickname === currentUser.nickname) {
-        const ioTokens = (u.input_tokens || 0) + (u.output_tokens || 0);
+        const ioTokens = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_tokens || 0);
         if (ioTokens > 0) tokenMap[normalizeDate(u.date)] = ioTokens;
       }
     });
@@ -569,7 +566,7 @@ function renderDashboard() {
   if (dashboardData.usage) {
     dashboardData.usage.forEach(u => {
       if (normalizeDate(u.date).startsWith(curMonth) && monthlyTokens[u.nickname] !== undefined) {
-        monthlyTokens[u.nickname] += (u.input_tokens || 0) + (u.output_tokens || 0);
+        monthlyTokens[u.nickname] += (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_tokens || 0);
       }
     });
   }
