@@ -439,6 +439,7 @@ function handleReportUsage(params) {
         var storedDate = toDateStr(records[k][8]) || toDateStr(records[k][5]);
         if (String(records[k][0]) === nickname && String(records[k][6]) === 'auto' && storedDate === date) {
           recordSheet.getRange(k + 1, 5).setValue(earnedPts);
+          recordSheet.getRange(k + 1, 6).setValue(now);  // submittedAt도 최신 보고 시간으로 갱신
           recordSheet.getRange(k + 1, 8).setValue(score);
           recordSheet.getRange(k + 1, 9).setNumberFormat('@').setValue(date);
           alreadyExists = true;
