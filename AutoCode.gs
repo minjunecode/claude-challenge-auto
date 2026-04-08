@@ -225,15 +225,23 @@ function handleReportUsage(params) {
       var alreadyExists = false;
       for (var k = 1; k < records.length; k++) {
         // resetsAt(col 8) 또는 submittedAt(col 5)에서 날짜 매칭
-        var storedDate = String(records[k][8] || '').substring(0, 10);
-        if (!storedDate || storedDate.length < 10) {
-          storedDate = records[k][5] instanceof Date ? Utilities.formatDate(records[k][5], 'Asia/Seoul', 'yyyy-MM-dd') : String(records[k][5]).substring(0, 10);
+        var rawReset = records[k][8];
+        var storedDate = '';
+        if (rawReset) {
+          storedDate = rawReset instanceof Date ? Utilities.formatDate(rawReset, 'Asia/Seoul', 'yyyy-MM-dd') : String(rawReset);
+          // "YYYY-MM-DD" 형식만 추출
+          var m = storedDate.match(/\d{4}-\d{2}-\d{2}/);
+          storedDate = m ? m[0] : '';
+        }
+        if (!storedDate) {
+          var rawSub = records[k][5];
+          storedDate = rawSub instanceof Date ? Utilities.formatDate(rawSub, 'Asia/Seoul', 'yyyy-MM-dd') : String(rawSub).substring(0, 10);
         }
         if (String(records[k][0]) === nickname && String(records[k][6]) === 'auto' && storedDate === date) {
           // 기존 기록의 포인트 + 토큰 업데이트
           recordSheet.getRange(k + 1, 5).setValue(earnedPts);
           recordSheet.getRange(k + 1, 8).setValue(totalTokens);
-          recordSheet.getRange(k + 1, 9).setValue(date);
+          recordSheet.getRange(k + 1, 9).setNumberFormat('@').setValue(date);
           alreadyExists = true;
           break;
         }
@@ -248,7 +256,7 @@ function handleReportUsage(params) {
         var week = Math.ceil(((utcD - yearStart) / 86400000 + 1) / 7);
         var year = d.getFullYear();
 
-        recordSheet.appendRow([nickname, week, year, 'session', earnedPts, now, 'auto', totalTokens, date]);
+        recordSheet.appendRow([nickname, week, year, 'session', earnedPts, now, 'auto', totalTokens, "'" + date]);
       }
     }
   }
