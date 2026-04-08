@@ -58,7 +58,7 @@ function handleRequest(e) {
     case 'login':        result = handleLogin(params); break;
     case 'register':     result = handleRegister(params); break;
     case 'init':         result = handleInit(params); break;
-    case 'dashboard':    result = handleDashboard(); break;
+    case 'dashboard':    result = handleDashboard(params); break;
     case 'reportUsage':  result = handleReportUsage(params); break;
     case 'upload':       result = handleUpload(params); break;
     case 'addMember':    result = handleAddMember(params); break;
@@ -205,7 +205,63 @@ function handleDashboard() {
     }
   }
 
-  return { success: true, members: members, submissions: submissions, usage: usage };
+  // ── 요청자의 personalStats도 함께 반환 (API 호출 1회로 통합) ──
+  var myStats = null;
+  var reqNickname = (params.nickname || '').trim();
+  var reqPassword = (params.password || '').trim();
+  if (reqNickname && reqPassword) {
+    // 인증 확인
+    var authenticated = false;
+    for (var m = 1; m < memberData.length; m++) {
+      if (String(memberData[m][0]).trim() === reqNickname && String(memberData[m][1]).trim() === reqPassword) {
+        authenticated = true; break;
+      }
+    }
+    if (authenticated) {
+      var rawData = [];
+      var rawSheet = ss.getSheetByName('사용량_raw');
+      if (rawSheet && rawSheet.getLastRow() > 1) {
+        var rawRows = rawSheet.getDataRange().getValues();
+        for (var r = 1; r < rawRows.length; r++) {
+          if (String(rawRows[r][0]).trim() === reqNickname) {
+            var hourlyStr = rawRows[r][7] || '';
+            var hourly = null;
+            if (hourlyStr) { try { hourly = JSON.parse(hourlyStr); } catch(e) {} }
+            rawData.push({
+              date: toDateStr(rawRows[r][1]),
+              input_tokens: Number(rawRows[r][2]) || 0,
+              output_tokens: Number(rawRows[r][3]) || 0,
+              cache_tokens: Number(rawRows[r][4]) || 0,
+              sessions: Number(rawRows[r][5]) || 0,
+              reportedAt: toDateTimeStr(rawRows[r][6]),
+              hourly: hourly
+            });
+          }
+        }
+      }
+      var dailyData = [];
+      for (var u = 0; u < usage.length; u++) {
+        if (usage[u].nickname === reqNickname) {
+          dailyData.push(usage[u]);
+        }
+      }
+      var pointsData = [];
+      if (recordSheet && submissions.length > 0) {
+        for (var p = 0; p < submissions.length; p++) {
+          if (submissions[p].nickname === reqNickname) {
+            pointsData.push({
+              date: submissions[p].resetsAt || submissions[p].submittedAt,
+              points: submissions[p].points,
+              source: submissions[p].source
+            });
+          }
+        }
+      }
+      myStats = { raw: rawData, daily: dailyData, points: pointsData };
+    }
+  }
+
+  return { success: true, members: members, submissions: submissions, usage: usage, myStats: myStats };
 }
 
 // ── 사용량 보고 (PC에서 Hook으로 전송) ──

@@ -281,10 +281,32 @@ async function loadDashboard() {
       renderDashboard();
     } catch { /* ignore */ }
   }
+  const psCached = localStorage.getItem('personalStatsCache');
+  if (psCached) {
+    try {
+      const ps = JSON.parse(psCached);
+      if (ps && ps.success) { personalStatsData = ps; personalStatsLoaded = true; }
+    } catch { /* ignore */ }
+  }
 
-  // 2) API에서 최신 데이터 가져오기
-  const result = await apiCall('dashboard');
+  // 2) API에서 최신 데이터 가져오기 (personalStats도 함께 요청)
+  const params = {};
+  if (currentUser && currentUser.nickname) params.nickname = currentUser.nickname;
+  if (currentUser && currentUser.password) params.password = currentUser.password;
+  const result = await apiCall('dashboard', params);
   if (result && result.success) {
+    // myStats가 포함되어 있으면 personalStats 캐시도 갱신
+    if (result.myStats) {
+      const ps = { success: true, raw: result.myStats.raw, daily: result.myStats.daily, points: result.myStats.points };
+      personalStatsData = ps;
+      personalStatsLoaded = true;
+      localStorage.setItem('personalStatsCache', JSON.stringify(ps));
+      // 현재 내 분석 탭이 열려있으면 즉시 렌더
+      if (document.getElementById('tab-stats').classList.contains('active')) {
+        renderPersonalStats();
+      }
+      delete result.myStats; // dashboardCache에는 저장 안 함 (용량 절약)
+    }
     dashboardData = result;
     localStorage.setItem('dashboardCache', JSON.stringify(result));
   } else if (!dashboardData) {
@@ -861,7 +883,13 @@ async function loadPersonalStats() {
 
   if (!currentUser || !currentUser.nickname) return;
 
-  // 1) Show cached data immediately
+  // 1) 이미 loadDashboard에서 데이터를 받았으면 즉시 렌더
+  if (personalStatsLoaded && personalStatsData) {
+    renderPersonalStats();
+    return;
+  }
+
+  // 2) 캐시에서 표시
   const cached = localStorage.getItem('personalStatsCache');
   if (cached) {
     try {
@@ -870,25 +898,21 @@ async function loadPersonalStats() {
         personalStatsData = parsed;
         personalStatsLoaded = true;
         renderPersonalStats();
+        return; // dashboard API가 백그라운드에서 갱신해줄 것
       }
-    } catch { /* ignore bad cache */ }
+    } catch { /* ignore */ }
   }
 
-  // 2) If no password, show re-login (only if no cache)
+  // 3) 캐시도 없고 데이터도 없으면 — password 확인 후 별도 API 호출
   if (!currentUser.password) {
-    if (!personalStatsLoaded) {
-      container.innerHTML =
-        '<div class="stats-placeholder" style="padding:40px;text-align:center;">' +
-        '내 분석 기능을 사용하려면 재로그인이 필요합니다.<br><br>' +
-        '<button onclick="handleLogout()" class="btn btn-primary" style="display:inline-block;width:auto;padding:8px 24px;">재로그인</button></div>';
-    }
+    container.innerHTML =
+      '<div class="stats-placeholder" style="padding:40px;text-align:center;">' +
+      '내 분석 기능을 사용하려면 재로그인이 필요합니다.<br><br>' +
+      '<button onclick="handleLogout()" class="btn btn-primary" style="display:inline-block;width:auto;padding:8px 24px;">재로그인</button></div>';
     return;
   }
 
-  // 3) Fetch fresh data from API in background
-  if (!personalStatsLoaded) {
-    container.querySelectorAll('.stats-placeholder').forEach(el => { el.textContent = '데이터 로딩 중...'; });
-  }
+  container.querySelectorAll('.stats-placeholder').forEach(el => { el.textContent = '데이터 로딩 중...'; });
 
   const data = await apiCall('personalStats', { nickname: currentUser.nickname, password: currentUser.password });
 
@@ -1011,28 +1035,37 @@ function renderHourlyChart(raw, date) {
     return;
   }
 
-  // Build hourly data from the latest report
-  const hourly = {};
-  for (let h = 0; h < 24; h++) hourly[h] = 0;
+  // Build hourly data from the latest report (input/output 분리)
+  const hourlyIn = {}, hourlyOut = {};
+  for (let h = 0; h < 24; h++) { hourlyIn[h] = 0; hourlyOut[h] = 0; }
   latest.hourly.forEach(item => {
     const h = item.h;
     if (h >= 0 && h < 24) {
-      hourly[h] = (item.in || 0) + (item.out || 0);
+      hourlyIn[h] = item.in || 0;
+      hourlyOut[h] = item.out || 0;
     }
   });
 
-  const max = Math.max(...Object.values(hourly), 1);
+  const max = Math.max(...Array.from({length: 24}, (_, h) => hourlyIn[h] + hourlyOut[h]), 1);
 
   let html = '<div class="bar-chart">';
   for (let h = 0; h < 24; h++) {
-    const val = hourly[h];
-    const pct = (val / max) * 100;
-    html += `<div class="bar-col">`;
-    if (val > 0) html += `<div class="bar-value">${formatTokens(val)}</div>`;
-    html += `<div class="bar-fill" style="height:${Math.max(pct, val > 0 ? 3 : 0)}%"></div>`;
+    const inp = hourlyIn[h], out = hourlyOut[h], total = inp + out;
+    const inPct = (inp / max) * 100;
+    const outPct = (out / max) * 100;
+    html += `<div class="bar-col" title="${h}시: input ${formatTokens(inp)}, output ${formatTokens(out)}">`;
+    if (total > 0) html += `<div class="bar-value">${formatTokens(total)}</div>`;
+    html += `<div class="bar-stack" style="height:${Math.max(inPct + outPct, total > 0 ? 3 : 0)}%">`;
+    html += `<div class="bar-seg-output" style="height:${total > 0 ? (out/total)*100 : 0}%"></div>`;
+    html += `<div class="bar-seg-input" style="height:${total > 0 ? (inp/total)*100 : 0}%"></div>`;
+    html += `</div>`;
     html += `<div class="bar-label">${h}</div>`;
     html += `</div>`;
   }
+  html += '</div>';
+  html += '<div class="hbar-legend" style="margin-top:8px;">';
+  html += '<span><span class="hbar-legend-dot" style="background:rgba(129,140,248,0.45);"></span>Input</span>';
+  html += '<span><span class="hbar-legend-dot" style="background:rgba(129,140,248,0.8);"></span>Output</span>';
   html += '</div>';
   container.innerHTML = html;
 }
