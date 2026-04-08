@@ -210,14 +210,33 @@
       <div class="step">
         <div class="step-num">2</div>
         <div class="step-body">
-          <div class="step-title">최초 실행 — 닉네임 등록</div>
+          <div class="step-title">Python 경로 확인</div>
           <div class="step-desc">
             <strong>명령 프롬프트(cmd)</strong>를 열고 아래를 입력하세요.<br>
-            챌린지 사이트 닉네임과 비밀번호를 물어봅니다. <strong>1번만 하면 됩니다.</strong>
+            출력된 경로를 <strong>메모</strong>해두세요. (스케줄러 등록에 필요)
           </div>
           <div class="code">
-            <button class="copy-btn" onclick="copyText('python %USERPROFILE%\\.claude\\challenge-report.py')">복사</button>
-            python %USERPROFILE%\.claude\challenge-report.py
+            <button class="copy-btn" onclick="copyText('where python')">복사</button>
+            where python
+          </div>
+          <div class="expected">
+            <span class="ok">C:\Users\<span class="val">내이름</span>\AppData\Local\Python\bin\python.exe</span><br>
+            <span class="cm"># 여러 줄이 나오면 첫 번째 경로를 사용하세요</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">최초 실행 — 닉네임 등록</div>
+          <div class="step-desc">
+            위에서 확인한 <strong>Python 전체 경로</strong>로 스크립트를 실행하세요.<br>
+            챌린지 닉네임과 비밀번호를 물어봅니다. <strong>1번만 하면 됩니다.</strong>
+          </div>
+          <div class="code">
+            <span class="cm"># Python 경로를 본인 것으로 변경하세요:</span><br>
+            <span class="hl">C:\...\python.exe</span> %USERPROFILE%\.claude\challenge-report.py
           </div>
           <div class="expected">
             <span class="prompt">=== Claude Max 챌린지 — 초기 설정 ===</span><br>
@@ -234,19 +253,25 @@
       </div>
 
       <div class="step">
-        <div class="step-num">3</div>
+        <div class="step-num">4</div>
         <div class="step-body">
           <div class="step-title">1시간마다 자동 실행 등록</div>
           <div class="step-desc">
-            아래 명령어를 <strong>명령 프롬프트(cmd)에 한 번</strong> 입력하면,<br>
+            아래 명령어에서 <strong>Python 경로를 본인 것으로 변경</strong>한 뒤 실행하세요.<br>
             PC가 켜져 있는 동안 매 시간 자동으로 사용량을 보고합니다.
           </div>
           <div class="code">
-            <button class="copy-btn" onclick="copyText('schtasks /create /tn &quot;ClaudeChallenge&quot; /tr &quot;python %USERPROFILE%\\.claude\\challenge-report.py&quot; /sc hourly /st 00:00 /f')">복사</button>
-            schtasks /create /tn "ClaudeChallenge" /tr "python %USERPROFILE%\.claude\challenge-report.py" /sc hourly /st 00:00 /f
+            <span class="cm"># Python 경로를 본인 것으로 변경하세요:</span><br>
+            schtasks /create /tn "ClaudeChallenge"<br>
+            &nbsp;&nbsp;/tr "<span class="hl">C:\...\python.exe</span> %USERPROFILE%\.claude\challenge-report.py"<br>
+            &nbsp;&nbsp;/sc hourly /st 00:00 /f
           </div>
           <div class="expected">
             <span class="ok">성공: 예약된 작업 "ClaudeChallenge"이(가) 만들어졌습니다.</span>
+          </div>
+          <div class="alert alert-dim" style="margin-top:8px;">
+            <strong>예시 (한 줄로 입력):</strong><br>
+            <code style="color:#a1a1aa;font-size:11px;word-break:break-all;">schtasks /create /tn "ClaudeChallenge" /tr "C:\Users\내이름\AppData\Local\Python\bin\python.exe %USERPROFILE%\.claude\challenge-report.py" /sc hourly /st 00:00 /f</code>
           </div>
         </div>
       </div>
@@ -256,8 +281,7 @@
         <div class="step-body">
           <div class="step-title">끝!</div>
           <div class="step-desc">
-            이제 Claude Code를 사용하면, 매 시간 사용량이 자동으로 챌린지 사이트에 반영됩니다.<br>
-            아무것도 더 할 필요 없습니다.
+            이제 Claude Code를 사용하면, 매 시간 사용량이 자동으로 챌린지 사이트에 반영됩니다.
           </div>
           <div class="alert alert-green">
             <strong>확인 방법:</strong> 챌린지 사이트 → 인증 탭에서 "자동 리포팅 활성" 표시가 나오면 성공!
@@ -266,8 +290,7 @@
       </div>
 
       <div class="alert alert-dim">
-        <strong>자동 실행 해제하려면:</strong><br>
-        <code style="color:#818cf8;">schtasks /delete /tn "ClaudeChallenge" /f</code>
+        <strong>자동 실행 해제:</strong> <code style="color:#818cf8;">schtasks /delete /tn "ClaudeChallenge" /f</code>
       </div>
     </div>
 
