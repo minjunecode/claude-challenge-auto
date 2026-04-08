@@ -3,6 +3,43 @@
 // Hook 기반 자동 사용량 수집 (OAuth 불필요)
 // ============================================
 
+/** 어떤 형태의 값이든 "YYYY-MM-DD"로 변환 */
+function toDateStr(v) {
+  if (!v) return '';
+  // 1) Utilities.formatDate 시도 (Date 객체)
+  try {
+    var s = Utilities.formatDate(v, 'Asia/Seoul', 'yyyy-MM-dd');
+    if (s && /^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  } catch(e) {}
+  // 2) 문자열에서 YYYY-MM-DD 추출
+  var str = String(v);
+  var m = str.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[0];
+  // 3) "Wed Apr 08 2026..." 형식 파싱
+  try {
+    var d = new Date(str);
+    if (!isNaN(d.getTime())) return Utilities.formatDate(d, 'Asia/Seoul', 'yyyy-MM-dd');
+  } catch(e) {}
+  return str;
+}
+
+/** 어떤 형태의 값이든 "YYYY-MM-DD HH:mm:ss"로 변환 */
+function toDateTimeStr(v) {
+  if (!v) return '';
+  try {
+    var s = Utilities.formatDate(v, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
+    if (s && s.length >= 19) return s;
+  } catch(e) {}
+  var str = String(v);
+  var m = str.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+  if (m) return m[0];
+  try {
+    var d = new Date(str);
+    if (!isNaN(d.getTime())) return Utilities.formatDate(d, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
+  } catch(e) {}
+  return str;
+}
+
 function doGet(e) { return handleRequest(e); }
 function doPost(e) { return handleRequest(e); }
 
@@ -132,7 +169,7 @@ function handleDashboard() {
           year: Number(recordData[j][2]),
           type: recordData[j][3] || 'session',
           points: Number(recordData[j][4]) || 1,
-          submittedAt: recordData[j][5] instanceof Date ? Utilities.formatDate(recordData[j][5], 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss') : String(recordData[j][5]),
+          submittedAt: toDateTimeStr(recordData[j][5]),
           source: recordData[j][6] || 'auto',
           tokens: Number(recordData[j][7]) || 0,
           resetsAt: recordData[j][8] || ''
@@ -150,12 +187,12 @@ function handleDashboard() {
       if (usageData[k][0]) {
         usage.push({
           nickname: String(usageData[k][0]),
-          date: (function(v){ var s = v instanceof Date ? Utilities.formatDate(v,'Asia/Seoul','yyyy-MM-dd') : String(v); var m = s.match(/\d{4}-\d{2}-\d{2}/); return m ? m[0] : s; })(usageData[k][1]),
+          date: toDateStr(usageData[k][1]),
           input_tokens: Number(usageData[k][2]) || 0,
           output_tokens: Number(usageData[k][3]) || 0,
           cache_tokens: Number(usageData[k][4]) || 0,
           sessions: Number(usageData[k][5]) || 0,
-          reportedAt: usageData[k][6] instanceof Date ? Utilities.formatDate(usageData[k][6], 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss') : String(usageData[k][6])
+          reportedAt: toDateTimeStr(usageData[k][6])
         });
       }
     }
@@ -200,11 +237,7 @@ function handleReportUsage(params) {
   var usageData = usageSheet.getDataRange().getValues();
   var existingRow = -1;
   for (var j = 1; j < usageData.length; j++) {
-    var rawD = usageData[j][1];
-    var cellDate = rawD instanceof Date ? Utilities.formatDate(rawD, 'Asia/Seoul', 'yyyy-MM-dd') : String(rawD);
-    var dm = cellDate.match(/\d{4}-\d{2}-\d{2}/);
-    cellDate = dm ? dm[0] : cellDate;
-    if (String(usageData[j][0]) === nickname && cellDate === date) {
+    if (String(usageData[j][0]) === nickname && toDateStr(usageData[j][1]) === date) {
       existingRow = j + 1; break;
     }
   }
@@ -228,18 +261,7 @@ function handleReportUsage(params) {
       var alreadyExists = false;
       for (var k = 1; k < records.length; k++) {
         // resetsAt(col 8) 또는 submittedAt(col 5)에서 날짜 매칭
-        var rawReset = records[k][8];
-        var storedDate = '';
-        if (rawReset) {
-          storedDate = rawReset instanceof Date ? Utilities.formatDate(rawReset, 'Asia/Seoul', 'yyyy-MM-dd') : String(rawReset);
-          // "YYYY-MM-DD" 형식만 추출
-          var m = storedDate.match(/\d{4}-\d{2}-\d{2}/);
-          storedDate = m ? m[0] : '';
-        }
-        if (!storedDate) {
-          var rawSub = records[k][5];
-          storedDate = rawSub instanceof Date ? Utilities.formatDate(rawSub, 'Asia/Seoul', 'yyyy-MM-dd') : String(rawSub).substring(0, 10);
-        }
+        var storedDate = toDateStr(records[k][8]) || toDateStr(records[k][5]);
         if (String(records[k][0]) === nickname && String(records[k][6]) === 'auto' && storedDate === date) {
           // 기존 기록의 포인트 + 토큰 업데이트
           recordSheet.getRange(k + 1, 5).setValue(earnedPts);
@@ -380,7 +402,7 @@ function checkHasAutoReport(nickname) {
   var threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
   var cutoff = Utilities.formatDate(threeDaysAgo, 'Asia/Seoul', 'yyyy-MM-dd');
   for (var i = data.length - 1; i >= 1; i--) {
-    if (data[i][0] === nickname && String(data[i][1]) >= cutoff) return true;
+    if (data[i][0] === nickname && toDateStr(data[i][1]) >= cutoff) return true;
   }
   return false;
 }
