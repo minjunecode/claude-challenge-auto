@@ -119,7 +119,7 @@ async function handleLogin(e) {
 
   if (!result) return;
   if (result.success) {
-    currentUser = { nickname: result.nickname, isAdmin: result.isAdmin, hasAutoReport: result.hasAutoReport };
+    currentUser = { nickname: result.nickname, isAdmin: result.isAdmin, hasAutoReport: result.hasAutoReport, password };
     localStorage.setItem('challengeUser', JSON.stringify(currentUser));
     showMain();
   } else { errorEl.textContent = result.error; }
@@ -170,7 +170,7 @@ function switchTab(tabName) {
   document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
   document.getElementById(`tab-${tabName}`).classList.add('active');
   // URL hash에 현재 탭 저장 (새로고침 시 복원용)
-  history.replaceState(null, '', '#' + tabName);
+  location.hash = tabName;
   if (tabName === 'dashboard') renderDashboard();
   if (tabName === 'cert') { renderAutoStatus(); }
   if (tabName === 'stats') {
@@ -852,14 +852,15 @@ async function loadPersonalStats() {
     return;
   }
 
-  const cfg = JSON.parse(localStorage.getItem('challengeConfig') || '{}');
-  if (!cfg.nickname || !cfg.password) return;
+  if (!currentUser || !currentUser.nickname) return;
+  const nickname = currentUser.nickname;
+  const password = currentUser.password;
 
   try {
     const resp = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'personalStats', nickname: cfg.nickname, password: cfg.password }),
+      body: JSON.stringify({ action: 'personalStats', nickname, password }),
       redirect: 'follow'
     });
     const data = await resp.json();
