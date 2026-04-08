@@ -209,12 +209,23 @@ function handleDashboard() {
     var usageHasScore = usageData[0].length >= 9;
     for (var k = 1; k < usageData.length; k++) {
       if (usageData[k][0]) {
+        var uInp = Number(usageData[k][2]) || 0;
+        var uOut = Number(usageData[k][3]) || 0;
+        var uCC = usageHasScore ? (Number(usageData[k][4]) || 0) : 0;
+        var uCR = usageHasScore ? (Number(usageData[k][5]) || 0) : 0;
+        var uScore = usageHasScore ? (Number(usageData[k][6]) || 0) : 0;
+        // 이전 데이터 호환: score가 0이면 가중치 공식으로 계산
+        if (!uScore) {
+          uScore = Math.round((uInp * 1) + (uOut * 5) + (uCC * 1.25) + (uCR * 0.1));
+        }
         usage.push({
           nickname: String(usageData[k][0]),
           date: toDateStr(usageData[k][1]),
-          input_tokens: Number(usageData[k][2]) || 0,
-          output_tokens: Number(usageData[k][3]) || 0,
-          score: usageHasScore ? (Number(usageData[k][6]) || 0) : 0,
+          input_tokens: uInp,
+          output_tokens: uOut,
+          cache_creation_tokens: uCC,
+          cache_read_tokens: uCR,
+          score: uScore,
           sessions: Number(usageHasScore ? usageData[k][7] : usageData[k][5]) || 0,
           reportedAt: toDateTimeStr(usageHasScore ? usageData[k][8] : usageData[k][6])
         });
@@ -351,8 +362,8 @@ function handleReportUsage(params) {
     usageSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, score, sessions, now]);
   }
 
-  // 자동 인증: score 기반 포인트 (50K → 1pt, 100K → 2pt)
-  var earnedPts = score >= 100000 ? 2 : (score >= 50000 ? 1 : 0);
+  // 자동 인증: score 기반 포인트 (100K → 1pt, 300K → 2pt)
+  var earnedPts = score >= 300000 ? 2 : (score >= 100000 ? 1 : 0);
   if (earnedPts > 0) {
     var recordSheet = ss.getSheetByName('인증기록');
     if (recordSheet) {

@@ -82,6 +82,15 @@ function setupEventListeners() {
   infoBtn.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
   infoBtn.addEventListener('click', () => tooltip.classList.toggle('hidden'));
 
+  // 스코어 공식 토글
+  const scoreToggle = document.getElementById('score-info-toggle');
+  if (scoreToggle) {
+    scoreToggle.addEventListener('click', () => {
+      const detail = document.getElementById('score-info-detail');
+      detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+    });
+  }
+
   // 모달
   document.querySelector('.modal-overlay').addEventListener('click', () => { document.getElementById('image-modal').classList.add('hidden'); });
   document.querySelector('.modal-close').addEventListener('click', () => { document.getElementById('image-modal').classList.add('hidden'); });
@@ -245,7 +254,7 @@ function renderAutoStatus() {
 
     usageDisplay.classList.remove('hidden');
 
-    // 오늘 토큰 (input+output 기준, cache 제외)
+    // 오늘 토큰 (가중 스코어)
     if (todayUsage) {
       const ioTotal = getScore(todayUsage);
       document.getElementById('auto-today-tokens').textContent = formatTokens(ioTotal);
@@ -273,10 +282,18 @@ function formatTokens(n) {
   return String(n);
 }
 
-// 가중치 스코어: score 필드 있으면 사용, 없으면 input+output fallback
+// 가중치 스코어: score 필드 있으면 사용, 없으면 가중치 공식 적용
 function getScore(d) {
-  return d.score || (d.input_tokens + d.output_tokens);
+  if (d.score) return d.score;
+  const inp = d.input_tokens || 0;
+  const out = d.output_tokens || 0;
+  const cc = d.cache_creation_tokens || 0;
+  const cr = d.cache_read_tokens || 0;
+  return Math.round((inp * 1) + (out * 5) + (cc * 1.25) + (cr * 0.1));
 }
+// 포인트 기준 (가중 스코어 기반)
+const POINT_1_THRESHOLD = 100000;   // 1pt: 100K
+const POINT_2_THRESHOLD = 300000;   // 2pt: 300K
 
 // 날짜 정규화: 어떤 형식이든 "YYYY-MM-DD"로 변환
 function normalizeDate(v) {
@@ -454,10 +471,10 @@ function renderDailyTable(members, submissions) {
         td.classList.add('daily-td-future');
       } else if (d.date === today) {
         td.classList.add('daily-td-today');
-        if (tokens >= 100000) {
+        if (tokens >= POINT_2_THRESHOLD) {
           td.classList.add('daily-td-done');
           td.textContent = 'OO';
-        } else if (tokens >= 50000) {
+        } else if (tokens >= POINT_1_THRESHOLD) {
           td.classList.add('daily-td-done');
           td.textContent = 'O';
         } else if (tokens > 0) {
@@ -468,10 +485,10 @@ function renderDailyTable(members, submissions) {
           td.textContent = '-';
         }
       } else {
-        if (tokens >= 100000) {
+        if (tokens >= POINT_2_THRESHOLD) {
           td.classList.add('daily-td-done');
           td.textContent = 'OO';
-        } else if (tokens >= 50000) {
+        } else if (tokens >= POINT_1_THRESHOLD) {
           td.classList.add('daily-td-done');
           td.textContent = 'O';
         } else if (tokens > 0) {
@@ -589,9 +606,9 @@ function renderMonthlyCalendar() {
         if (dateStr > today) el.classList.add('future');
         else if (dateStr === today) {
           el.classList.add('today');
-          el.classList.add(tokens >= 50000 ? 'done' : 'pending');
+          el.classList.add(tokens >= POINT_1_THRESHOLD ? 'done' : 'pending');
         } else {
-          el.classList.add(tokens >= 50000 ? 'done' : 'miss');
+          el.classList.add(tokens >= POINT_1_THRESHOLD ? 'done' : 'miss');
         }
       }
       grid.appendChild(el);
@@ -989,16 +1006,16 @@ function renderStatsSummary(daily, points) {
   // Goal progress bar
   const goalFill = document.getElementById('stats-goal-fill');
   if (goalFill) {
-    const pct = Math.min((todayTokens / 100000) * 100, 100);
+    const pct = Math.min((todayTokens / POINT_2_THRESHOLD) * 100, 100);
     goalFill.style.width = pct + '%';
     goalFill.className = 'stat-goal-fill' +
-      (todayTokens >= 100000 ? ' goal-100k' : todayTokens >= 50000 ? ' goal-50k' : '');
+      (todayTokens >= POINT_2_THRESHOLD ? ' goal-100k' : todayTokens >= POINT_1_THRESHOLD ? ' goal-50k' : '');
   }
 
   // Point badge
   const badge = document.getElementById('stats-today-badge');
   if (badge) {
-    const pts = todayTokens >= 100000 ? 2 : todayTokens >= 50000 ? 1 : 0;
+    const pts = todayTokens >= POINT_2_THRESHOLD ? 2 : todayTokens >= POINT_1_THRESHOLD ? 1 : 0;
     badge.textContent = pts + 'pt';
     badge.className = 'stat-point-badge badge-' + pts;
   }
@@ -1072,14 +1089,18 @@ function renderHourlyChart(raw, date) {
 
   const max = Math.max(...Array.from({length: 24}, (_, h) => hourlyIn[h] + hourlyOut[h]), 1);
 
+  // Snap max to nice breakpoint for consistent scale
+  const barBreaks = [100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000];
+  const niceMax = barBreaks.find(b => b >= max) || max;
+
   let html = '<div class="bar-chart">';
   for (let h = 0; h < 24; h++) {
     const inp = hourlyIn[h], out = hourlyOut[h], total = inp + out;
-    const inPct = (inp / max) * 100;
-    const outPct = (out / max) * 100;
+    const totalPct = Math.min((total / niceMax) * 100, 100);
+    const barHeight = total > 0 ? Math.max(totalPct, 4) : 0;
     html += `<div class="bar-col" title="${h}시: input ${formatTokens(inp)}, output ${formatTokens(out)}">`;
     if (total > 0) html += `<div class="bar-value">${formatTokens(total)}</div>`;
-    html += `<div class="bar-stack" style="height:${Math.max(inPct + outPct, total > 0 ? 3 : 0)}%">`;
+    html += `<div class="bar-stack" style="height:${barHeight}%">`;
     html += `<div class="bar-seg-output" style="height:${total > 0 ? (out/total)*100 : 0}%"></div>`;
     html += `<div class="bar-seg-input" style="height:${total > 0 ? (inp/total)*100 : 0}%"></div>`;
     html += `</div>`;
@@ -1104,22 +1125,29 @@ function renderDailyTrendChart(daily) {
     return;
   }
 
-  // Find max for scaling (at least 100K so threshold lines always visible)
-  const maxTotal = Math.max(...sorted.map(d => getScore(d)), 100000);
+  // Find max for scaling — snap to nice round breakpoints
+  const breakpoints = [1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000, 50000000];
+  const rawMax = Math.max(...sorted.map(d => getScore(d)), 1);
+  const maxTotal = breakpoints.find(b => b >= rawMax) || rawMax;
 
   // Build threshold positions
-  const pct50 = (50000 / maxTotal) * 100;
-  const pct100 = (100000 / maxTotal) * 100;
+  const pct1pt = (POINT_1_THRESHOLD / maxTotal) * 100;
+  const pct2pt = (POINT_2_THRESHOLD / maxTotal) * 100;
 
   let html = '<div class="hbar-chart">';
 
+  // Scale label (max value on the right)
+  html += `<div class="hbar-scale-header"><span></span><span class="hbar-scale-max">${formatTokens(maxTotal)}</span></div>`;
+
   // Threshold lines container (positioned over the track area)
   html += '<div style="position:relative;margin-left:58px;margin-right:56px;height:0;pointer-events:none;z-index:2;">';
-  html += `<div style="position:absolute;left:${pct50}%;top:0;bottom:0;width:0;border-left:1px dashed rgba(129,140,248,0.35);height:${sorted.length * 26}px;">
-    <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--primary);opacity:0.6;">50K</span></div>`;
-  if (pct100 <= 100) {
-    html += `<div style="position:absolute;left:${pct100}%;top:0;bottom:0;width:0;border-left:1px dashed rgba(52,211,153,0.35);height:${sorted.length * 26}px;">
-      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--accent);opacity:0.6;">100K</span></div>`;
+  if (pct1pt <= 100) {
+    html += `<div style="position:absolute;left:${pct1pt}%;top:0;bottom:0;width:0;border-left:1px dashed rgba(129,140,248,0.35);height:${sorted.length * 26}px;">
+      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--primary);opacity:0.6;">${formatTokens(POINT_1_THRESHOLD)} (1pt)</span></div>`;
+  }
+  if (pct2pt <= 100) {
+    html += `<div style="position:absolute;left:${pct2pt}%;top:0;bottom:0;width:0;border-left:1px dashed rgba(52,211,153,0.35);height:${sorted.length * 26}px;">
+      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--accent);opacity:0.6;">${formatTokens(POINT_2_THRESHOLD)} (2pt)</span></div>`;
   }
   html += '</div>';
 
@@ -1127,7 +1155,7 @@ function renderDailyTrendChart(daily) {
     const inp = d.input_tokens || 0;
     const out = d.output_tokens || 0;
     const total = getScore(d);
-    const tier = total >= 100000 ? 'green' : total >= 50000 ? 'blue' : 'gray';
+    const tier = total >= POINT_2_THRESHOLD ? 'green' : total >= POINT_1_THRESHOLD ? 'blue' : 'gray';
     const inPct = (inp / maxTotal) * 100;
     const outPct = (out / maxTotal) * 100;
     const dateLabel = d.date.substring(5); // MM-DD

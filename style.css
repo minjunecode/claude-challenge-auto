@@ -1796,6 +1796,48 @@ header h1 {
 /* ── 내 분석 탭 ── */
 .stats-container { max-width: 720px; margin: 0 auto; }
 
+/* 스코어 공식 안내 배너 */
+.score-info-banner {
+  margin-bottom: 14px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 10px 14px;
+}
+.score-info-toggle {
+  cursor: pointer; font-size: 0.8rem; color: var(--muted);
+  display: flex; align-items: center; gap: 6px; font-weight: 600;
+  user-select: none;
+}
+.score-info-toggle .info-icon {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--primary); color: #fff; display: inline-flex;
+  align-items: center; justify-content: center;
+  font-size: 0.65rem; font-weight: 700; font-style: italic;
+}
+.score-info-detail {
+  margin-top: 10px; font-size: 0.75rem; color: var(--text);
+}
+.score-formula {
+  background: rgba(129,140,248,0.08); border-radius: 8px;
+  padding: 8px 12px; font-family: 'Courier New', monospace;
+  font-size: 0.7rem; margin-bottom: 10px; word-break: break-all;
+  line-height: 1.5;
+}
+.score-table {
+  width: 100%; border-collapse: collapse; margin-bottom: 8px;
+  font-size: 0.72rem;
+}
+.score-table th {
+  background: rgba(129,140,248,0.1); padding: 5px 8px;
+  text-align: left; font-weight: 600; border-bottom: 1px solid var(--border);
+}
+.score-table td {
+  padding: 4px 8px; border-bottom: 1px solid var(--border);
+}
+.score-points {
+  font-size: 0.7rem; color: var(--muted); text-align: center;
+  margin-top: 4px;
+}
+
 .stats-summary {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
   margin-bottom: 20px;
@@ -1867,6 +1909,13 @@ header h1 {
 
 /* Horizontal bar chart (daily usage) */
 .hbar-chart { display: flex; flex-direction: column; gap: 4px; position: relative; }
+.hbar-scale-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-left: 58px; margin-right: 0; margin-bottom: 2px;
+}
+.hbar-scale-max {
+  font-size: 0.6rem; color: var(--muted); font-weight: 600; opacity: 0.7;
+}
 .hbar-row {
   display: flex; align-items: center; gap: 8px; height: 22px;
 }
@@ -1909,8 +1958,8 @@ header h1 {
 }
 
 /* Vertical bar chart (hourly) */
-.bar-chart { display: flex; align-items: flex-end; gap: 2px; height: 160px; padding-top: 8px; }
-.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.bar-chart { display: flex; align-items: flex-end; gap: 2px; height: 180px; padding-top: 18px; }
+.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; height: 100%; justify-content: flex-end; }
 .bar-fill {
   width: 100%; border-radius: 4px 4px 0 0;
   background: linear-gradient(180deg, var(--primary) 0%, rgba(129,140,248,0.4) 100%);
@@ -1963,7 +2012,7 @@ header h1 {
 
 @media (max-width: 600px) {
   .stats-summary { grid-template-columns: 1fr; }
-  .bar-chart { height: 120px; }
+  .bar-chart { height: 140px; }
   .hbar-date { flex: 0 0 40px; font-size: 0.6rem; }
   .hbar-amount { flex: 0 0 40px; font-size: 0.6rem; }
   .stats-section-header { flex-direction: column; align-items: flex-start; gap: 8px; }
