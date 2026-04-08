@@ -252,7 +252,8 @@ function handleReportUsage(params) {
   }
 
   // 자동 인증: 50K → 1pt, 100K → 2pt (하루 최대 2pt)
-  var earnedPts = totalTokens >= 100000 ? 2 : (totalTokens >= 50000 ? 1 : 0);
+  var ioTokens = inputTokens + outputTokens;
+  var earnedPts = ioTokens >= 100000 ? 2 : (ioTokens >= 50000 ? 1 : 0);
   if (earnedPts > 0) {
     var recordSheet = ss.getSheetByName('인증기록');
     if (recordSheet) {
