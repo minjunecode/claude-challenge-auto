@@ -63,6 +63,7 @@ function handleRequest(e) {
     case 'upload':       result = handleUpload(params); break;
     case 'addMember':    result = handleAddMember(params); break;
     case 'deleteMember': result = handleDeleteMember(params); break;
+    case 'personalStats': result = handlePersonalStats(params); break;
     default: result = { success: false, error: '알 수 없는 action: ' + action };
   }
 
@@ -394,6 +395,82 @@ function handleDeleteMember(params) {
     if (data[i][0] === nickname) { sheet.deleteRow(i + 1); return { success: true }; }
   }
   return { success: false, error: '해당 멤버를 찾을 수 없습니다.' };
+}
+
+// ── 개인 통계 ──
+function handlePersonalStats(params) {
+  var nickname = (params.nickname || '').trim();
+  var password = (params.password || '').trim();
+  if (!nickname || !password) return { success: false, error: '인증 정보가 필요합니다.' };
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var memberSheet = ss.getSheetByName('멤버');
+  if (!memberSheet) return { success: false, error: '"멤버" 시트가 없습니다.' };
+
+  var memberData = memberSheet.getDataRange().getValues();
+  var authenticated = false;
+  for (var i = 1; i < memberData.length; i++) {
+    if (String(memberData[i][0]).trim() === nickname && String(memberData[i][1]).trim() === password) {
+      authenticated = true; break;
+    }
+  }
+  if (!authenticated) return { success: false, error: '인증 실패.' };
+
+  // 사용량_raw (시간별 스냅샷)
+  var rawData = [];
+  var rawSheet = ss.getSheetByName('사용량_raw');
+  if (rawSheet && rawSheet.getLastRow() > 1) {
+    var rows = rawSheet.getDataRange().getValues();
+    for (var r = 1; r < rows.length; r++) {
+      if (String(rows[r][0]).trim() === nickname) {
+        rawData.push({
+          date: toDateStr(rows[r][1]),
+          input_tokens: Number(rows[r][2]) || 0,
+          output_tokens: Number(rows[r][3]) || 0,
+          cache_tokens: Number(rows[r][4]) || 0,
+          sessions: Number(rows[r][5]) || 0,
+          reportedAt: toDateTimeStr(rows[r][6])
+        });
+      }
+    }
+  }
+
+  // 사용량 (일별 최종)
+  var dailyData = [];
+  var usageSheet = ss.getSheetByName('사용량');
+  if (usageSheet && usageSheet.getLastRow() > 1) {
+    var uRows = usageSheet.getDataRange().getValues();
+    for (var u = 1; u < uRows.length; u++) {
+      if (String(uRows[u][0]).trim() === nickname) {
+        dailyData.push({
+          date: toDateStr(uRows[u][1]),
+          input_tokens: Number(uRows[u][2]) || 0,
+          output_tokens: Number(uRows[u][3]) || 0,
+          cache_tokens: Number(uRows[u][4]) || 0,
+          sessions: Number(uRows[u][5]) || 0,
+          reportedAt: toDateTimeStr(uRows[u][6])
+        });
+      }
+    }
+  }
+
+  // 인증기록 (포인트)
+  var pointsData = [];
+  var recordSheet = ss.getSheetByName('인증기록');
+  if (recordSheet && recordSheet.getLastRow() > 1) {
+    var pRows = recordSheet.getDataRange().getValues();
+    for (var p = 1; p < pRows.length; p++) {
+      if (String(pRows[p][0]).trim() === nickname) {
+        pointsData.push({
+          date: toDateStr(pRows[p][8]) || toDateStr(pRows[p][5]),
+          points: Number(pRows[p][4]) || 0,
+          source: pRows[p][6] || 'auto'
+        });
+      }
+    }
+  }
+
+  return { success: true, raw: rawData, daily: dailyData, points: pointsData };
 }
 
 // ── 유틸리티 ──

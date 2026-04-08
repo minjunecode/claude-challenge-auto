@@ -44,6 +44,7 @@
 
       <nav class="tabs">
         <button class="tab active" data-tab="dashboard">대시보드</button>
+        <button class="tab" data-tab="stats">내 분석</button>
         <button class="tab" data-tab="cert">인증</button>
         <button class="tab admin-only" data-tab="admin">관리자</button>
       </nav>
@@ -203,6 +204,68 @@
             </div>
           </div>
 
+
+        </div>
+      </div>
+
+      <!-- 내 분석 탭 -->
+      <div id="tab-stats" class="tab-content">
+        <div class="stats-container">
+
+          <!-- 요약 카드 -->
+          <div class="stats-summary">
+            <div class="stat-card">
+              <div class="stat-label">오늘 토큰</div>
+              <div class="stat-value" id="stats-today-tokens">-</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">주간 평균</div>
+              <div class="stat-value" id="stats-weekly-avg">-</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">연속 사용일</div>
+              <div class="stat-value" id="stats-streak">-</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">이번 달 포인트</div>
+              <div class="stat-value" id="stats-month-pts">-</div>
+            </div>
+          </div>
+
+          <!-- 시간대별 사용량 -->
+          <div class="stats-section">
+            <div class="stats-section-header">
+              <h3>시간대별 사용량</h3>
+              <input type="date" id="stats-date-picker" class="stats-date-input">
+            </div>
+            <div class="stats-chart-area" id="stats-hourly-chart">
+              <div class="stats-placeholder">날짜를 선택하면 시간별 사용량이 표시됩니다.</div>
+            </div>
+          </div>
+
+          <!-- 일간 추이 (최근 30일) -->
+          <div class="stats-section">
+            <h3>일간 추이 <span class="stats-sub">(최근 30일)</span></h3>
+            <div class="stats-chart-area" id="stats-daily-chart">
+              <div class="stats-placeholder">데이터 로딩 중...</div>
+            </div>
+          </div>
+
+          <!-- 활동 시간대 -->
+          <div class="stats-section">
+            <h3>활동 시간대</h3>
+            <div class="stats-chart-area" id="stats-hour-heatmap">
+              <div class="stats-placeholder">데이터 로딩 중...</div>
+            </div>
+          </div>
+
+          <!-- 포인트 이력 -->
+          <div class="stats-section">
+            <h3>포인트 이력</h3>
+            <div class="stats-table-area" id="stats-points-table">
+              <div class="stats-placeholder">데이터 로딩 중...</div>
+            </div>
+          </div>
 
         </div>
       </div>

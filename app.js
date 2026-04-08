@@ -167,6 +167,7 @@ function switchTab(tabName) {
   document.getElementById(`tab-${tabName}`).classList.add('active');
   if (tabName === 'dashboard') renderDashboard();
   if (tabName === 'cert') { renderAutoStatus(); }
+  if (tabName === 'stats') loadPersonalStats();
   if (tabName === 'admin') renderAdminTab();
 }
 
@@ -819,4 +820,248 @@ function getDemoData() {
     submissions: subs,
     usage: usage,
   };
+}
+
+
+// ══════════════════════════════════
+// ── 내 분석 (Personal Stats) ──
+// ══════════════════════════════════
+
+let personalStatsData = null;
+let personalStatsLoaded = false;
+
+async function loadPersonalStats() {
+  // 이미 로드했으면 다시 렌더만
+  if (personalStatsLoaded && personalStatsData) {
+    renderPersonalStats();
+    return;
+  }
+
+  const cfg = JSON.parse(localStorage.getItem('challengeConfig') || '{}');
+  if (!cfg.nickname || !cfg.password) return;
+
+  try {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'personalStats', nickname: cfg.nickname, password: cfg.password }),
+      redirect: 'follow'
+    });
+    const data = await resp.json();
+    if (data.success) {
+      personalStatsData = data;
+      personalStatsLoaded = true;
+      renderPersonalStats();
+    }
+  } catch (e) {
+    console.error('personalStats error:', e);
+  }
+}
+
+function renderPersonalStats() {
+  if (!personalStatsData) return;
+  const { raw, daily, points } = personalStatsData;
+
+  renderStatsSummary(daily, points);
+  renderDailyTrendChart(daily);
+  renderHourHeatmap(raw);
+  renderPointsTable(points);
+
+  // 날짜 선택기 초기화
+  const picker = document.getElementById('stats-date-picker');
+  if (picker && !picker.dataset.init) {
+    const today = new Date();
+    const kst = new Date(today.getTime() + 9 * 60 * 60 * 1000);
+    picker.value = kst.toISOString().split('T')[0];
+    picker.addEventListener('change', () => renderHourlyChart(raw, picker.value));
+    picker.dataset.init = '1';
+    renderHourlyChart(raw, picker.value);
+  }
+}
+
+// ── 요약 카드 ──
+function renderStatsSummary(daily, points) {
+  const today = normalizeDate(new Date().toISOString().split('T')[0]);
+
+  // 오늘 토큰
+  const todayData = daily.find(d => normalizeDate(d.date) === today);
+  const todayTokens = todayData ? (todayData.input_tokens + todayData.output_tokens) : 0;
+  document.getElementById('stats-today-tokens').textContent = formatTokens(todayTokens);
+
+  // 주간 평균 (최근 7일)
+  const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date));
+  const last7 = sorted.slice(-7);
+  const weekAvg = last7.length > 0 ? last7.reduce((s, d) => s + d.input_tokens + d.output_tokens, 0) / last7.length : 0;
+  document.getElementById('stats-weekly-avg').textContent = formatTokens(Math.round(weekAvg));
+
+  // 연속 사용일 (스트릭)
+  let streak = 0;
+  const dateSet = new Set(daily.map(d => normalizeDate(d.date)));
+  const d = new Date();
+  const kstNow = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  let checkDate = new Date(kstNow);
+  while (true) {
+    const ds = checkDate.toISOString().split('T')[0];
+    if (dateSet.has(ds)) {
+      streak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+  document.getElementById('stats-streak').textContent = streak + '일';
+
+  // 이번 달 포인트
+  const curMonth = today.substring(0, 7);
+  const monthPts = points
+    .filter(p => (normalizeDate(p.date) || '').startsWith(curMonth))
+    .reduce((s, p) => s + p.points, 0);
+  document.getElementById('stats-month-pts').textContent = monthPts + 'pt';
+}
+
+// ── 시간대별 차트 ──
+function renderHourlyChart(raw, date) {
+  const container = document.getElementById('stats-hourly-chart');
+  const dayRecords = raw
+    .filter(r => normalizeDate(r.date) === date)
+    .sort((a, b) => (a.reportedAt || '').localeCompare(b.reportedAt || ''));
+
+  if (dayRecords.length === 0) {
+    container.innerHTML = '<div class="stats-placeholder">해당 날짜의 보고 데이터가 없습니다.</div>';
+    return;
+  }
+
+  // 시간별 delta 계산 (누적 스냅샷 차이)
+  const hourly = {};
+  for (let h = 0; h < 24; h++) hourly[h] = 0;
+
+  for (let i = 0; i < dayRecords.length; i++) {
+    const r = dayRecords[i];
+    const cur = r.input_tokens + r.output_tokens;
+    const prev = i > 0 ? (dayRecords[i - 1].input_tokens + dayRecords[i - 1].output_tokens) : 0;
+    const delta = i === 0 ? cur : (cur - prev);
+    const hour = parseInt((r.reportedAt || '').substring(11, 13)) || 0;
+    hourly[hour] += Math.max(0, delta);
+  }
+
+  const max = Math.max(...Object.values(hourly), 1);
+
+  let html = '<div class="bar-chart">';
+  for (let h = 0; h < 24; h++) {
+    const val = hourly[h];
+    const pct = (val / max) * 100;
+    const accent = val > 0 ? '' : '';
+    html += `<div class="bar-col">`;
+    if (val > 0) html += `<div class="bar-value">${formatTokens(val)}</div>`;
+    html += `<div class="bar-fill${val > 0 ? '' : ''}" style="height:${Math.max(pct, val > 0 ? 3 : 0)}%"></div>`;
+    html += `<div class="bar-label">${h}</div>`;
+    html += `</div>`;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// ── 일간 추이 (최근 30일) ──
+function renderDailyTrendChart(daily) {
+  const container = document.getElementById('stats-daily-chart');
+  const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
+
+  if (sorted.length === 0) {
+    container.innerHTML = '<div class="stats-placeholder">사용량 데이터가 없습니다.</div>';
+    return;
+  }
+
+  const values = sorted.map(d => d.input_tokens + d.output_tokens);
+  const max = Math.max(...values, 1);
+
+  // 50K, 100K 기준선 위치
+  const line50 = Math.min((50000 / max) * 100, 100);
+  const line100 = Math.min((100000 / max) * 100, 100);
+
+  let html = '<div class="bar-chart" style="position:relative;">';
+
+  // 기준선
+  if (max >= 50000) {
+    html += `<div style="position:absolute;left:0;right:0;bottom:${line50}%;border-top:1px dashed rgba(129,140,248,0.3);pointer-events:none;z-index:1;">
+      <span style="position:absolute;left:0;top:-14px;font-size:0.5rem;color:var(--primary);opacity:0.6;">50K</span></div>`;
+  }
+  if (max >= 100000) {
+    html += `<div style="position:absolute;left:0;right:0;bottom:${line100}%;border-top:1px dashed rgba(52,211,153,0.3);pointer-events:none;z-index:1;">
+      <span style="position:absolute;left:0;top:-14px;font-size:0.5rem;color:var(--accent);opacity:0.6;">100K</span></div>`;
+  }
+
+  sorted.forEach((d, i) => {
+    const val = values[i];
+    const pct = (val / max) * 100;
+    const isAccent = val >= 100000;
+    html += `<div class="bar-col" title="${d.date}: ${val.toLocaleString()} tokens">`;
+    html += `<div class="bar-fill${isAccent ? ' bar-accent' : ''}" style="height:${Math.max(pct, val > 0 ? 2 : 0)}%"></div>`;
+    // 5일 간격으로 라벨
+    if (i % 5 === 0 || i === sorted.length - 1) {
+      html += `<div class="bar-label">${d.date.substring(5)}</div>`;
+    } else {
+      html += `<div class="bar-label"></div>`;
+    }
+    html += `</div>`;
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// ── 활동 시간대 히트맵 ──
+function renderHourHeatmap(raw) {
+  const container = document.getElementById('stats-hour-heatmap');
+  if (!raw || raw.length === 0) {
+    container.innerHTML = '<div class="stats-placeholder">보고 데이터가 없습니다.</div>';
+    return;
+  }
+
+  // 시간대별 보고 횟수 집계
+  const counts = {};
+  for (let h = 0; h < 24; h++) counts[h] = 0;
+
+  raw.forEach(r => {
+    const hour = parseInt((r.reportedAt || '').substring(11, 13));
+    if (!isNaN(hour)) counts[hour]++;
+  });
+
+  const max = Math.max(...Object.values(counts), 1);
+
+  let html = '<div class="hour-heatmap">';
+  for (let h = 0; h < 24; h++) {
+    const val = counts[h];
+    const level = val === 0 ? 0 : val <= max * 0.25 ? 1 : val <= max * 0.5 ? 2 : val <= max * 0.75 ? 3 : 4;
+    html += `<div class="hour-cell level-${level}" title="${h}시: ${val}회">${val || ''}</div>`;
+  }
+  html += '</div>';
+
+  html += '<div class="hour-hour-labels">';
+  for (let h = 0; h < 24; h++) {
+    html += `<div class="hour-hour-label">${h}</div>`;
+  }
+  html += '</div>';
+
+  container.innerHTML = html;
+}
+
+// ── 포인트 이력 ──
+function renderPointsTable(points) {
+  const container = document.getElementById('stats-points-table');
+  if (!points || points.length === 0) {
+    container.innerHTML = '<div class="stats-placeholder">포인트 이력이 없습니다.</div>';
+    return;
+  }
+
+  const sorted = [...points].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const recent = sorted.slice(0, 20);
+
+  let html = '<table class="pts-table"><thead><tr><th>날짜</th><th>포인트</th><th>소스</th></tr></thead><tbody>';
+  recent.forEach(p => {
+    const d = normalizeDate(p.date) || '-';
+    const badge = p.points >= 2 ? 'pts-2' : 'pts-1';
+    const srcLabel = p.source === 'auto' ? '자동' : '수동';
+    html += `<tr><td>${d}</td><td><span class="pts-badge ${badge}">${p.points}pt</span></td><td>${srcLabel}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
 }
