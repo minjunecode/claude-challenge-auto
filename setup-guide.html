@@ -10,7 +10,7 @@
     body {
       font-family: 'Pretendard Variable', -apple-system, sans-serif;
       background: #08080a; color: #e4e4e7;
-      line-height: 1.6; -webkit-font-smoothing: antialiased;
+      line-height: 1.7; -webkit-font-smoothing: antialiased;
       padding: 32px 24px 80px;
     }
     .wrap { max-width: 680px; margin: 0 auto; }
@@ -70,12 +70,34 @@
     .step-num.done { background: rgba(52,211,153,0.12); color: #34d399; }
     .step-body { flex: 1; }
     .step-title {
-      font-size: 15px; font-weight: 700; margin-bottom: 6px;
+      font-size: 15px; font-weight: 700; margin-bottom: 8px;
     }
     .step-desc {
       font-size: 13px; color: #a1a1aa; margin-bottom: 10px;
     }
     .step-desc strong { color: #e4e4e7; }
+
+    /* Substeps */
+    .substep {
+      display: flex; gap: 10px; margin: 10px 0;
+      padding: 10px 14px; background: #0a0a0e; border: 1px solid #1a1a20;
+      border-radius: 8px; font-size: 13px; color: #a1a1aa;
+      align-items: flex-start;
+    }
+    .substep-num {
+      flex-shrink: 0; width: 22px; height: 22px;
+      background: rgba(129,140,248,0.08); color: #818cf8;
+      border-radius: 6px; display: flex; align-items: center;
+      justify-content: center; font-weight: 700; font-size: 11px;
+    }
+    .substep-body { flex: 1; }
+    .substep-body strong { color: #e4e4e7; }
+    .substep-body .key {
+      display: inline-block; padding: 1px 8px; background: #1e1e24;
+      border-radius: 4px; font-size: 12px; font-weight: 600;
+      color: #e4e4e7; border: 1px solid #2a2a32;
+      font-family: inherit;
+    }
 
     /* Code Block */
     .code {
@@ -87,6 +109,7 @@
     .code .cm { color: #52525b; }
     .code .hl { color: #34d399; }
     .code .acc { color: #818cf8; }
+    .code .warn { color: #fbbf24; }
     .copy-btn {
       position: absolute; top: 8px; right: 8px;
       background: #1e1e24; border: none; color: #71717a;
@@ -119,6 +142,7 @@
     }
     .alert-green { background: rgba(52,211,153,0.08); border: 1px solid #22543d; color: #34d399; }
     .alert-dim { background: rgba(129,140,248,0.06); border: 1px solid #1e1e24; color: #a1a1aa; }
+    .alert-yellow { background: rgba(251,191,36,0.06); border: 1px solid #854d0e; color: #fbbf24; }
 
     /* Sources */
     .src { font-size: 12px; color: #52525b; }
@@ -134,6 +158,21 @@
     .expected .ok { color: #34d399; }
     .expected .val { color: #fbbf24; }
     .expected .prompt { color: #818cf8; }
+
+    /* Visual arrow for path */
+    .path-visual {
+      background: #0d0d12; border: 1px solid #1e1e24; border-radius: 8px;
+      padding: 14px; margin: 10px 0; font-size: 13px;
+    }
+    .path-visual .folder {
+      color: #818cf8; font-weight: 600;
+    }
+    .path-visual .file {
+      color: #34d399; font-weight: 600;
+    }
+    .path-visual .arrow {
+      color: #3f3f46; margin: 0 4px;
+    }
 
     @media (max-width: 600px) {
       .grid4 { grid-template-columns: repeat(2, 1fr); }
@@ -153,11 +192,11 @@
     <h2>작동 방식</h2>
     <div class="flow">
       <div class="flow-node">Claude Code 사용</div>
-      <div class="flow-arr">→</div>
+      <div class="flow-arr">&rarr;</div>
       <div class="flow-node">로컬 JSONL 자동 기록</div>
-      <div class="flow-arr">→</div>
+      <div class="flow-arr">&rarr;</div>
       <div class="flow-node">1시간마다 집계</div>
-      <div class="flow-arr">→</div>
+      <div class="flow-arr">&rarr;</div>
       <div class="flow-node hl">챌린지 사이트</div>
     </div>
     <div class="note">PC의 스케줄러가 로컬 파일에서 토큰 수(숫자)만 읽어 전송합니다. OAuth 토큰 불필요.</div>
@@ -190,201 +229,383 @@
     <!-- ===== Windows ===== -->
     <div id="os-win" class="os-content active">
 
+      <!-- Step 1: 스크립트 다운로드 -->
       <div class="step">
         <div class="step-num">1</div>
         <div class="step-body">
           <div class="step-title">스크립트 다운로드</div>
           <div class="step-desc">
-            <strong>challenge-report.py</strong> 파일을 아래 경로에 저장하세요.<br>
-            (챌린지 사이트 저장소에서 다운로드하거나, 관리자에게 받으세요)
+            아래 버튼을 눌러 파일을 다운로드한 뒤, <strong>.claude</strong> 폴더에 넣어주세요.
           </div>
-          <div class="code">
-            <span class="cm"># 저장 위치:</span><br>
-            <span class="hl">%USERPROFILE%\.claude\challenge-report.py</span><br><br>
-            <span class="cm"># 즉, 이런 경로가 됩니다:</span><br>
-            C:\Users\<span class="acc">내이름</span>\.claude\challenge-report.py
+
+          <div style="margin:12px 0;">
+            <a href="challenge-report.py" download style="display:inline-block;padding:10px 24px;background:#818cf8;color:#fff;border-radius:8px;font-weight:700;font-size:14px;text-decoration:none;">challenge-report.py 다운로드</a>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">a</div>
+            <div class="substep-body">
+              <strong>파일 탐색기</strong>를 열고, 주소창에 아래를 붙여넣기하세요:
+              <div class="code" style="margin-top:6px;">
+                <button class="copy-btn" onclick="copyText('%USERPROFILE%\\.claude')">복사</button>
+                %USERPROFILE%\.claude
+              </div>
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">b</div>
+            <div class="substep-body">
+              <strong>.claude</strong> 폴더가 열리면, 다운로드 받은 <strong>challenge-report.py</strong> 파일을 이 폴더 안에 넣어주세요.
+            </div>
+          </div>
+
+          <div class="path-visual">
+            <span class="folder">C:\Users\내이름</span>
+            <span class="arrow">&gt;</span>
+            <span class="folder">.claude</span>
+            <span class="arrow">&gt;</span>
+            <span class="file">challenge-report.py</span>
+            &nbsp;&larr; 여기에 있으면 OK
           </div>
         </div>
       </div>
 
+      <!-- Step 2: Python 경로 확인 -->
       <div class="step">
         <div class="step-num">2</div>
         <div class="step-body">
-          <div class="step-title">Python 경로 확인</div>
+          <div class="step-title">내 Python 경로 확인하기</div>
           <div class="step-desc">
-            <strong>명령 프롬프트(cmd)</strong>를 열고 아래를 입력하세요.<br>
-            출력된 경로를 <strong>메모</strong>해두세요. (스케줄러 등록에 필요)
+            자동 실행 등록에 필요한 Python 설치 위치를 찾습니다.
           </div>
-          <div class="code">
-            <button class="copy-btn" onclick="copyText('where python')">복사</button>
-            where python
+
+          <div class="substep">
+            <div class="substep-num">a</div>
+            <div class="substep-body">
+              키보드에서 <span class="key">Win</span> 키를 누른 뒤 <strong>"cmd"</strong> 라고 입력하세요.
+            </div>
           </div>
-          <div class="expected">
-            <span class="ok">C:\Users\<span class="val">내이름</span>\AppData\Local\Python\bin\python.exe</span><br>
-            <span class="cm"># 여러 줄이 나오면 첫 번째 경로를 사용하세요</span>
+
+          <div class="substep">
+            <div class="substep-num">b</div>
+            <div class="substep-body">
+              <strong>"명령 프롬프트"</strong> 가 검색되면 클릭해서 열어주세요.<br>
+              <span style="color:#52525b;font-size:12px;">검은 배경에 흰 글씨가 나오는 창이 열립니다.</span>
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">c</div>
+            <div class="substep-body">
+              아래를 복사해서 <strong>그대로 붙여넣기</strong> 한 뒤 <span class="key">Enter</span> 를 누르세요.
+              <div class="code" style="margin-top:6px;">
+                <button class="copy-btn" onclick="copyText('where python')">복사</button>
+                where python
+              </div>
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">d</div>
+            <div class="substep-body">
+              아래처럼 <strong>경로가 출력</strong>됩니다. 이 경로를 <strong>드래그로 선택 → 마우스 우클릭으로 복사</strong>해두세요.<br>
+              <span style="color:#52525b;font-size:12px;">(여러 줄이 나오면 첫 번째 줄만 복사)</span>
+              <div class="expected">
+                <span class="ok">C:\Users\<span class="val">내이름</span>\AppData\Local\Programs\Python\Python312\python.exe</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="alert alert-yellow">
+            이 경로를 <strong>Step 3, 4에서 사용</strong>합니다. 메모장에 붙여넣어 두면 편합니다.
           </div>
         </div>
       </div>
 
+      <!-- Step 3: 최초 실행 -->
       <div class="step">
         <div class="step-num">3</div>
         <div class="step-body">
           <div class="step-title">최초 실행 — 닉네임 등록</div>
           <div class="step-desc">
-            위에서 확인한 <strong>Python 전체 경로</strong>로 스크립트를 실행하세요.<br>
-            챌린지 닉네임과 비밀번호를 물어봅니다. <strong>1번만 하면 됩니다.</strong>
+            챌린지 닉네임/비밀번호를 등록합니다. <strong>딱 한 번만</strong> 하면 됩니다.
           </div>
-          <div class="code">
-            <span class="cm"># Python 경로를 본인 것으로 변경하세요:</span><br>
-            <span class="hl">C:\...\python.exe</span> %USERPROFILE%\.claude\challenge-report.py
+
+          <div class="substep">
+            <div class="substep-num">a</div>
+            <div class="substep-body">
+              아까 열어둔 <strong>명령 프롬프트(cmd)</strong>에서, 아래 형식으로 입력하세요.<br>
+              <span style="color:#fbbf24;font-size:12px;">노란색 부분</span>을 Step 2에서 복사한 <strong>내 Python 경로</strong>로 바꿔주세요.
+              <div class="code" style="margin-top:6px;">
+                <span class="warn">내Python경로</span> %USERPROFILE%\.claude\challenge-report.py
+              </div>
+              <div style="margin-top:6px;font-size:12px;color:#52525b;">
+                예시: <code style="color:#71717a;">C:\Users\홍길동\AppData\Local\Programs\Python\Python312\python.exe %USERPROFILE%\.claude\challenge-report.py</code>
+              </div>
+            </div>
           </div>
-          <div class="expected">
-            <span class="prompt">=== Claude Max 챌린지 — 초기 설정 ===</span><br>
-            챌린지 닉네임: <span class="val">minjune</span><br>
-            챌린지 비밀번호: <span class="val">****</span><br>
-            <span class="ok">설정 저장 완료: C:\Users\...\challenge-config.json</span><br>
-            <span class="ok">[14:30] minjune | 2026-04-08 | 182,214 tokens | 3 sessions | OK</span>
+
+          <div class="substep">
+            <div class="substep-num">b</div>
+            <div class="substep-body">
+              닉네임과 비밀번호를 물어봅니다. <strong>챌린지 사이트 계정 정보</strong>를 입력하세요.
+              <div class="expected" style="margin-top:6px;">
+                <span class="prompt">=== Claude Max 챌린지 — 초기 설정 ===</span><br><br>
+                챌린지 닉네임: <span class="val">내닉네임</span><br>
+                챌린지 비밀번호: <span class="val">내비밀번호</span><br><br>
+                <span class="ok">설정 저장 완료: C:\Users\...\challenge-config.json</span><br>
+                <span class="ok">[14:30] 내닉네임 | 2026-04-08 | 182,214 tokens | 3 sessions | OK</span>
+              </div>
+            </div>
           </div>
-          <div class="alert alert-dim" style="margin-top:8px;">
+
+          <div class="alert alert-dim">
             여기서 입력하는 닉네임/비밀번호는 <strong>챌린지 사이트 로그인 정보</strong>입니다.<br>
-            Claude 계정 정보가 아닙니다. 로컬에만 저장됩니다.
+            Claude 계정 정보가 아닙니다. 내 PC에만 저장됩니다.
           </div>
         </div>
       </div>
 
+      <!-- Step 4: 자동 실행 등록 -->
       <div class="step">
         <div class="step-num">4</div>
         <div class="step-body">
           <div class="step-title">1시간마다 자동 실행 등록</div>
           <div class="step-desc">
-            <strong>PowerShell을 관리자 권한으로</strong> 열고, 아래 명령어에서 <strong>Python 경로를 본인 것으로 변경</strong>한 뒤 실행하세요.<br>
-            배터리 모드에서도 실행되고, 놓친 실행은 자동 보충됩니다.
+            PC가 켜져 있으면 <strong>매 시간 자동으로</strong> 사용량을 보고하도록 등록합니다.<br>
+            <span style="color:#52525b;font-size:12px;">노트북 배터리 모드에서도 정상 작동합니다.</span>
           </div>
-          <div class="code" style="font-size:11.5px;">
-            <span class="cm"># Python 경로를 본인 것으로 변경하세요:</span><br>
-            $action = New-ScheduledTaskAction `<br>
-            &nbsp;&nbsp;-Execute "<span class="hl">C:\...\python.exe</span>" `<br>
-            &nbsp;&nbsp;-Argument "$env:USERPROFILE\.claude\challenge-report.py"<br><br>
-            $trigger = New-ScheduledTaskTrigger `<br>
-            &nbsp;&nbsp;-Once -At "00:00" `<br>
-            &nbsp;&nbsp;-RepetitionInterval (New-TimeSpan -Hours 1)<br><br>
-            $settings = New-ScheduledTaskSettingsSet `<br>
-            &nbsp;&nbsp;-AllowStartIfOnBatteries `<br>
-            &nbsp;&nbsp;-DontStopIfGoingOnBatteries `<br>
-            &nbsp;&nbsp;-StartWhenAvailable `<br>
-            &nbsp;&nbsp;-ExecutionTimeLimit (New-TimeSpan -Minutes 10)<br><br>
-            Register-ScheduledTask -TaskName "ClaudeChallenge" `<br>
-            &nbsp;&nbsp;-Action $action -Trigger $trigger -Settings $settings -Force
+
+          <div class="substep">
+            <div class="substep-num">a</div>
+            <div class="substep-body">
+              <strong>PowerShell 열기:</strong><br>
+              키보드에서 <span class="key">Win</span> 키를 누르고 <strong>"powershell"</strong> 이라고 입력하세요.
+            </div>
           </div>
-          <div class="expected">
-            <span class="ok">TaskPath  TaskName          State</span><br>
-            <span class="ok">--------  --------          -----</span><br>
-            <span class="ok">\         ClaudeChallenge   Ready</span>
+
+          <div class="substep">
+            <div class="substep-num">b</div>
+            <div class="substep-body">
+              검색 결과에서 <strong>"Windows PowerShell"</strong>을 찾아 <strong>"관리자 권한으로 실행"</strong>을 클릭하세요.<br>
+              <span style="color:#52525b;font-size:12px;">(우클릭하면 나오거나, 오른쪽에 바로 보입니다)</span>
+            </div>
           </div>
-          <div class="alert alert-dim" style="margin-top:8px;">
-            <strong>⚠️ 중요:</strong> <code style="color:#ef4444;">schtasks /create</code> 대신 <strong>PowerShell</strong>을 사용해야 합니다.<br>
-            schtasks 기본 설정은 배터리 모드에서 실행이 차단되어 노트북에서 자동 보고가 안 됩니다.
+
+          <div class="substep">
+            <div class="substep-num">c</div>
+            <div class="substep-body">
+              <strong>"이 앱이 변경을 허용하시겠습니까?"</strong> 라고 물으면 <strong>"예"</strong>를 클릭하세요.<br>
+              <span style="color:#52525b;font-size:12px;">파란 배경의 창이 열립니다. 이게 PowerShell입니다.</span>
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">d</div>
+            <div class="substep-body">
+              아래 <strong>"복사"</strong> 버튼을 누르세요. 명령어가 클립보드에 복사됩니다.
+              <div class="alert alert-yellow" style="margin:8px 0 4px;">
+                복사하기 전에 아래 <span style="color:#fbbf24;font-weight:700;">노란색 부분</span>을 <strong>내 Python 경로</strong>로 바꿔주세요!<br>
+                <span style="font-size:12px;">(Step 2에서 확인한 경로)</span>
+              </div>
+              <div class="code" style="margin-top:6px;">
+                <button class="copy-btn" id="ps-copy-btn" onclick="copyPS()">복사</button>
+                <span class="cm"># 아래 한 줄에서 Python 경로만 바꾸세요</span><br><br>
+                <span class="acc">$py</span> = "<span class="warn" id="py-path-placeholder">여기에_내_Python_경로</span>"<br><br>
+
+                <span class="cm"># 아래는 그대로 복사 (수정 X)</span><br>
+                <span class="acc">$action</span> = New-ScheduledTaskAction -Execute <span class="acc">$py</span> -Argument "$env:USERPROFILE\.claude\challenge-report.py"<br>
+                <span class="acc">$trigger</span> = New-ScheduledTaskTrigger -Once -At "00:00" -RepetitionInterval (New-TimeSpan -Hours 1)<br>
+                <span class="acc">$settings</span> = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10)<br>
+                Register-ScheduledTask -TaskName "ClaudeChallenge" -Action <span class="acc">$action</span> -Trigger <span class="acc">$trigger</span> -Settings <span class="acc">$settings</span> -Force
+              </div>
+
+              <div style="margin-top:8px;font-size:12px;color:#52525b;">
+                예시 (첫 줄만 바꾸면 됩니다):<br>
+                <code style="color:#71717a;">$py = "C:\Users\홍길동\AppData\Local\Programs\Python\Python312\python.exe"</code>
+              </div>
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">e</div>
+            <div class="substep-body">
+              PowerShell 창에서 <strong>마우스 우클릭</strong>하면 붙여넣기가 됩니다.<br>
+              그 다음 <span class="key">Enter</span> 를 누르세요.
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">f</div>
+            <div class="substep-body">
+              아래처럼 나오면 <strong>성공</strong>입니다! PowerShell 창을 닫아도 됩니다.
+              <div class="expected" style="margin-top:6px;">
+                <span class="ok">TaskPath  TaskName          State</span><br>
+                <span class="ok">--------  --------          -----</span><br>
+                <span class="ok">\         ClaudeChallenge   Ready</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
+      <!-- 완료 -->
       <div class="step">
-        <div class="step-num done">✓</div>
+        <div class="step-num done">&#10003;</div>
         <div class="step-body">
-          <div class="step-title">끝!</div>
+          <div class="step-title">끝! 설정 완료</div>
           <div class="step-desc">
-            이제 Claude Code를 사용하면, 매 시간 사용량이 자동으로 챌린지 사이트에 반영됩니다.
+            이제 Claude Code를 사용하면, <strong>매 정각</strong> 사용량이 자동으로 챌린지 사이트에 반영됩니다.<br>
+            PC를 껐다 켜도 자동 실행은 유지됩니다. 더 이상 할 일이 없습니다!
           </div>
           <div class="alert alert-green">
-            <strong>확인 방법:</strong> 챌린지 사이트 → 인증 탭에서 "자동 리포팅 활성" 표시가 나오면 성공!
+            <strong>확인 방법:</strong> 챌린지 사이트 &rarr; 인증 탭에서 "자동 리포팅 활성" 표시가 나오면 성공!
           </div>
         </div>
       </div>
 
+      <!-- 해제 방법 -->
       <div class="alert alert-dim">
-        <strong>자동 실행 해제:</strong> <code style="color:#818cf8;">schtasks /delete /tn "ClaudeChallenge" /f</code>
+        <strong>혹시 자동 실행을 해제하고 싶다면:</strong><br>
+        <span class="key">Win</span> &rarr; "powershell" 검색 &rarr; 관리자 권한으로 실행 &rarr; 아래 입력 후 Enter<br>
+        <code style="color:#818cf8;">Unregister-ScheduledTask -TaskName "ClaudeChallenge" -Confirm:$false</code>
       </div>
     </div>
 
     <!-- ===== Mac / Linux ===== -->
     <div id="os-mac" class="os-content">
 
+      <!-- Step 1: 스크립트 다운로드 -->
       <div class="step">
         <div class="step-num">1</div>
         <div class="step-body">
           <div class="step-title">스크립트 다운로드</div>
           <div class="step-desc">
-            <strong>challenge-report.py</strong> 파일을 아래 경로에 저장하세요.
+            아래 버튼을 눌러 파일을 다운로드한 뒤, <strong>.claude</strong> 폴더에 넣어주세요.
           </div>
-          <div class="code">
-            <span class="cm"># 저장 위치:</span><br>
-            <span class="hl">~/.claude/challenge-report.py</span>
+
+          <div style="margin:12px 0;">
+            <a href="challenge-report.py" download style="display:inline-block;padding:10px 24px;background:#818cf8;color:#fff;border-radius:8px;font-weight:700;font-size:14px;text-decoration:none;">challenge-report.py 다운로드</a>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">a</div>
+            <div class="substep-body">
+              <strong>터미널</strong>을 열고, 아래 명령어로 다운로드한 파일을 이동하세요.
+              <div class="code" style="margin-top:6px;">
+                <button class="copy-btn" onclick="copyText('mv ~/Downloads/challenge-report.py ~/.claude/challenge-report.py')">복사</button>
+                mv ~/Downloads/challenge-report.py ~/.claude/challenge-report.py
+              </div>
+            </div>
+          </div>
+
+          <div class="path-visual">
+            <span class="folder">~</span>
+            <span class="arrow">&gt;</span>
+            <span class="folder">.claude</span>
+            <span class="arrow">&gt;</span>
+            <span class="file">challenge-report.py</span>
+            &nbsp;&larr; 여기에 있으면 OK
           </div>
         </div>
       </div>
 
+      <!-- Step 2: 최초 실행 -->
       <div class="step">
         <div class="step-num">2</div>
         <div class="step-body">
           <div class="step-title">최초 실행 — 닉네임 등록</div>
           <div class="step-desc">
-            <strong>터미널</strong>을 열고 아래를 입력하세요. <strong>1번만 하면 됩니다.</strong>
+            <strong>터미널</strong>에서 아래를 실행하세요. <strong>딱 한 번만</strong> 하면 됩니다.
           </div>
-          <div class="code">
-            <button class="copy-btn" onclick="copyText('python3 ~/.claude/challenge-report.py')">복사</button>
-            python3 ~/.claude/challenge-report.py
+
+          <div class="substep">
+            <div class="substep-num">a</div>
+            <div class="substep-body">
+              터미널에 아래를 복사 &rarr; 붙여넣기 &rarr; <span class="key">Enter</span>
+              <div class="code" style="margin-top:6px;">
+                <button class="copy-btn" onclick="copyText('python3 ~/.claude/challenge-report.py')">복사</button>
+                python3 ~/.claude/challenge-report.py
+              </div>
+            </div>
           </div>
-          <div class="expected">
-            <span class="prompt">=== Claude Max 챌린지 — 초기 설정 ===</span><br>
-            챌린지 닉네임: <span class="val">minjune</span><br>
-            챌린지 비밀번호: <span class="val">****</span><br>
-            <span class="ok">설정 저장 완료: /Users/.../.claude/challenge-config.json</span><br>
-            <span class="ok">[14:30] minjune | 2026-04-08 | 182,214 tokens | 3 sessions | OK</span>
+
+          <div class="substep">
+            <div class="substep-num">b</div>
+            <div class="substep-body">
+              닉네임과 비밀번호를 물어봅니다. <strong>챌린지 사이트 계정 정보</strong>를 입력하세요.
+              <div class="expected" style="margin-top:6px;">
+                <span class="prompt">=== Claude Max 챌린지 — 초기 설정 ===</span><br><br>
+                챌린지 닉네임: <span class="val">내닉네임</span><br>
+                챌린지 비밀번호: <span class="val">내비밀번호</span><br><br>
+                <span class="ok">설정 저장 완료: /Users/.../.claude/challenge-config.json</span><br>
+                <span class="ok">[14:30] 내닉네임 | 2026-04-08 | 182,214 tokens | 3 sessions | OK</span>
+              </div>
+            </div>
           </div>
-          <div class="alert alert-dim" style="margin-top:8px;">
+
+          <div class="alert alert-dim">
             여기서 입력하는 닉네임/비밀번호는 <strong>챌린지 사이트 로그인 정보</strong>입니다.<br>
-            Claude 계정 정보가 아닙니다. 로컬에만 저장됩니다.
+            Claude 계정 정보가 아닙니다. 내 PC에만 저장됩니다.
           </div>
         </div>
       </div>
 
+      <!-- Step 3: 자동 실행 등록 -->
       <div class="step">
         <div class="step-num">3</div>
         <div class="step-body">
           <div class="step-title">1시간마다 자동 실행 등록</div>
           <div class="step-desc">
-            아래 명령어를 <strong>터미널에 한 번</strong> 입력하세요.<br>
-            crontab에 매 시간 실행 스케줄이 추가됩니다.
+            아래 명령어를 <strong>터미널에 한 번</strong> 복사 &rarr; 붙여넣기 &rarr; Enter
           </div>
-          <div class="code">
-            <button class="copy-btn" onclick="copyText('(crontab -l 2>/dev/null; echo &quot;0 * * * * python3 ~/.claude/challenge-report.py&quot;) | crontab -')">복사</button>
-            <span class="cm"># 기존 crontab 유지하면서 추가</span><br>
-            (crontab -l 2>/dev/null; echo "0 * * * * python3 ~/.claude/challenge-report.py") | crontab -
+
+          <div class="substep">
+            <div class="substep-num">a</div>
+            <div class="substep-body">
+              <div class="code">
+                <button class="copy-btn" onclick="copyText('(crontab -l 2>/dev/null; echo &quot;0 * * * * python3 ~/.claude/challenge-report.py&quot;) | crontab -')">복사</button>
+                (crontab -l 2>/dev/null; echo "0 * * * * python3 ~/.claude/challenge-report.py") | crontab -
+              </div>
+            </div>
           </div>
-          <div class="expected">
-            <span class="cm"># 확인하려면:</span><br>
-            <span class="ok">$ crontab -l</span><br>
-            0 * * * * python3 ~/.claude/challenge-report.py
+
+          <div class="substep">
+            <div class="substep-num">b</div>
+            <div class="substep-body">
+              등록되었는지 확인하려면:
+              <div class="code" style="margin-top:6px;">
+                <button class="copy-btn" onclick="copyText('crontab -l')">복사</button>
+                crontab -l
+              </div>
+              <div class="expected" style="margin-top:6px;">
+                <span class="ok">0 * * * * python3 ~/.claude/challenge-report.py</span>
+              </div>
+              <span style="color:#52525b;font-size:12px;">위처럼 나오면 성공!</span>
+            </div>
           </div>
         </div>
       </div>
 
+      <!-- 완료 -->
       <div class="step">
-        <div class="step-num done">✓</div>
+        <div class="step-num done">&#10003;</div>
         <div class="step-body">
-          <div class="step-title">끝!</div>
+          <div class="step-title">끝! 설정 완료</div>
           <div class="step-desc">
-            이제 Claude Code를 사용하면, 매 시간 사용량이 자동으로 챌린지 사이트에 반영됩니다.
+            이제 Claude Code를 사용하면, <strong>매 정각</strong> 사용량이 자동으로 챌린지 사이트에 반영됩니다.<br>
+            더 이상 할 일이 없습니다!
           </div>
           <div class="alert alert-green">
-            <strong>확인 방법:</strong> 챌린지 사이트 → 인증 탭에서 "자동 리포팅 활성" 표시가 나오면 성공!
+            <strong>확인 방법:</strong> 챌린지 사이트 &rarr; 인증 탭에서 "자동 리포팅 활성" 표시가 나오면 성공!
           </div>
         </div>
       </div>
 
       <div class="alert alert-dim">
-        <strong>자동 실행 해제하려면:</strong><br>
-        <code style="color:#818cf8;">crontab -e</code> 에서 해당 줄 삭제
+        <strong>자동 실행을 해제하고 싶다면:</strong><br>
+        터미널에서 <code style="color:#818cf8;">crontab -e</code> 입력 후, 해당 줄을 삭제하고 저장
       </div>
     </div>
   </section>
@@ -393,9 +614,9 @@
   <section style="margin-bottom:0;">
     <h2>근거</h2>
     <div class="src">
-      Anthropic 공식: <a href="https://code.claude.com/docs/ko/analytics">Analytics</a> · <a href="https://code.claude.com/docs/hooks">Hooks</a> — 로컬 파일 기반 사용량 수집 공식 지원
+      Anthropic 공식: <a href="https://code.claude.com/docs/ko/analytics">Analytics</a> &middot; <a href="https://code.claude.com/docs/hooks">Hooks</a> — 로컬 파일 기반 사용량 수집 공식 지원
       &nbsp;|&nbsp;
-      업계: <a href="https://whatap.io/ko/blog/claude-code-monitoring-guide">WhaTap</a> · <a href="https://insight.infograb.net/blog/2026/01/07/claudecode-monitoring/">InfoGrab</a> — 동일 구조
+      업계: <a href="https://whatap.io/ko/blog/claude-code-monitoring-guide">WhaTap</a> &middot; <a href="https://insight.infograb.net/blog/2026/01/07/claudecode-monitoring/">InfoGrab</a> — 동일 구조
     </div>
   </section>
 
@@ -415,6 +636,39 @@ function copyText(text) {
     setTimeout(() => btn.textContent = '복사', 1200);
   });
 }
+function copyPS() {
+  const path = document.getElementById('py-path-placeholder').textContent;
+  if (path === '여기에_내_Python_경로') {
+    alert('먼저 Python 경로를 입력해주세요!\\n\\nStep 2에서 확인한 경로를 아래 노란색 부분에 입력한 뒤 복사하세요.');
+    return;
+  }
+  const cmd = `$py = "${path}"\n$action = New-ScheduledTaskAction -Execute $py -Argument "$env:USERPROFILE\\.claude\\challenge-report.py"\n$trigger = New-ScheduledTaskTrigger -Once -At "00:00" -RepetitionInterval (New-TimeSpan -Hours 1)\n$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10)\nRegister-ScheduledTask -TaskName "ClaudeChallenge" -Action $action -Trigger $trigger -Settings $settings -Force`;
+  navigator.clipboard.writeText(cmd).then(() => {
+    const btn = document.getElementById('ps-copy-btn');
+    btn.textContent = 'OK!';
+    setTimeout(() => btn.textContent = '복사', 1200);
+  });
+}
+
+// Make Python path editable
+document.addEventListener('DOMContentLoaded', function() {
+  const placeholder = document.getElementById('py-path-placeholder');
+  if (placeholder) {
+    placeholder.style.cursor = 'pointer';
+    placeholder.style.borderBottom = '2px dashed #fbbf24';
+    placeholder.style.paddingBottom = '1px';
+    placeholder.title = '클릭해서 내 Python 경로를 입력하세요';
+    placeholder.addEventListener('click', function() {
+      const current = this.textContent;
+      const input = prompt('Step 2에서 확인한 Python 경로를 붙여넣기 하세요:', current === '여기에_내_Python_경로' ? '' : current);
+      if (input && input.trim()) {
+        this.textContent = input.trim();
+        this.style.color = '#34d399';
+        this.style.borderBottom = '2px solid #34d399';
+      }
+    });
+  }
+});
 </script>
 </body>
 </html>
