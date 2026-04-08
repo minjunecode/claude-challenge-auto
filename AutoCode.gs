@@ -40,6 +40,38 @@ function toDateTimeStr(v) {
   return str;
 }
 
+/**
+ * 시트 헤더 마이그레이션: 구형 → 신형 자동 전환
+ * 구형 데이터는 컬럼 위치가 맞지 않으므로 삭제 후 재수집 유도
+ */
+function migrateSheetIfNeeded_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // ── 사용량 시트: 구형(7열) → 신형(9열) ──
+  var usageSheet = ss.getSheetByName('사용량');
+  if (usageSheet) {
+    var uHeaders = usageSheet.getRange(1, 1, 1, usageSheet.getLastColumn()).getValues()[0];
+    var uHeaderStr = uHeaders.join(',');
+    // 구형 판별: cache_creation_tokens 헤더가 없으면 구형
+    if (uHeaderStr.indexOf('cache_creation_tokens') < 0 && uHeaderStr.indexOf('score') < 0) {
+      // 데이터 삭제 (헤더 포함 전부)
+      usageSheet.clear();
+      usageSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt']);
+    }
+  }
+
+  // ── 사용량_raw 시트: 구형(8열) → 신형(10열) ──
+  var rawSheet = ss.getSheetByName('사용량_raw');
+  if (rawSheet) {
+    var rHeaders = rawSheet.getRange(1, 1, 1, rawSheet.getLastColumn()).getValues()[0];
+    var rHeaderStr = rHeaders.join(',');
+    if (rHeaderStr.indexOf('cache_creation_tokens') < 0 && rHeaderStr.indexOf('score') < 0) {
+      rawSheet.clear();
+      rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt', 'hourly']);
+    }
+  }
+}
+
 function doGet(e) { return handleRequest(e); }
 function doPost(e) { return handleRequest(e); }
 
@@ -162,6 +194,9 @@ function handleInit(params) {
 
 // ── 대시보드 ──
 function handleDashboard(params) {
+  // 구형 시트 자동 마이그레이션 (1회성)
+  migrateSheetIfNeeded_();
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   var memberSheet = ss.getSheetByName('멤버');
@@ -318,6 +353,9 @@ function handleDashboard(params) {
 // ── 사용량 보고 (PC에서 Hook으로 전송) ──
 // 가중치 스코어: (input×1) + (output×5) + (cache_creation×1.25) + (cache_read×0.1)
 function handleReportUsage(params) {
+  // 구형 시트 자동 마이그레이션 (1회성)
+  migrateSheetIfNeeded_();
+
   var nickname = (params.nickname || '').trim();
   var password = (params.password || '').trim();
   var date = (params.date || '').trim();
