@@ -1109,10 +1109,7 @@ function renderHourlyChart(raw, date) {
     html += `</div>`;
   }
   html += '</div>';
-  html += '<div class="hbar-legend" style="margin-top:8px;">';
-  html += '<span><span class="hbar-legend-dot" style="background:rgba(129,140,248,0.45);"></span>Input</span>';
-  html += '<span><span class="hbar-legend-dot" style="background:rgba(129,140,248,0.8);"></span>Output</span>';
-  html += '</div>';
+  // legend removed
   container.innerHTML = html;
 }
 
@@ -1179,10 +1176,7 @@ function renderDailyTrendChart(daily) {
   });
 
   // Legend
-  html += '<div class="hbar-legend">';
-  html += '<span><span class="hbar-legend-dot" style="background:rgba(129,140,248,0.45);"></span>Input</span>';
-  html += '<span><span class="hbar-legend-dot" style="background:rgba(129,140,248,0.75);"></span>Output</span>';
-  html += '</div>';
+  // legend removed
 
   html += '</div>';
   container.innerHTML = html;

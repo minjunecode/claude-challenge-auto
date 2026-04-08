@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260408g">
+  <link rel="stylesheet" href="style.css?v=20260408h">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -212,21 +212,23 @@
       <div id="tab-stats" class="tab-content">
         <div class="stats-container">
 
-          <!-- 스코어 공식 안내 -->
+          <!-- 토큰 산정 방식 안내 -->
           <div class="score-info-banner" id="score-info-banner">
             <span class="score-info-toggle" id="score-info-toggle">
-              <span class="info-icon">i</span> 스코어 산정 방식
+              <span class="info-icon">i</span> 토큰 산정 방식
             </span>
             <div class="score-info-detail" id="score-info-detail" style="display:none;">
-              <div class="score-formula">score = (input &times; 1) + (output &times; 5) + (cache_creation &times; 1.25) + (cache_read &times; 0.1)</div>
+              <p class="score-desc">Anthropic API 과금 체계(Claude 3.5 Sonnet 기준)의 토큰 유형별 단가 비율을 반영한 가중 합산 방식입니다.</p>
+              <div class="score-formula">W = (I &times; 1.0) + (O &times; 5.0) + (C<sub>w</sub> &times; 1.25) + (C<sub>r</sub> &times; 0.1)</div>
               <table class="score-table">
-                <tr><th>토큰 종류</th><th>가중치</th><th>근거</th></tr>
-                <tr><td>input</td><td>&times;1</td><td>기본 단가</td></tr>
-                <tr><td>output</td><td>&times;5</td><td>실제로 5배 비쌈 (추론 연산)</td></tr>
-                <tr><td>cache_creation</td><td>&times;1.25</td><td>input보다 25% 비쌈</td></tr>
-                <tr><td>cache_read</td><td>&times;0.1</td><td>input의 10% (거의 무료)</td></tr>
+                <tr><th>기호</th><th>토큰 유형</th><th>가중치</th><th>산정 근거</th></tr>
+                <tr><td>I</td><td>Input</td><td>1.0</td><td>기준 단가 $3 / 1M tokens</td></tr>
+                <tr><td>O</td><td>Output</td><td>5.0</td><td>$15 / 1M tokens (Input 대비 5배)</td></tr>
+                <tr><td>C<sub>w</sub></td><td>Cache Write</td><td>1.25</td><td>$3.75 / 1M tokens (Input 대비 1.25배)</td></tr>
+                <tr><td>C<sub>r</sub></td><td>Cache Read</td><td>0.1</td><td>$0.30 / 1M tokens (Input 대비 0.1배)</td></tr>
               </table>
-              <div class="score-points">1pt = 300K score (약 1시간) · 2pt = 1M score (약 3시간)</div>
+              <p class="score-ref">* 단가 기준: <a href="https://www.anthropic.com/pricing" target="_blank" rel="noopener">anthropic.com/pricing</a> (Claude 3.5 Sonnet)</p>
+              <div class="score-points">1pt = 300K · 2pt = 1M (일간 가중 스코어 기준)</div>
             </div>
           </div>
 
@@ -317,6 +319,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260408g"></script>
+  <script src="app.js?v=20260408h"></script>
 </body>
 </html>
