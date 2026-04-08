@@ -33,6 +33,8 @@ function setMemberColor(n, c) { const s = JSON.parse(localStorage.getItem('membe
 
 // ── 초기화 ──
 document.addEventListener('DOMContentLoaded', () => {
+  // hash를 초기화 전에 먼저 캡처 (showMain에서 쓰임)
+  window._savedHash = location.hash.replace('#', '');
   const saved = localStorage.getItem('challengeUser');
   if (saved) { currentUser = JSON.parse(saved); showMain(); }
   setupEventListeners();
@@ -89,8 +91,10 @@ function setupEventListeners() {
 async function apiCall(action, params = {}) {
   if (API_URL === 'YOUR_APPS_SCRIPT_URL_HERE') { if (!dashboardData) dashboardData = getDemoData(); return null; }
   const body = { action, ...params };
-  const response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body) });
-  try { return JSON.parse(await response.text()); } catch { return { success: false, error: '서버 응답 오류' }; }
+  try {
+    const response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body), redirect: 'follow' });
+    return JSON.parse(await response.text());
+  } catch { return { success: false, error: '서버 응답 오류' }; }
 }
 
 // ── 로그인 ──
@@ -130,7 +134,7 @@ function handleLogout() {
   personalStatsData = null; personalStatsLoaded = false;
   localStorage.removeItem('challengeUser');
   localStorage.removeItem('dashboardCache');
-  location.hash = '';
+  history.replaceState(null, '', location.pathname);
   document.getElementById('main-view').classList.remove('active');
   document.getElementById('login-view').classList.add('active');
 }
@@ -154,8 +158,9 @@ async function handleRegister() {
 
 // ── 메인 ──
 async function showMain() {
-  // ① hash를 loadDashboard 전에 먼저 읽어둠 (덮어쓰기 방지)
-  const hash = location.hash.replace('#', '');
+  // ① 페이지 로드 시 캡처한 hash 사용 (switchTab이 덮어쓰기 전)
+  const hash = window._savedHash || location.hash.replace('#', '');
+  window._savedHash = '';  // 사용 후 초기화
   const validTabs = ['dashboard', 'stats', 'cert', 'admin'];
   const restoredTab = validTabs.includes(hash) ? hash : 'dashboard';
 
@@ -164,9 +169,9 @@ async function showMain() {
   document.getElementById('user-info').textContent = currentUser.nickname + (currentUser.isAdmin ? ' (관리자)' : '');
   document.querySelectorAll('.admin-only').forEach(el => { el.style.display = currentUser.isAdmin ? '' : 'none'; });
 
-  // ② 캐시로 즉시 렌더 → 탭 전환 → API는 백그라운드
-  loadDashboard();
+  // ② 탭 먼저 전환 (즉시 UI 표시) → API는 백그라운드
   switchTab(restoredTab);
+  loadDashboard();
 }
 
 function switchTab(tabName) {
@@ -851,6 +856,8 @@ let personalStatsData = null;
 let personalStatsLoaded = false;
 
 async function loadPersonalStats() {
+  const container = document.querySelector('.stats-container');
+
   // 이미 로드했으면 다시 렌더만
   if (personalStatsLoaded && personalStatsData) {
     renderPersonalStats();
@@ -858,36 +865,29 @@ async function loadPersonalStats() {
   }
 
   if (!currentUser || !currentUser.nickname) return;
-  const nickname = currentUser.nickname;
-  const password = currentUser.password;
 
-  // password가 없으면 재로그인 필요 (기존 세션 호환)
-  if (!password) {
-    document.querySelector('.stats-container').innerHTML =
-      '<div class="stats-placeholder" style="padding:40px;text-align:center;">세션이 만료되었습니다. 로그아웃 후 다시 로그인해주세요.</div>';
+  // password가 없으면 재로그인 유도
+  if (!currentUser.password) {
+    container.innerHTML =
+      '<div class="stats-placeholder" style="padding:40px;text-align:center;">' +
+      '내 분석 기능을 사용하려면 재로그인이 필요합니다.<br><br>' +
+      '<button onclick="handleLogout()" class="btn btn-primary" style="display:inline-block;width:auto;padding:8px 24px;">재로그인</button></div>';
     return;
   }
 
-  try {
-    const resp = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'personalStats', nickname, password }),
-      redirect: 'follow'
-    });
-    const data = await resp.json();
-    if (data.success) {
-      personalStatsData = data;
-      personalStatsLoaded = true;
-      renderPersonalStats();
-    } else {
-      console.error('personalStats failed:', data.error);
-      document.querySelector('.stats-container').innerHTML =
-        '<div class="stats-placeholder" style="padding:40px;text-align:center;">데이터를 불러오지 못했습니다: ' + (data.error || '알 수 없는 오류') + '</div>';
-    }
-  } catch (e) {
-    console.error('personalStats error:', e);
-    document.querySelector('.stats-container').innerHTML =
+  container.querySelectorAll('.stats-placeholder').forEach(el => { el.textContent = '데이터 로딩 중...'; });
+
+  const data = await apiCall('personalStats', { nickname: currentUser.nickname, password: currentUser.password });
+
+  if (data && data.success) {
+    personalStatsData = data;
+    personalStatsLoaded = true;
+    renderPersonalStats();
+  } else if (data && data.error) {
+    container.innerHTML =
+      '<div class="stats-placeholder" style="padding:40px;text-align:center;">' + data.error + '</div>';
+  } else {
+    container.innerHTML =
       '<div class="stats-placeholder" style="padding:40px;text-align:center;">서버 연결 실패. 잠시 후 다시 시도해주세요.</div>';
   }
 }
