@@ -984,12 +984,19 @@ function renderPersonalStats() {
   renderDailyTrendChart(daily);
   renderActivityPattern(raw);
 
-  // 날짜 선택기 초기화 — 기본값: 오늘
+  // 날짜 선택기 초기화 — 기본값: raw 데이터가 있는 최신 날짜 (없으면 오늘)
   const picker = document.getElementById('stats-date-picker');
   if (picker && !picker.dataset.init) {
-    const today = new Date();
-    const kst = new Date(today.getTime() + 9 * 60 * 60 * 1000);
-    picker.value = kst.toISOString().split('T')[0];
+    const latestRawDate = raw.length > 0
+      ? [...raw].sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].date
+      : null;
+    if (latestRawDate) {
+      picker.value = normalizeDate(latestRawDate);
+    } else {
+      const today = new Date();
+      const kst = new Date(today.getTime() + 9 * 60 * 60 * 1000);
+      picker.value = kst.toISOString().split('T')[0];
+    }
     picker.addEventListener('change', () => renderHourlyChart(raw, picker.value));
     picker.dataset.init = '1';
   }
@@ -1155,25 +1162,15 @@ function renderDailyTrendChart(daily) {
   html += '</div>';
 
   sorted.forEach(d => {
-    const inp = d.input_tokens || 0;
-    const out = d.output_tokens || 0;
-    const cc = d.cache_creation_tokens || 0;
-    const cr = d.cache_read_tokens || 0;
     const total = getScore(d);
     const tier = total >= POINT_2_THRESHOLD ? 'green' : total >= POINT_1_THRESHOLD ? 'blue' : 'gray';
-    // 가중치 적용된 기여분으로 바 폭 계산
-    const wInp = (inp * 1) + (cc * 1.25) + (cr * 0.1);
-    const wOut = out * 5;
     const totalPct = (total / maxTotal) * 100;
-    const inPct = total > 0 ? (wInp / total) * totalPct : 0;
-    const outPct = total > 0 ? (wOut / total) * totalPct : 0;
     const dateLabel = d.date.substring(5); // MM-DD
 
-    html += `<div class="hbar-row hbar-tier-${tier}" title="${d.date}: score ${formatTokens(total)} (in:${formatTokens(inp)} out:${formatTokens(out)})">`;
+    html += `<div class="hbar-row hbar-tier-${tier}" title="${d.date}: ${formatTokens(total)}">`;
     html += `<div class="hbar-date">${dateLabel}</div>`;
     html += `<div class="hbar-track">`;
-    html += `<div class="hbar-fill-input" style="width:${inPct}%"></div>`;
-    html += `<div class="hbar-fill-output" style="left:${inPct}%;width:${outPct}%"></div>`;
+    html += `<div class="hbar-fill-input" style="width:${totalPct}%"></div>`;
     html += `</div>`;
     html += `<div class="hbar-amount">${formatTokens(total)}</div>`;
     html += `</div>`;
