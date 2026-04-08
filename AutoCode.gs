@@ -237,13 +237,14 @@ function handleReportUsage(params) {
   var now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
   var totalTokens = inputTokens + outputTokens + cacheTokens;
 
-  // ① 사용량_raw: 모든 보고를 append (원본 보존)
+  // ① 사용량_raw: 보고 원본 + 시간대별 데이터 보존
   var rawSheet = ss.getSheetByName('사용량_raw');
   if (!rawSheet) {
     rawSheet = ss.insertSheet('사용량_raw');
-    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt']);
+    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt', 'hourly']);
   }
-  rawSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheTokens, sessions, now]);
+  var hourlyJson = params.hourly ? JSON.stringify(params.hourly) : '';
+  rawSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheTokens, sessions, now, hourlyJson]);
 
   // ② 사용량: 일별 최종값만 upsert (프론트 표시용)
   var usageSheet = ss.getSheetByName('사용량');
@@ -423,13 +424,17 @@ function handlePersonalStats(params) {
     var rows = rawSheet.getDataRange().getValues();
     for (var r = 1; r < rows.length; r++) {
       if (String(rows[r][0]).trim() === nickname) {
+        var hourlyStr = rows[r][7] || '';
+        var hourly = null;
+        if (hourlyStr) { try { hourly = JSON.parse(hourlyStr); } catch(e) {} }
         rawData.push({
           date: toDateStr(rows[r][1]),
           input_tokens: Number(rows[r][2]) || 0,
           output_tokens: Number(rows[r][3]) || 0,
           cache_tokens: Number(rows[r][4]) || 0,
           sessions: Number(rows[r][5]) || 0,
-          reportedAt: toDateTimeStr(rows[r][6])
+          reportedAt: toDateTimeStr(rows[r][6]),
+          hourly: hourly
         });
       }
     }

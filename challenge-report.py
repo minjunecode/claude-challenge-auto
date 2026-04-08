@@ -48,7 +48,7 @@ def setup_config():
 
 
 def count_today_tokens():
-    """~/.claude/ JSONL 파일에서 오늘(KST) 토큰 사용량 집계"""
+    """~/.claude/ JSONL 파일에서 오늘(KST) 토큰 사용량 집계 (시간대별 포함)"""
     home = os.path.expanduser("~")
     jsonl_files = glob.glob(os.path.join(home, ".claude", "projects", "*", "*.jsonl"))
 
@@ -58,37 +58,68 @@ def count_today_tokens():
     cache_tokens = 0
     sessions = set()
 
+    # 시간대별 집계 (0~23시)
+    hourly = {}
+    for h in range(24):
+        hourly[h] = {"input": 0, "output": 0}
+
     for fpath in jsonl_files:
         with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 try:
                     obj = json.loads(line)
                     ts = obj.get("timestamp", "")
-                    if not ts.startswith(today):
-                        # KST 변환 체크
-                        if ts and "T" in ts:
-                            try:
-                                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                                if dt.astimezone(KST).strftime("%Y-%m-%d") != today:
-                                    continue
-                            except:
+                    kst_hour = None
+
+                    if ts.startswith(today):
+                        # 이미 KST 날짜면 시간 추출
+                        try:
+                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                            kst_hour = dt.astimezone(KST).hour
+                        except:
+                            pass
+                    elif ts and "T" in ts:
+                        # UTC → KST 변환
+                        try:
+                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                            kst_dt = dt.astimezone(KST)
+                            if kst_dt.strftime("%Y-%m-%d") != today:
                                 continue
-                        else:
+                            kst_hour = kst_dt.hour
+                        except:
                             continue
+                    else:
+                        continue
 
                     msg = obj.get("message", {})
                     if isinstance(msg, dict):
                         usage = msg.get("usage", {})
                         if usage and usage.get("output_tokens", 0) > 0:
-                            input_tokens += usage.get("input_tokens", 0)
-                            output_tokens += usage.get("output_tokens", 0)
-                            cache_tokens += usage.get("cache_creation_input_tokens", 0)
-                            cache_tokens += usage.get("cache_read_input_tokens", 0)
+                            inp = usage.get("input_tokens", 0)
+                            out = usage.get("output_tokens", 0)
+                            cch = usage.get("cache_creation_input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+
+                            input_tokens += inp
+                            output_tokens += out
+                            cache_tokens += cch
+
+                            if kst_hour is not None:
+                                hourly[kst_hour]["input"] += inp
+                                hourly[kst_hour]["output"] += out
+
                             sid = obj.get("sessionId", "")
                             if sid:
                                 sessions.add(sid)
                 except:
                     pass
+
+    # 시간대별 데이터를 간결한 리스트로 변환 (0시~23시)
+    hourly_list = []
+    for h in range(24):
+        inp = hourly[h]["input"]
+        out = hourly[h]["output"]
+        if inp > 0 or out > 0:
+            hourly_list.append({"h": h, "in": inp, "out": out})
 
     return {
         "date": today,
@@ -96,6 +127,7 @@ def count_today_tokens():
         "output_tokens": output_tokens,
         "cache_tokens": cache_tokens,
         "sessions": len(sessions),
+        "hourly": hourly_list,
     }
 
 

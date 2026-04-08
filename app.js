@@ -922,6 +922,8 @@ function renderStatsSummary(daily, points) {
 // ── 시간대별 차트 ──
 function renderHourlyChart(raw, date) {
   const container = document.getElementById('stats-hourly-chart');
+
+  // 해당 날짜의 가장 마지막(최신) 보고에서 hourly 데이터 사용
   const dayRecords = raw
     .filter(r => normalizeDate(r.date) === date)
     .sort((a, b) => (a.reportedAt || '').localeCompare(b.reportedAt || ''));
@@ -931,17 +933,22 @@ function renderHourlyChart(raw, date) {
     return;
   }
 
-  // 시간별 delta 계산 (누적 스냅샷 차이)
+  // 가장 마지막 보고의 hourly 데이터 사용 (가장 완전한 데이터)
+  const latest = dayRecords[dayRecords.length - 1];
   const hourly = {};
   for (let h = 0; h < 24; h++) hourly[h] = 0;
 
-  for (let i = 0; i < dayRecords.length; i++) {
-    const r = dayRecords[i];
-    const cur = r.input_tokens + r.output_tokens;
-    const prev = i > 0 ? (dayRecords[i - 1].input_tokens + dayRecords[i - 1].output_tokens) : 0;
-    const delta = i === 0 ? cur : (cur - prev);
-    const hour = parseInt((r.reportedAt || '').substring(11, 13)) || 0;
-    hourly[hour] += Math.max(0, delta);
+  if (latest.hourly && Array.isArray(latest.hourly)) {
+    latest.hourly.forEach(item => {
+      const h = item.h;
+      if (h >= 0 && h < 24) {
+        hourly[h] = (item.in || 0) + (item.out || 0);
+      }
+    });
+  } else {
+    // hourly 데이터가 없는 경우 (이전 방식 보고) — 전체 토큰을 보고 시간에 표시
+    const hour = parseInt((latest.reportedAt || '').substring(11, 13)) || 0;
+    hourly[hour] = latest.input_tokens + latest.output_tokens;
   }
 
   const max = Math.max(...Object.values(hourly), 1);
@@ -950,10 +957,9 @@ function renderHourlyChart(raw, date) {
   for (let h = 0; h < 24; h++) {
     const val = hourly[h];
     const pct = (val / max) * 100;
-    const accent = val > 0 ? '' : '';
     html += `<div class="bar-col">`;
     if (val > 0) html += `<div class="bar-value">${formatTokens(val)}</div>`;
-    html += `<div class="bar-fill${val > 0 ? '' : ''}" style="height:${Math.max(pct, val > 0 ? 3 : 0)}%"></div>`;
+    html += `<div class="bar-fill" style="height:${Math.max(pct, val > 0 ? 3 : 0)}%"></div>`;
     html += `<div class="bar-label">${h}</div>`;
     html += `</div>`;
   }
@@ -1016,22 +1022,36 @@ function renderHourHeatmap(raw) {
     return;
   }
 
-  // 시간대별 보고 횟수 집계
-  const counts = {};
-  for (let h = 0; h < 24; h++) counts[h] = 0;
+  // 시간대별 총 토큰 집계 (hourly 데이터 기반, 각 날짜의 최신 보고만)
+  const tokensByHour = {};
+  for (let h = 0; h < 24; h++) tokensByHour[h] = 0;
 
+  // 날짜별 최신 보고 추출
+  const byDate = {};
   raw.forEach(r => {
-    const hour = parseInt((r.reportedAt || '').substring(11, 13));
-    if (!isNaN(hour)) counts[hour]++;
+    const d = normalizeDate(r.date);
+    if (!byDate[d] || (r.reportedAt || '') > (byDate[d].reportedAt || '')) {
+      byDate[d] = r;
+    }
   });
 
-  const max = Math.max(...Object.values(counts), 1);
+  Object.values(byDate).forEach(r => {
+    if (r.hourly && Array.isArray(r.hourly)) {
+      r.hourly.forEach(item => {
+        if (item.h >= 0 && item.h < 24) {
+          tokensByHour[item.h] += (item.in || 0) + (item.out || 0);
+        }
+      });
+    }
+  });
+
+  const max = Math.max(...Object.values(tokensByHour), 1);
 
   let html = '<div class="hour-heatmap">';
   for (let h = 0; h < 24; h++) {
-    const val = counts[h];
+    const val = tokensByHour[h];
     const level = val === 0 ? 0 : val <= max * 0.25 ? 1 : val <= max * 0.5 ? 2 : val <= max * 0.75 ? 3 : 4;
-    html += `<div class="hour-cell level-${level}" title="${h}시: ${val}회">${val || ''}</div>`;
+    html += `<div class="hour-cell level-${level}" title="${h}시: ${formatTokens(val)}">${val > 0 ? formatTokens(val) : ''}</div>`;
   }
   html += '</div>';
 
