@@ -335,19 +335,49 @@
           <div class="substep">
             <div class="substep-num">a</div>
             <div class="substep-body">
-              아까 열어둔 <strong>명령 프롬프트(cmd)</strong>에서, 아래 형식으로 입력하세요.<br>
-              <span style="color:#fbbf24;font-size:12px;">노란색 부분</span>을 Step 2에서 복사한 <strong>내 Python 경로</strong>로 바꿔주세요.
-              <div class="code" style="margin-top:6px;">
-                <span class="warn">내Python경로</span> %USERPROFILE%\.claude\challenge-report.py
-              </div>
-              <div style="margin-top:6px;font-size:12px;color:#52525b;">
-                예시: <code style="color:#71717a;">C:\Users\홍길동\AppData\Local\Programs\Python\Python312\python.exe %USERPROFILE%\.claude\challenge-report.py</code>
-              </div>
+              아까 열어둔 <strong>명령 프롬프트(cmd)</strong>를 그대로 사용합니다.<br>
+              아래 순서대로 명령어를 만들어서 입력하세요.
             </div>
           </div>
 
           <div class="substep">
             <div class="substep-num">b</div>
+            <div class="substep-body">
+              <strong>메모장</strong>을 열고 (또는 cmd 창에 바로) 이렇게 조합하세요:<br><br>
+              <span style="font-size:13px;">
+                ① Step 2에서 복사한 <strong>내 Python 경로</strong>를 붙여넣고<br>
+                ② <strong>한 칸 띄우고</strong><br>
+                ③ 그 뒤에 아래 텍스트를 이어 붙이세요:
+              </span>
+              <div class="code" style="margin-top:6px;">
+                <button class="copy-btn" onclick="copyText('%USERPROFILE%\\.claude\\challenge-report.py')">복사</button>
+                %USERPROFILE%\.claude\challenge-report.py
+              </div>
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">c</div>
+            <div class="substep-body">
+              완성하면 이런 모양이 됩니다:
+              <div class="code" style="margin-top:6px;">
+                <span class="hl">C:\Users\홍길동\AppData\Local\...\python.exe</span> <span style="color:#a1a1aa;">%USERPROFILE%\.claude\challenge-report.py</span>
+              </div>
+              <div style="margin-top:6px;font-size:12px;color:#52525b;">
+                <span style="color:#34d399;">초록색</span> = 내 Python 경로 (사람마다 다름) &nbsp;|&nbsp; 회색 = 그대로 복사한 부분
+              </div>
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">d</div>
+            <div class="substep-body">
+              완성된 명령어를 <strong>명령 프롬프트(cmd)에 붙여넣기</strong> 하고 <span class="key">Enter</span> 를 누르세요.
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">e</div>
             <div class="substep-body">
               닉네임과 비밀번호를 물어봅니다. <strong>챌린지 사이트 계정 정보</strong>를 입력하세요.
               <div class="expected" style="margin-top:6px;">
@@ -404,17 +434,18 @@
           <div class="substep">
             <div class="substep-num">d</div>
             <div class="substep-body">
-              아래 <strong>"복사"</strong> 버튼을 누르세요. 명령어가 클립보드에 복사됩니다.
-              <div class="alert alert-yellow" style="margin:8px 0 4px;">
-                복사하기 전에 아래 <span style="color:#fbbf24;font-weight:700;">노란색 부분</span>을 <strong>내 Python 경로</strong>로 바꿔주세요!<br>
-                <span style="font-size:12px;">(Step 2에서 확인한 경로)</span>
-              </div>
-              <div class="code" style="margin-top:6px;">
+              아래 코드 블록에서 <strong>첫 번째 줄만</strong> 수정하면 됩니다.<br><br>
+              <span style="font-size:13px;">
+                ① 아래 <span style="color:#fbbf24;font-weight:700;">노란색 글씨</span>를 <strong>클릭</strong>하세요 — 입력창이 뜹니다<br>
+                ② Step 2에서 복사한 <strong>내 Python 경로</strong>를 붙여넣고 확인<br>
+                ③ 경로가 <span style="color:#34d399;">초록색</span>으로 바뀌면 <strong>"복사"</strong> 버튼을 누르세요
+              </span>
+              <div class="code" style="margin-top:10px;">
                 <button class="copy-btn" id="ps-copy-btn" onclick="copyPS()">복사</button>
-                <span class="cm"># 아래 한 줄에서 Python 경로만 바꾸세요</span><br><br>
-                <span class="acc">$py</span> = "<span class="warn" id="py-path-placeholder">여기에_내_Python_경로</span>"<br><br>
+                <span class="cm"># 첫 줄의 경로만 내 것으로 바꾸세요 (클릭!)</span><br><br>
+                <span class="acc">$py</span> = "<span class="warn" id="py-path-placeholder" style="cursor:pointer;border-bottom:2px dashed #fbbf24;padding-bottom:1px;" title="클릭해서 내 Python 경로를 입력하세요">여기를_클릭해서_내_Python_경로_입력</span>"<br><br>
 
-                <span class="cm"># 아래는 그대로 복사 (수정 X)</span><br>
+                <span class="cm"># 아래는 수정하지 마세요 ─────────────</span><br>
                 <span class="acc">$action</span> = New-ScheduledTaskAction -Execute <span class="acc">$py</span> -Argument "$env:USERPROFILE\.claude\challenge-report.py"<br>
                 <span class="acc">$trigger</span> = New-ScheduledTaskTrigger -Once -At "00:00" -RepetitionInterval (New-TimeSpan -Hours 1)<br>
                 <span class="acc">$settings</span> = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10)<br>
@@ -422,8 +453,8 @@
               </div>
 
               <div style="margin-top:8px;font-size:12px;color:#52525b;">
-                예시 (첫 줄만 바꾸면 됩니다):<br>
-                <code style="color:#71717a;">$py = "C:\Users\홍길동\AppData\Local\Programs\Python\Python312\python.exe"</code>
+                완성 예시 (첫 줄만 다릅니다):<br>
+                <code style="color:#34d399;">$py = "C:\Users\홍길동\AppData\Local\Programs\Python\Python312\python.exe"</code>
               </div>
             </div>
           </div>
@@ -431,13 +462,20 @@
           <div class="substep">
             <div class="substep-num">e</div>
             <div class="substep-body">
-              PowerShell 창에서 <strong>마우스 우클릭</strong>하면 붙여넣기가 됩니다.<br>
-              그 다음 <span class="key">Enter</span> 를 누르세요.
+              PowerShell 창(파란 화면)에서 <strong>마우스 우클릭</strong>하면 자동으로 붙여넣기가 됩니다.<br>
+              <span style="color:#52525b;font-size:12px;">(Ctrl+V는 안 될 수 있습니다. 반드시 <strong>우클릭</strong>으로 붙여넣기)</span>
             </div>
           </div>
 
           <div class="substep">
             <div class="substep-num">f</div>
+            <div class="substep-body">
+              붙여넣기가 되었으면 <span class="key">Enter</span> 를 누르세요.
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">g</div>
             <div class="substep-body">
               아래처럼 나오면 <strong>성공</strong>입니다! PowerShell 창을 닫아도 됩니다.
               <div class="expected" style="margin-top:6px;">
@@ -638,8 +676,8 @@ function copyText(text) {
 }
 function copyPS() {
   const path = document.getElementById('py-path-placeholder').textContent;
-  if (path === '여기에_내_Python_경로') {
-    alert('먼저 Python 경로를 입력해주세요!\\n\\nStep 2에서 확인한 경로를 아래 노란색 부분에 입력한 뒤 복사하세요.');
+  if (path === '여기를_클릭해서_내_Python_경로_입력') {
+    alert('먼저 Python 경로를 입력해주세요!\\n\\n위 노란색 글씨를 클릭한 뒤, Step 2에서 확인한 경로를 붙여넣기 하세요.');
     return;
   }
   const cmd = `$py = "${path}"\n$action = New-ScheduledTaskAction -Execute $py -Argument "$env:USERPROFILE\\.claude\\challenge-report.py"\n$trigger = New-ScheduledTaskTrigger -Once -At "00:00" -RepetitionInterval (New-TimeSpan -Hours 1)\n$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10)\nRegister-ScheduledTask -TaskName "ClaudeChallenge" -Action $action -Trigger $trigger -Settings $settings -Force`;
@@ -650,21 +688,22 @@ function copyPS() {
   });
 }
 
-// Make Python path editable
+// Make Python path editable (click to input)
 document.addEventListener('DOMContentLoaded', function() {
   const placeholder = document.getElementById('py-path-placeholder');
   if (placeholder) {
-    placeholder.style.cursor = 'pointer';
-    placeholder.style.borderBottom = '2px dashed #fbbf24';
-    placeholder.style.paddingBottom = '1px';
-    placeholder.title = '클릭해서 내 Python 경로를 입력하세요';
     placeholder.addEventListener('click', function() {
       const current = this.textContent;
-      const input = prompt('Step 2에서 확인한 Python 경로를 붙여넣기 하세요:', current === '여기에_내_Python_경로' ? '' : current);
+      const input = prompt(
+        'Step 2에서 확인한 Python 경로를 붙여넣기 하세요:\n\n' +
+        '예시: C:\\Users\\홍길동\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
+        current === '여기를_클릭해서_내_Python_경로_입력' ? '' : current
+      );
       if (input && input.trim()) {
         this.textContent = input.trim();
         this.style.color = '#34d399';
         this.style.borderBottom = '2px solid #34d399';
+        this.style.borderBottomStyle = 'solid';
       }
     });
   }
