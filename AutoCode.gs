@@ -429,7 +429,7 @@ function handleReportUsage(params) {
   }
 
   // 자동 인증: score 기반 포인트 (300K → 1pt, 1M → 2pt)
-  var earnedPts = score >= 1000000 ? 2 : (score >= 300000 ? 1 : 0);
+  var earnedPts = score >= 10000000 ? 2 : (score >= 1000000 ? 1 : 0);
   if (earnedPts > 0) {
     var recordSheet = ss.getSheetByName('인증기록');
     if (recordSheet) {

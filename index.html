@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260409c">
+  <link rel="stylesheet" href="style.css?v=20260409d">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -67,7 +67,7 @@
                 <button id="btn-daily-next" class="daily-nav-btn">&rarr;</button>
               </div>
             </div>
-            <div class="daily-legend">300K+ → 1pt · 1M+ → 2pt (가중 스코어)</div>
+            <div class="daily-legend">1M+ → 1pt · 10M+ → 2pt (가중 스코어)</div>
             <div class="daily-table-wrapper">
               <table id="daily-table" class="daily-table">
                 <thead><tr id="daily-header"></tr></thead>
@@ -141,7 +141,7 @@
                 <div><span class="lt-name">Master</span><span class="lt-pts">150pt~</span></div>
                 <div><span class="lt-name">Legend</span><span class="lt-pts">250pt~</span></div>
               </div>
-              <div class="level-tooltip-footer">300K+ → 1pt · 1M+ → 2pt / 일 (가중 스코어)</div>
+              <div class="level-tooltip-footer">1M+ → 1pt · 10M+ → 2pt / 일 (가중 스코어)</div>
             </div>
           </div>
 
@@ -228,7 +228,7 @@
                 <tr><td>C<sub>r</sub></td><td>Cache Read</td><td>0.1</td><td>$0.30 / 1M tokens (Input 대비 0.1배)</td></tr>
               </table>
               <p class="score-ref">* 단가 기준: <a href="https://www.anthropic.com/pricing" target="_blank" rel="noopener">anthropic.com/pricing</a> (Claude 3.5 Sonnet)</p>
-              <div class="score-points">1pt = 300K · 2pt = 1M (일간 가중 스코어 기준)</div>
+              <div class="score-points">1pt = 1M · 2pt = 10M (일간 가중 스코어 기준)</div>
             </div>
           </div>
 
@@ -239,11 +239,11 @@
               <div class="stat-value" id="stats-today-tokens">-</div>
               <div class="stat-goal-bar" id="stats-goal-bar">
                 <div class="stat-goal-fill" id="stats-goal-fill"></div>
-                <div class="stat-goal-mark" style="left:30%"></div>
+                <div class="stat-goal-mark" style="left:10%"></div>
                 <div class="stat-goal-mark stat-goal-mark-full" style="left:100%"></div>
               </div>
               <div class="stat-goal-labels">
-                <span>0</span><span>300K</span><span>1M</span>
+                <span>0</span><span>1M</span><span>10M</span>
               </div>
               <div class="stat-point-badge" id="stats-today-badge">0pt</div>
             </div>
@@ -319,6 +319,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260409c"></script>
+  <script src="app.js?v=20260409d"></script>
 </body>
 </html>

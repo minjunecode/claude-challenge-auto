@@ -300,8 +300,8 @@ function getScore(d) {
   return 0;
 }
 // 포인트 기준 (가중 스코어 기반)
-const POINT_1_THRESHOLD = 300000;   // 1pt: 300K
-const POINT_2_THRESHOLD = 1000000;  // 2pt: 1M
+const POINT_1_THRESHOLD = 1000000;    // 1pt: 1M
+const POINT_2_THRESHOLD = 10000000;   // 2pt: 10M
 
 // 날짜 정규화: 어떤 형식이든 "YYYY-MM-DD"로 변환
 function normalizeDate(v) {
@@ -485,9 +485,6 @@ function renderDailyTable(members, submissions) {
         } else if (tokens >= POINT_1_THRESHOLD) {
           td.classList.add('daily-td-done');
           td.textContent = 'O';
-        } else if (tokens > 0) {
-          td.classList.add('daily-td-partial');
-          td.textContent = formatTokens(tokens);
         } else {
           td.classList.add('daily-td-pending');
           td.textContent = '-';
@@ -1117,7 +1114,11 @@ function renderHourlyChart(raw, date) {
     html += `</div>`;
   }
   html += '</div>';
-  // legend removed
+  // Legend
+  html += '<div style="display:flex;gap:14px;justify-content:flex-end;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">';
+  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(56,189,248,0.45);vertical-align:middle;margin-right:3px;"></span>input ×1</span>';
+  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(14,165,233,0.85);vertical-align:middle;margin-right:3px;"></span>output ×5</span>';
+  html += '</div>';
   container.innerHTML = html;
 }
 
@@ -1131,10 +1132,8 @@ function renderDailyTrendChart(daily) {
     return;
   }
 
-  // Find max for scaling — snap to nice round breakpoints
-  const breakpoints = [1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000, 50000000];
-  const rawMax = Math.max(...sorted.map(d => getScore(d)), 1);
-  const maxTotal = breakpoints.find(b => b >= rawMax) || rawMax;
+  // 50M 고정 스케일
+  const maxTotal = 50000000;
 
   // Build threshold positions
   const pct1pt = (POINT_1_THRESHOLD / maxTotal) * 100;
@@ -1184,7 +1183,10 @@ function renderDailyTrendChart(daily) {
   });
 
   // Legend
-  // legend removed
+  html += '<div style="display:flex;gap:14px;justify-content:flex-end;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">';
+  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--primary);vertical-align:middle;margin-right:3px;"></span>input + cache</span>';
+  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#6ee7b7;vertical-align:middle;margin-right:3px;"></span>output</span>';
+  html += '</div>';
 
   html += '</div>';
   container.innerHTML = html;
