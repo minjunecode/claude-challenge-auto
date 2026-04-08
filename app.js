@@ -127,8 +127,10 @@ async function handleLogin(e) {
 
 function handleLogout() {
   currentUser = null; dashboardData = null;
+  personalStatsData = null; personalStatsLoaded = false;
   localStorage.removeItem('challengeUser');
   localStorage.removeItem('dashboardCache');
+  location.hash = '';
   document.getElementById('main-view').classList.remove('active');
   document.getElementById('login-view').classList.add('active');
 }
@@ -152,15 +154,18 @@ async function handleRegister() {
 
 // ── 메인 ──
 async function showMain() {
+  // ① hash를 loadDashboard 전에 먼저 읽어둠 (덮어쓰기 방지)
+  const hash = location.hash.replace('#', '');
+  const validTabs = ['dashboard', 'stats', 'cert', 'admin'];
+  const restoredTab = validTabs.includes(hash) ? hash : 'dashboard';
+
   document.getElementById('login-view').classList.remove('active');
   document.getElementById('main-view').classList.add('active');
   document.getElementById('user-info').textContent = currentUser.nickname + (currentUser.isAdmin ? ' (관리자)' : '');
   document.querySelectorAll('.admin-only').forEach(el => { el.style.display = currentUser.isAdmin ? '' : 'none'; });
-  await loadDashboard();
-  // URL hash에서 탭 복원 (새로고침 시 현재 탭 유지)
-  const hash = location.hash.replace('#', '');
-  const validTabs = ['dashboard', 'stats', 'cert', 'admin'];
-  const restoredTab = validTabs.includes(hash) ? hash : 'dashboard';
+
+  // ② 캐시로 즉시 렌더 → 탭 전환 → API는 백그라운드
+  loadDashboard();
   switchTab(restoredTab);
 }
 
@@ -170,7 +175,7 @@ function switchTab(tabName) {
   document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
   document.getElementById(`tab-${tabName}`).classList.add('active');
   // URL hash에 현재 탭 저장 (새로고침 시 복원용)
-  location.hash = tabName;
+  history.replaceState(null, '', '#' + tabName);
   if (tabName === 'dashboard') renderDashboard();
   if (tabName === 'cert') { renderAutoStatus(); }
   if (tabName === 'stats') {
@@ -856,6 +861,13 @@ async function loadPersonalStats() {
   const nickname = currentUser.nickname;
   const password = currentUser.password;
 
+  // password가 없으면 재로그인 필요 (기존 세션 호환)
+  if (!password) {
+    document.querySelector('.stats-container').innerHTML =
+      '<div class="stats-placeholder" style="padding:40px;text-align:center;">세션이 만료되었습니다. 로그아웃 후 다시 로그인해주세요.</div>';
+    return;
+  }
+
   try {
     const resp = await fetch(API_URL, {
       method: 'POST',
@@ -868,9 +880,15 @@ async function loadPersonalStats() {
       personalStatsData = data;
       personalStatsLoaded = true;
       renderPersonalStats();
+    } else {
+      console.error('personalStats failed:', data.error);
+      document.querySelector('.stats-container').innerHTML =
+        '<div class="stats-placeholder" style="padding:40px;text-align:center;">데이터를 불러오지 못했습니다: ' + (data.error || '알 수 없는 오류') + '</div>';
     }
   } catch (e) {
     console.error('personalStats error:', e);
+    document.querySelector('.stats-container').innerHTML =
+      '<div class="stats-placeholder" style="padding:40px;text-align:center;">서버 연결 실패. 잠시 후 다시 시도해주세요.</div>';
   }
 }
 
