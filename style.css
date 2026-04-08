@@ -1797,15 +1797,47 @@ header h1 {
 .stats-container { max-width: 720px; margin: 0 auto; }
 
 .stats-summary {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
   margin-bottom: 20px;
 }
 .stat-card {
   background: var(--card); border: 1px solid var(--border);
   border-radius: 12px; padding: 16px; text-align: center;
 }
+.stat-card-today { grid-row: span 1; }
 .stat-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
 .stat-value { font-size: 1.4rem; font-weight: 800; color: var(--text); }
+.stat-sub-value { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+.stat-pts-inline { font-weight: 700; }
+
+/* Goal progress bar */
+.stat-goal-bar {
+  position: relative; height: 8px; background: var(--bg);
+  border-radius: 4px; margin-top: 10px; overflow: visible;
+}
+.stat-goal-fill {
+  height: 100%; border-radius: 4px; transition: width 0.4s ease;
+  background: var(--muted);
+}
+.stat-goal-fill.goal-50k { background: var(--primary); }
+.stat-goal-fill.goal-100k { background: var(--accent); }
+.stat-goal-mark {
+  position: absolute; top: -2px; width: 2px; height: 12px;
+  background: var(--muted); opacity: 0.4; transform: translateX(-1px);
+}
+.stat-goal-labels {
+  display: flex; justify-content: space-between;
+  font-size: 0.6rem; color: var(--muted); margin-top: 3px;
+}
+
+/* Point badge */
+.stat-point-badge {
+  display: inline-block; margin-top: 8px; padding: 3px 12px;
+  border-radius: 12px; font-size: 0.75rem; font-weight: 700;
+}
+.stat-point-badge.badge-0 { background: rgba(100,100,100,0.15); color: var(--muted); }
+.stat-point-badge.badge-1 { background: rgba(129,140,248,0.18); color: var(--primary); }
+.stat-point-badge.badge-2 { background: rgba(52,211,153,0.18); color: var(--accent); }
 
 .stats-section {
   background: var(--card); border: 1px solid var(--border);
@@ -1828,8 +1860,55 @@ header h1 {
 
 .stats-chart-area { min-height: 120px; }
 .stats-placeholder { color: var(--muted); font-size: 0.8rem; text-align: center; padding: 40px 0; }
+.stats-info-msg {
+  color: var(--muted); font-size: 0.8rem; text-align: center;
+  padding: 30px 20px; background: var(--bg); border-radius: 8px;
+}
 
-/* 바 차트 (시간대별 / 일간) */
+/* Horizontal bar chart (daily usage) */
+.hbar-chart { display: flex; flex-direction: column; gap: 4px; position: relative; }
+.hbar-row {
+  display: flex; align-items: center; gap: 8px; height: 22px;
+}
+.hbar-date { flex: 0 0 50px; font-size: 0.7rem; color: var(--muted); text-align: right; white-space: nowrap; }
+.hbar-track { flex: 1; height: 18px; position: relative; background: var(--bg); border-radius: 4px; overflow: hidden; }
+.hbar-fill-input {
+  position: absolute; left: 0; top: 0; height: 100%;
+  border-radius: 4px 0 0 4px; transition: width 0.3s ease;
+}
+.hbar-fill-output {
+  position: absolute; top: 0; height: 100%;
+  border-radius: 0 4px 4px 0; transition: width 0.3s ease, left 0.3s ease;
+}
+.hbar-amount {
+  flex: 0 0 48px; font-size: 0.68rem; font-weight: 600; color: var(--text);
+  text-align: right; white-space: nowrap;
+}
+/* threshold lines overlay */
+.hbar-thresholds { position: relative; height: 0; margin: 0 58px 0 58px; }
+.hbar-threshold-line {
+  position: absolute; top: 0; width: 1px; border-left: 1px dashed;
+  pointer-events: none; z-index: 2;
+}
+/* color tiers */
+.hbar-tier-gray .hbar-fill-input { background: rgba(100,100,100,0.35); }
+.hbar-tier-gray .hbar-fill-output { background: rgba(100,100,100,0.55); }
+.hbar-tier-blue .hbar-fill-input { background: rgba(129,140,248,0.45); }
+.hbar-tier-blue .hbar-fill-output { background: rgba(129,140,248,0.75); }
+.hbar-tier-green .hbar-fill-input { background: rgba(52,211,153,0.45); }
+.hbar-tier-green .hbar-fill-output { background: rgba(52,211,153,0.75); }
+
+/* Legend for daily chart */
+.hbar-legend {
+  display: flex; gap: 14px; justify-content: flex-end; margin-top: 8px;
+  font-size: 0.65rem; color: var(--muted);
+}
+.hbar-legend-dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+  margin-right: 4px; vertical-align: middle;
+}
+
+/* Vertical bar chart (hourly) */
 .bar-chart { display: flex; align-items: flex-end; gap: 2px; height: 160px; padding-top: 8px; }
 .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
 .bar-fill {
@@ -1842,25 +1921,45 @@ header h1 {
 }
 .bar-label { font-size: 0.6rem; color: var(--muted); margin-top: 4px; white-space: nowrap; }
 .bar-value { font-size: 0.55rem; color: var(--text); margin-bottom: 2px; font-weight: 600; }
-.bar-chart-labels { display: flex; gap: 2px; margin-top: 2px; }
 
-/* 히트맵 (활동 시간대) */
-.hour-heatmap { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; }
-.hour-cell {
-  aspect-ratio: 1; border-radius: 4px; display: flex; align-items: center;
-  justify-content: center; font-size: 0.55rem; color: var(--muted); font-weight: 600;
+/* Activity pattern heatmap (7x24) */
+.activity-heatmap { width: 100%; }
+.activity-heatmap-grid {
+  display: grid;
+  grid-template-columns: 28px repeat(24, 1fr);
+  gap: 2px;
 }
-.hour-cell.level-0 { background: var(--bg); }
-.hour-cell.level-1 { background: rgba(129,140,248,0.15); color: var(--primary); }
-.hour-cell.level-2 { background: rgba(129,140,248,0.3); color: var(--primary); }
-.hour-cell.level-3 { background: rgba(129,140,248,0.5); color: #fff; }
-.hour-cell.level-4 { background: rgba(129,140,248,0.75); color: #fff; }
-.hour-hour-labels { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; margin-top: 4px; }
-.hour-hour-label { font-size: 0.5rem; color: var(--muted); text-align: center; }
-
+.activity-heatmap-header {
+  font-size: 0.55rem; color: var(--muted); text-align: center;
+  padding: 2px 0; font-weight: 600;
+}
+.activity-heatmap-day-label {
+  font-size: 0.65rem; color: var(--muted); font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+}
+.activity-cell {
+  aspect-ratio: 1; border-radius: 3px;
+  transition: background 0.2s;
+}
+.activity-cell.level-0 { background: var(--bg); }
+.activity-cell.level-1 { background: rgba(129,140,248,0.15); }
+.activity-cell.level-2 { background: rgba(129,140,248,0.3); }
+.activity-cell.level-3 { background: rgba(129,140,248,0.55); }
+.activity-cell.level-4 { background: rgba(129,140,248,0.8); }
+.activity-heatmap-legend {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 3px; margin-top: 6px; font-size: 0.6rem; color: var(--muted);
+}
+.activity-legend-cell {
+  width: 12px; height: 12px; border-radius: 2px;
+}
 
 @media (max-width: 600px) {
-  .stats-summary { grid-template-columns: repeat(2, 1fr); }
+  .stats-summary { grid-template-columns: 1fr; }
   .bar-chart { height: 120px; }
+  .hbar-date { flex: 0 0 40px; font-size: 0.6rem; }
+  .hbar-amount { flex: 0 0 40px; font-size: 0.6rem; }
   .stats-section-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .activity-heatmap-grid { gap: 1px; }
+  .activity-heatmap-header { font-size: 0.45rem; }
 }

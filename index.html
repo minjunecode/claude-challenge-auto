@@ -212,23 +212,38 @@
       <div id="tab-stats" class="tab-content">
         <div class="stats-container">
 
-          <!-- 요약 카드 -->
+          <!-- 요약 카드 (3장) -->
           <div class="stats-summary">
-            <div class="stat-card">
-              <div class="stat-label">오늘 토큰</div>
+            <div class="stat-card stat-card-today">
+              <div class="stat-label">오늘</div>
               <div class="stat-value" id="stats-today-tokens">-</div>
+              <div class="stat-goal-bar" id="stats-goal-bar">
+                <div class="stat-goal-fill" id="stats-goal-fill"></div>
+                <div class="stat-goal-mark" style="left:50%"></div>
+                <div class="stat-goal-mark stat-goal-mark-full" style="left:100%"></div>
+              </div>
+              <div class="stat-goal-labels">
+                <span>0</span><span>50K</span><span>100K</span>
+              </div>
+              <div class="stat-point-badge" id="stats-today-badge">0pt</div>
             </div>
             <div class="stat-card">
-              <div class="stat-label">주간 평균</div>
-              <div class="stat-value" id="stats-weekly-avg">-</div>
+              <div class="stat-label">이번 주</div>
+              <div class="stat-value" id="stats-weekly-total">-</div>
+              <div class="stat-sub-value">일 평균 <span id="stats-weekly-avg">-</span></div>
             </div>
             <div class="stat-card">
-              <div class="stat-label">연속 사용일</div>
-              <div class="stat-value" id="stats-streak">-</div>
+              <div class="stat-label">이번 달</div>
+              <div class="stat-value" id="stats-monthly-total">-</div>
+              <div class="stat-sub-value">획득 포인트 <span id="stats-month-pts" class="stat-pts-inline">-</span></div>
             </div>
-            <div class="stat-card">
-              <div class="stat-label">이번 달 포인트</div>
-              <div class="stat-value" id="stats-month-pts">-</div>
+          </div>
+
+          <!-- 일간 사용량 (최근 14일) -->
+          <div class="stats-section">
+            <h3>일간 사용량 <span class="stats-sub">(최근 14일)</span></h3>
+            <div class="stats-chart-area" id="stats-daily-chart">
+              <div class="stats-placeholder">데이터 로딩 중...</div>
             </div>
           </div>
 
@@ -243,18 +258,10 @@
             </div>
           </div>
 
-          <!-- 일간 추이 (최근 30일) -->
+          <!-- 활동 패턴 (7x24 히트맵) -->
           <div class="stats-section">
-            <h3>일간 추이 <span class="stats-sub">(최근 30일)</span></h3>
-            <div class="stats-chart-area" id="stats-daily-chart">
-              <div class="stats-placeholder">데이터 로딩 중...</div>
-            </div>
-          </div>
-
-          <!-- 활동 시간대 -->
-          <div class="stats-section">
-            <h3>활동 시간대</h3>
-            <div class="stats-chart-area" id="stats-hour-heatmap">
+            <h3>활동 패턴</h3>
+            <div class="stats-chart-area" id="stats-activity-pattern">
               <div class="stats-placeholder">데이터 로딩 중...</div>
             </div>
           </div>

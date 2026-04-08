@@ -857,38 +857,55 @@ let personalStatsLoaded = false;
 
 async function loadPersonalStats() {
   const container = document.querySelector('.stats-container');
-
-  // 이미 로드했으면 다시 렌더만
-  if (personalStatsLoaded && personalStatsData) {
-    renderPersonalStats();
-    return;
-  }
+  if (!container) return;
 
   if (!currentUser || !currentUser.nickname) return;
 
-  // password가 없으면 재로그인 유도
+  // 1) Show cached data immediately
+  const cached = localStorage.getItem('personalStatsCache');
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      if (parsed && parsed.success) {
+        personalStatsData = parsed;
+        personalStatsLoaded = true;
+        renderPersonalStats();
+      }
+    } catch { /* ignore bad cache */ }
+  }
+
+  // 2) If no password, show re-login (only if no cache)
   if (!currentUser.password) {
-    container.innerHTML =
-      '<div class="stats-placeholder" style="padding:40px;text-align:center;">' +
-      '내 분석 기능을 사용하려면 재로그인이 필요합니다.<br><br>' +
-      '<button onclick="handleLogout()" class="btn btn-primary" style="display:inline-block;width:auto;padding:8px 24px;">재로그인</button></div>';
+    if (!personalStatsLoaded) {
+      container.innerHTML =
+        '<div class="stats-placeholder" style="padding:40px;text-align:center;">' +
+        '내 분석 기능을 사용하려면 재로그인이 필요합니다.<br><br>' +
+        '<button onclick="handleLogout()" class="btn btn-primary" style="display:inline-block;width:auto;padding:8px 24px;">재로그인</button></div>';
+    }
     return;
   }
 
-  container.querySelectorAll('.stats-placeholder').forEach(el => { el.textContent = '데이터 로딩 중...'; });
+  // 3) Fetch fresh data from API in background
+  if (!personalStatsLoaded) {
+    container.querySelectorAll('.stats-placeholder').forEach(el => { el.textContent = '데이터 로딩 중...'; });
+  }
 
   const data = await apiCall('personalStats', { nickname: currentUser.nickname, password: currentUser.password });
 
   if (data && data.success) {
     personalStatsData = data;
     personalStatsLoaded = true;
+    localStorage.setItem('personalStatsCache', JSON.stringify(data));
     renderPersonalStats();
-  } else if (data && data.error) {
-    container.innerHTML =
-      '<div class="stats-placeholder" style="padding:40px;text-align:center;">' + data.error + '</div>';
-  } else {
-    container.innerHTML =
-      '<div class="stats-placeholder" style="padding:40px;text-align:center;">서버 연결 실패. 잠시 후 다시 시도해주세요.</div>';
+  } else if (!personalStatsLoaded) {
+    // Only show error if we have no cached data
+    if (data && data.error) {
+      container.innerHTML =
+        '<div class="stats-placeholder" style="padding:40px;text-align:center;">' + data.error + '</div>';
+    } else {
+      container.innerHTML =
+        '<div class="stats-placeholder" style="padding:40px;text-align:center;">서버 연결 실패. 잠시 후 다시 시도해주세요.</div>';
+    }
   }
 }
 
@@ -898,7 +915,7 @@ function renderPersonalStats() {
 
   renderStatsSummary(daily, points);
   renderDailyTrendChart(daily);
-  renderHourHeatmap(raw);
+  renderActivityPattern(raw);
 
   // 날짜 선택기 초기화 — 기본값: 오늘
   const picker = document.getElementById('stats-date-picker');
@@ -909,47 +926,60 @@ function renderPersonalStats() {
     picker.addEventListener('change', () => renderHourlyChart(raw, picker.value));
     picker.dataset.init = '1';
   }
-  // 매번 렌더 시 현재 선택된 날짜로 차트 갱신
   if (picker) renderHourlyChart(raw, picker.value);
 }
 
-// ── 요약 카드 ──
+// ── 요약 카드 (오늘 / 이번 주 / 이번 달) ──
 function renderStatsSummary(daily, points) {
   const today = normalizeDate(new Date().toISOString().split('T')[0]);
 
-  // 오늘 토큰
+  // ── 오늘 토큰 + 목표 프로그레스 ──
   const todayData = daily.find(d => normalizeDate(d.date) === today);
   const todayTokens = todayData ? (todayData.input_tokens + todayData.output_tokens) : 0;
   document.getElementById('stats-today-tokens').textContent = formatTokens(todayTokens);
 
-  // 주간 평균 (최근 7일)
-  const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date));
-  const last7 = sorted.slice(-7);
-  const weekAvg = last7.length > 0 ? last7.reduce((s, d) => s + d.input_tokens + d.output_tokens, 0) / last7.length : 0;
-  document.getElementById('stats-weekly-avg').textContent = formatTokens(Math.round(weekAvg));
-
-  // 연속 사용일 (스트릭)
-  let streak = 0;
-  const dateSet = new Set(daily.map(d => normalizeDate(d.date)));
-  const d = new Date();
-  const kstNow = new Date(d.getTime() + 9 * 60 * 60 * 1000);
-  let checkDate = new Date(kstNow);
-  while (true) {
-    const ds = checkDate.toISOString().split('T')[0];
-    if (dateSet.has(ds)) {
-      streak++;
-      checkDate.setDate(checkDate.getDate() - 1);
-    } else {
-      break;
-    }
+  // Goal progress bar
+  const goalFill = document.getElementById('stats-goal-fill');
+  if (goalFill) {
+    const pct = Math.min((todayTokens / 100000) * 100, 100);
+    goalFill.style.width = pct + '%';
+    goalFill.className = 'stat-goal-fill' +
+      (todayTokens >= 100000 ? ' goal-100k' : todayTokens >= 50000 ? ' goal-50k' : '');
   }
-  document.getElementById('stats-streak').textContent = streak + '일';
 
-  // 이번 달 포인트
+  // Point badge
+  const badge = document.getElementById('stats-today-badge');
+  if (badge) {
+    const pts = todayTokens >= 100000 ? 2 : todayTokens >= 50000 ? 1 : 0;
+    badge.textContent = pts + 'pt';
+    badge.className = 'stat-point-badge badge-' + pts;
+  }
+
+  // ── 이번 주 (월~일) ──
+  const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date));
+  // Get current week's Monday
+  const now = new Date();
+  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const dayOfWeek = kstNow.getDay(); // 0=Sun
+  const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const monday = new Date(kstNow);
+  monday.setDate(monday.getDate() - mondayOffset);
+  const mondayStr = monday.toISOString().split('T')[0];
+
+  const weekDays = sorted.filter(d => normalizeDate(d.date) >= mondayStr && normalizeDate(d.date) <= today);
+  const weekTotal = weekDays.reduce((s, d) => s + d.input_tokens + d.output_tokens, 0);
+  const weekAvg = weekDays.length > 0 ? Math.round(weekTotal / weekDays.length) : 0;
+  document.getElementById('stats-weekly-total').textContent = formatTokens(weekTotal);
+  document.getElementById('stats-weekly-avg').textContent = formatTokens(weekAvg);
+
+  // ── 이번 달 ──
   const curMonth = today.substring(0, 7);
+  const monthDays = sorted.filter(d => normalizeDate(d.date).startsWith(curMonth));
+  const monthTotal = monthDays.reduce((s, d) => s + d.input_tokens + d.output_tokens, 0);
   const monthPts = points
     .filter(p => (normalizeDate(p.date) || '').startsWith(curMonth))
     .reduce((s, p) => s + p.points, 0);
+  document.getElementById('stats-monthly-total').textContent = formatTokens(monthTotal);
   document.getElementById('stats-month-pts').textContent = monthPts + 'pt';
 }
 
@@ -957,7 +987,6 @@ function renderStatsSummary(daily, points) {
 function renderHourlyChart(raw, date) {
   const container = document.getElementById('stats-hourly-chart');
 
-  // 해당 날짜의 가장 마지막(최신) 보고에서 hourly 데이터 사용
   const dayRecords = raw
     .filter(r => normalizeDate(r.date) === date)
     .sort((a, b) => (a.reportedAt || '').localeCompare(b.reportedAt || ''));
@@ -967,23 +996,30 @@ function renderHourlyChart(raw, date) {
     return;
   }
 
-  // 가장 마지막 보고의 hourly 데이터 사용 (가장 완전한 데이터)
+  // Check if ANY record for this date has hourly data
   const latest = dayRecords[dayRecords.length - 1];
+  const hasHourly = latest.hourly && Array.isArray(latest.hourly) && latest.hourly.length > 0;
+
+  if (!hasHourly) {
+    // No hourly data — show informational message instead of faking it
+    const total = latest.input_tokens + latest.output_tokens;
+    container.innerHTML =
+      '<div class="stats-info-msg">' +
+      '시간대별 데이터는 자동 리포팅 업데이트 후 수집됩니다.<br>' +
+      '<span style="font-size:0.7rem;margin-top:6px;display:inline-block;">이 날짜 총 사용량: ' + formatTokens(total) + '</span>' +
+      '</div>';
+    return;
+  }
+
+  // Build hourly data from the latest report
   const hourly = {};
   for (let h = 0; h < 24; h++) hourly[h] = 0;
-
-  if (latest.hourly && Array.isArray(latest.hourly)) {
-    latest.hourly.forEach(item => {
-      const h = item.h;
-      if (h >= 0 && h < 24) {
-        hourly[h] = (item.in || 0) + (item.out || 0);
-      }
-    });
-  } else {
-    // hourly 데이터가 없는 경우 (이전 방식 보고) — 전체 토큰을 보고 시간에 표시
-    const hour = parseInt((latest.reportedAt || '').substring(11, 13)) || 0;
-    hourly[hour] = latest.input_tokens + latest.output_tokens;
-  }
+  latest.hourly.forEach(item => {
+    const h = item.h;
+    if (h >= 0 && h < 24) {
+      hourly[h] = (item.in || 0) + (item.out || 0);
+    }
+  });
 
   const max = Math.max(...Object.values(hourly), 1);
 
@@ -1001,64 +1037,71 @@ function renderHourlyChart(raw, date) {
   container.innerHTML = html;
 }
 
-// ── 일간 추이 (최근 30일) ──
+// ── 일간 사용량 (최근 14일, 수평 바 차트) ──
 function renderDailyTrendChart(daily) {
   const container = document.getElementById('stats-daily-chart');
-  const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
+  const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date)).slice(-14);
 
   if (sorted.length === 0) {
     container.innerHTML = '<div class="stats-placeholder">사용량 데이터가 없습니다.</div>';
     return;
   }
 
-  const values = sorted.map(d => d.input_tokens + d.output_tokens);
-  const max = Math.max(...values, 1);
+  // Find max for scaling (at least 100K so threshold lines always visible)
+  const maxTotal = Math.max(...sorted.map(d => d.input_tokens + d.output_tokens), 100000);
 
-  // 50K, 100K 기준선 위치
-  const line50 = Math.min((50000 / max) * 100, 100);
-  const line100 = Math.min((100000 / max) * 100, 100);
+  // Build threshold positions
+  const pct50 = (50000 / maxTotal) * 100;
+  const pct100 = (100000 / maxTotal) * 100;
 
-  let html = '<div class="bar-chart" style="position:relative;">';
+  let html = '<div class="hbar-chart">';
 
-  // 기준선
-  if (max >= 50000) {
-    html += `<div style="position:absolute;left:0;right:0;bottom:${line50}%;border-top:1px dashed rgba(129,140,248,0.3);pointer-events:none;z-index:1;">
-      <span style="position:absolute;left:0;top:-14px;font-size:0.5rem;color:var(--primary);opacity:0.6;">50K</span></div>`;
+  // Threshold lines container (positioned over the track area)
+  html += '<div style="position:relative;margin-left:58px;margin-right:56px;height:0;pointer-events:none;z-index:2;">';
+  html += `<div style="position:absolute;left:${pct50}%;top:0;bottom:0;width:0;border-left:1px dashed rgba(129,140,248,0.35);height:${sorted.length * 26}px;">
+    <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--primary);opacity:0.6;">50K</span></div>`;
+  if (pct100 <= 100) {
+    html += `<div style="position:absolute;left:${pct100}%;top:0;bottom:0;width:0;border-left:1px dashed rgba(52,211,153,0.35);height:${sorted.length * 26}px;">
+      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--accent);opacity:0.6;">100K</span></div>`;
   }
-  if (max >= 100000) {
-    html += `<div style="position:absolute;left:0;right:0;bottom:${line100}%;border-top:1px dashed rgba(52,211,153,0.3);pointer-events:none;z-index:1;">
-      <span style="position:absolute;left:0;top:-14px;font-size:0.5rem;color:var(--accent);opacity:0.6;">100K</span></div>`;
-  }
+  html += '</div>';
 
-  sorted.forEach((d, i) => {
-    const val = values[i];
-    const pct = (val / max) * 100;
-    const isAccent = val >= 100000;
-    html += `<div class="bar-col" title="${d.date}: ${val.toLocaleString()} tokens">`;
-    html += `<div class="bar-fill${isAccent ? ' bar-accent' : ''}" style="height:${Math.max(pct, val > 0 ? 2 : 0)}%"></div>`;
-    // 5일 간격으로 라벨
-    if (i % 5 === 0 || i === sorted.length - 1) {
-      html += `<div class="bar-label">${d.date.substring(5)}</div>`;
-    } else {
-      html += `<div class="bar-label"></div>`;
-    }
+  sorted.forEach(d => {
+    const inp = d.input_tokens || 0;
+    const out = d.output_tokens || 0;
+    const total = inp + out;
+    const tier = total >= 100000 ? 'green' : total >= 50000 ? 'blue' : 'gray';
+    const inPct = (inp / maxTotal) * 100;
+    const outPct = (out / maxTotal) * 100;
+    const dateLabel = d.date.substring(5); // MM-DD
+
+    html += `<div class="hbar-row hbar-tier-${tier}" title="${d.date}: input ${formatTokens(inp)}, output ${formatTokens(out)}">`;
+    html += `<div class="hbar-date">${dateLabel}</div>`;
+    html += `<div class="hbar-track">`;
+    html += `<div class="hbar-fill-input" style="width:${inPct}%"></div>`;
+    html += `<div class="hbar-fill-output" style="left:${inPct}%;width:${outPct}%"></div>`;
+    html += `</div>`;
+    html += `<div class="hbar-amount">${formatTokens(total)}</div>`;
     html += `</div>`;
   });
+
+  // Legend
+  html += '<div class="hbar-legend">';
+  html += '<span><span class="hbar-legend-dot" style="background:rgba(129,140,248,0.45);"></span>Input</span>';
+  html += '<span><span class="hbar-legend-dot" style="background:rgba(129,140,248,0.75);"></span>Output</span>';
+  html += '</div>';
+
   html += '</div>';
   container.innerHTML = html;
 }
 
-// ── 활동 시간대 히트맵 ──
-function renderHourHeatmap(raw) {
-  const container = document.getElementById('stats-hour-heatmap');
+// ── 활동 패턴 (7일 x 24시간 히트맵) ──
+function renderActivityPattern(raw) {
+  const container = document.getElementById('stats-activity-pattern');
   if (!raw || raw.length === 0) {
     container.innerHTML = '<div class="stats-placeholder">보고 데이터가 없습니다.</div>';
     return;
   }
-
-  // 시간대별 총 토큰 집계 (hourly 데이터 기반, 각 날짜의 최신 보고만)
-  const tokensByHour = {};
-  for (let h = 0; h < 24; h++) tokensByHour[h] = 0;
 
   // 날짜별 최신 보고 추출
   const byDate = {};
@@ -1069,32 +1112,63 @@ function renderHourHeatmap(raw) {
     }
   });
 
-  Object.values(byDate).forEach(r => {
-    if (r.hourly && Array.isArray(r.hourly)) {
-      r.hourly.forEach(item => {
-        if (item.h >= 0 && item.h < 24) {
-          tokensByHour[item.h] += (item.in || 0) + (item.out || 0);
-        }
-      });
-    }
+  // 요일(0=월~6=일) x 시간(0~23) 집계
+  const grid = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  const dayLabels = ['월', '화', '수', '목', '금', '토', '일'];
+
+  Object.entries(byDate).forEach(([dateStr, r]) => {
+    if (!r.hourly || !Array.isArray(r.hourly)) return;
+    const dt = new Date(dateStr + 'T00:00:00+09:00');
+    const jsDay = dt.getDay(); // 0=Sun
+    const dow = jsDay === 0 ? 6 : jsDay - 1; // 0=Mon
+    r.hourly.forEach(item => {
+      if (item.h >= 0 && item.h < 24) {
+        grid[dow][item.h] += (item.in || 0) + (item.out || 0);
+      }
+    });
   });
 
-  const max = Math.max(...Object.values(tokensByHour), 1);
+  const allVals = grid.flat();
+  const max = Math.max(...allVals, 1);
 
-  let html = '<div class="hour-heatmap">';
-  for (let h = 0; h < 24; h++) {
-    const val = tokensByHour[h];
-    const level = val === 0 ? 0 : val <= max * 0.25 ? 1 : val <= max * 0.5 ? 2 : val <= max * 0.75 ? 3 : 4;
-    html += `<div class="hour-cell level-${level}" title="${h}시: ${formatTokens(val)}">${val > 0 ? formatTokens(val) : ''}</div>`;
+  // Check if we have any data at all
+  const hasData = allVals.some(v => v > 0);
+  if (!hasData) {
+    container.innerHTML = '<div class="stats-info-msg">시간대별 데이터가 수집되면 활동 패턴이 표시됩니다.</div>';
+    return;
   }
+
+  let html = '<div class="activity-heatmap">';
+  html += '<div class="activity-heatmap-grid">';
+
+  // Header row: empty corner + 24 hour labels
+  html += '<div class="activity-heatmap-header"></div>';
+  for (let h = 0; h < 24; h++) {
+    html += `<div class="activity-heatmap-header">${h}</div>`;
+  }
+
+  // 7 rows (월~일)
+  for (let dow = 0; dow < 7; dow++) {
+    html += `<div class="activity-heatmap-day-label">${dayLabels[dow]}</div>`;
+    for (let h = 0; h < 24; h++) {
+      const val = grid[dow][h];
+      const level = val === 0 ? 0 : val <= max * 0.25 ? 1 : val <= max * 0.5 ? 2 : val <= max * 0.75 ? 3 : 4;
+      html += `<div class="activity-cell level-${level}" title="${dayLabels[dow]} ${h}시: ${formatTokens(val)}"></div>`;
+    }
+  }
+
   html += '</div>';
 
-  html += '<div class="hour-hour-labels">';
-  for (let h = 0; h < 24; h++) {
-    html += `<div class="hour-hour-label">${h}</div>`;
+  // Legend
+  html += '<div class="activity-heatmap-legend">';
+  html += '<span>적음</span>';
+  for (let l = 0; l <= 4; l++) {
+    html += `<div class="activity-legend-cell level-${l} activity-cell"></div>`;
   }
+  html += '<span>많음</span>';
   html += '</div>';
 
+  html += '</div>';
   container.innerHTML = html;
 }
 
