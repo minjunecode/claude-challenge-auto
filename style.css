@@ -1948,12 +1948,12 @@ header h1 {
   pointer-events: none; z-index: 2;
 }
 /* color tiers */
-.hbar-tier-gray .hbar-fill-input { background: rgba(100,100,100,0.35); }
-.hbar-tier-gray .hbar-fill-output { background: rgba(100,100,100,0.55); }
-.hbar-tier-blue .hbar-fill-input { background: rgba(129,140,248,0.45); }
-.hbar-tier-blue .hbar-fill-output { background: rgba(129,140,248,0.75); }
-.hbar-tier-green .hbar-fill-input { background: rgba(52,211,153,0.45); }
-.hbar-tier-green .hbar-fill-output { background: rgba(52,211,153,0.75); }
+.hbar-tier-gray .hbar-fill-input,
+.hbar-tier-gray .hbar-fill-output { background: rgba(100,100,100,0.45); }
+.hbar-tier-blue .hbar-fill-input,
+.hbar-tier-blue .hbar-fill-output { background: rgba(52,211,153,0.55); }
+.hbar-tier-green .hbar-fill-input,
+.hbar-tier-green .hbar-fill-output { background: rgba(52,211,153,0.7); }
 
 /* Legend for daily chart */
 .hbar-legend {
@@ -1983,8 +1983,8 @@ header h1 {
   width: 100%; border-radius: 4px 4px 0 0; display: flex; flex-direction: column;
   overflow: hidden; transition: height 0.3s ease;
 }
-.bar-seg-input { width: 100%; background: rgba(56,189,248,0.45); }
-.bar-seg-output { width: 100%; background: rgba(14,165,233,0.85); }
+.bar-seg-input { width: 100%; background: rgba(129,140,248,0.25); }
+.bar-seg-output { width: 100%; background: rgba(129,140,248,0.5); }
 
 /* Activity pattern heatmap (7x24) */
 .activity-heatmap { width: 100%; }
