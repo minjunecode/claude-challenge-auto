@@ -48,14 +48,22 @@ def setup_config():
 
 
 def count_today_tokens():
-    """~/.claude/ JSONL 파일에서 오늘(KST) 토큰 사용량 집계 (시간대별 포함)"""
+    """~/.claude/ JSONL 파일에서 오늘(KST) 토큰 사용량 집계 (시간대별 포함)
+
+    glob을 **/*.jsonl로 사용하여 subagent JSONL도 포함.
+
+    가중치 스코어:
+      score = (input × 1) + (output × 5) + (cache_creation × 1.25) + (cache_read × 0.1)
+    """
     home = os.path.expanduser("~")
-    jsonl_files = glob.glob(os.path.join(home, ".claude", "projects", "*", "*.jsonl"))
+    # **/*.jsonl → subagents/ 하위 폴더까지 매칭
+    jsonl_files = glob.glob(os.path.join(home, ".claude", "projects", "**", "*.jsonl"), recursive=True)
 
     today = datetime.now(KST).strftime("%Y-%m-%d")
     input_tokens = 0
     output_tokens = 0
-    cache_tokens = 0
+    cache_creation_tokens = 0
+    cache_read_tokens = 0
     sessions = set()
 
     # 시간대별 집계 (0~23시)
@@ -72,14 +80,12 @@ def count_today_tokens():
                     kst_hour = None
 
                     if ts.startswith(today):
-                        # 이미 KST 날짜면 시간 추출
                         try:
                             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                             kst_hour = dt.astimezone(KST).hour
                         except:
                             pass
                     elif ts and "T" in ts:
-                        # UTC → KST 변환
                         try:
                             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                             kst_dt = dt.astimezone(KST)
@@ -97,11 +103,13 @@ def count_today_tokens():
                         if usage and usage.get("output_tokens", 0) > 0:
                             inp = usage.get("input_tokens", 0)
                             out = usage.get("output_tokens", 0)
-                            cch = usage.get("cache_creation_input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+                            cc = usage.get("cache_creation_input_tokens", 0)
+                            cr = usage.get("cache_read_input_tokens", 0)
 
                             input_tokens += inp
                             output_tokens += out
-                            cache_tokens += cch
+                            cache_creation_tokens += cc
+                            cache_read_tokens += cr
 
                             if kst_hour is not None:
                                 hourly[kst_hour]["input"] += inp
@@ -112,6 +120,9 @@ def count_today_tokens():
                                 sessions.add(sid)
                 except:
                     pass
+
+    # 가중치 스코어 계산
+    score = (input_tokens * 1) + (output_tokens * 5) + (cache_creation_tokens * 1.25) + (cache_read_tokens * 0.1)
 
     # 시간대별 데이터를 간결한 리스트로 변환 (0시~23시)
     hourly_list = []
@@ -125,7 +136,9 @@ def count_today_tokens():
         "date": today,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
-        "cache_tokens": cache_tokens,
+        "cache_creation_tokens": cache_creation_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "score": int(score),
         "sessions": len(sessions),
         "hourly": hourly_list,
     }
@@ -171,12 +184,16 @@ def main():
         cfg = setup_config()
 
     usage = count_today_tokens()
-    total = usage["input_tokens"] + usage["output_tokens"] + usage["cache_tokens"]
+    score = usage["score"]
 
     print(f"[{datetime.now(KST).strftime('%H:%M')}] {cfg['nickname']} | "
           f"{usage['date']} | "
-          f"{total:,} tokens | "
+          f"score: {score:,} | "
+          f"in:{usage['input_tokens']:,} out:{usage['output_tokens']:,} "
+          f"cc:{usage['cache_creation_tokens']:,} cr:{usage['cache_read_tokens']:,} | "
           f"{usage['sessions']} sessions", end="")
+
+    total = score
 
     if total == 0:
         print(" | skip (no usage)")

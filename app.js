@@ -247,7 +247,7 @@ function renderAutoStatus() {
 
     // 오늘 토큰 (input+output 기준, cache 제외)
     if (todayUsage) {
-      const ioTotal = (todayUsage.input_tokens || 0) + (todayUsage.output_tokens || 0);
+      const ioTotal = getScore(todayUsage);
       document.getElementById('auto-today-tokens').textContent = formatTokens(ioTotal);
       document.getElementById('auto-today-sessions').textContent = todayUsage.sessions || 0;
     } else {
@@ -271,6 +271,11 @@ function formatTokens(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
   if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
   return String(n);
+}
+
+// 가중치 스코어: score 필드 있으면 사용, 없으면 input+output fallback
+function getScore(d) {
+  return d.score || (d.input_tokens + d.output_tokens);
 }
 
 // 날짜 정규화: 어떤 형식이든 "YYYY-MM-DD"로 변환
@@ -398,7 +403,7 @@ function renderDailyTable(members, submissions) {
     dashboardData.usage.forEach(u => {
       if (dailyMap[u.nickname]) {
         const uDate = normalizeDate(u.date);
-        const ioTokens = (u.input_tokens || 0) + (u.output_tokens || 0);
+        const ioTokens = getScore(u);
         const allTokens = ioTokens + (u.cache_tokens || 0);
         if (!dailyMap[u.nickname][uDate]) dailyMap[u.nickname][uDate] = { done: false, tokens: 0, allTokens: 0, source: '' };
         dailyMap[u.nickname][uDate].tokens = ioTokens;
@@ -530,7 +535,7 @@ function renderMonthlyCalendar() {
   if (dashboardData.usage) {
     dashboardData.usage.forEach(u => {
       if (u.nickname === currentUser.nickname) {
-        const ioTokens = (u.input_tokens || 0) + (u.output_tokens || 0);
+        const ioTokens = getScore(u);
         if (ioTokens > 0) tokenMap[normalizeDate(u.date)] = ioTokens;
       }
     });
@@ -636,7 +641,7 @@ function renderDashboard() {
   if (dashboardData.usage) {
     dashboardData.usage.forEach(u => {
       if (normalizeDate(u.date).startsWith(curMonth) && monthlyTokens[u.nickname] !== undefined) {
-        monthlyTokens[u.nickname] += (u.input_tokens || 0) + (u.output_tokens || 0);
+        monthlyTokens[u.nickname] += getScore(u);
       }
     });
   }
@@ -978,7 +983,7 @@ function renderStatsSummary(daily, points) {
 
   // ── 오늘 토큰 + 목표 프로그레스 ──
   const todayData = daily.find(d => normalizeDate(d.date) === today);
-  const todayTokens = todayData ? (todayData.input_tokens + todayData.output_tokens) : 0;
+  const todayTokens = todayData ? getScore(todayData) : 0;
   document.getElementById('stats-today-tokens').textContent = formatTokens(todayTokens);
 
   // Goal progress bar
@@ -1010,7 +1015,7 @@ function renderStatsSummary(daily, points) {
   const mondayStr = monday.toISOString().split('T')[0];
 
   const weekDays = sorted.filter(d => normalizeDate(d.date) >= mondayStr && normalizeDate(d.date) <= today);
-  const weekTotal = weekDays.reduce((s, d) => s + d.input_tokens + d.output_tokens, 0);
+  const weekTotal = weekDays.reduce((s, d) => s + getScore(d), 0);
   const weekAvg = weekDays.length > 0 ? Math.round(weekTotal / weekDays.length) : 0;
   document.getElementById('stats-weekly-total').textContent = formatTokens(weekTotal);
   document.getElementById('stats-weekly-avg').textContent = formatTokens(weekAvg);
@@ -1018,7 +1023,7 @@ function renderStatsSummary(daily, points) {
   // ── 이번 달 ──
   const curMonth = today.substring(0, 7);
   const monthDays = sorted.filter(d => normalizeDate(d.date).startsWith(curMonth));
-  const monthTotal = monthDays.reduce((s, d) => s + d.input_tokens + d.output_tokens, 0);
+  const monthTotal = monthDays.reduce((s, d) => s + getScore(d), 0);
   const monthPts = points
     .filter(p => (normalizeDate(p.date) || '').startsWith(curMonth))
     .reduce((s, p) => s + p.points, 0);
@@ -1045,7 +1050,7 @@ function renderHourlyChart(raw, date) {
 
   if (!hasHourly) {
     // No hourly data — show informational message instead of faking it
-    const total = latest.input_tokens + latest.output_tokens;
+    const total = getScore(latest);
     container.innerHTML =
       '<div class="stats-info-msg">' +
       '시간대별 데이터는 자동 리포팅 업데이트 후 수집됩니다.<br>' +
@@ -1100,7 +1105,7 @@ function renderDailyTrendChart(daily) {
   }
 
   // Find max for scaling (at least 100K so threshold lines always visible)
-  const maxTotal = Math.max(...sorted.map(d => d.input_tokens + d.output_tokens), 100000);
+  const maxTotal = Math.max(...sorted.map(d => getScore(d)), 100000);
 
   // Build threshold positions
   const pct50 = (50000 / maxTotal) * 100;
@@ -1121,7 +1126,7 @@ function renderDailyTrendChart(daily) {
   sorted.forEach(d => {
     const inp = d.input_tokens || 0;
     const out = d.output_tokens || 0;
-    const total = inp + out;
+    const total = getScore(d);
     const tier = total >= 100000 ? 'green' : total >= 50000 ? 'blue' : 'gray';
     const inPct = (inp / maxTotal) * 100;
     const outPct = (out / maxTotal) * 100;

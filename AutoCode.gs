@@ -201,11 +201,12 @@ function handleDashboard() {
     }
   }
 
-  // 사용량 (최근 14일)
+  // 사용량
   var usageSheet = ss.getSheetByName('사용량');
   var usage = [];
   if (usageSheet && usageSheet.getLastRow() > 1) {
     var usageData = usageSheet.getDataRange().getValues();
+    var usageHasScore = usageData[0].length >= 9;
     for (var k = 1; k < usageData.length; k++) {
       if (usageData[k][0]) {
         usage.push({
@@ -213,9 +214,9 @@ function handleDashboard() {
           date: toDateStr(usageData[k][1]),
           input_tokens: Number(usageData[k][2]) || 0,
           output_tokens: Number(usageData[k][3]) || 0,
-          cache_tokens: Number(usageData[k][4]) || 0,
-          sessions: Number(usageData[k][5]) || 0,
-          reportedAt: toDateTimeStr(usageData[k][6])
+          score: usageHasScore ? (Number(usageData[k][6]) || 0) : 0,
+          sessions: Number(usageHasScore ? usageData[k][7] : usageData[k][5]) || 0,
+          reportedAt: toDateTimeStr(usageHasScore ? usageData[k][8] : usageData[k][6])
         });
       }
     }
@@ -281,14 +282,26 @@ function handleDashboard() {
 }
 
 // ── 사용량 보고 (PC에서 Hook으로 전송) ──
+// 가중치 스코어: (input×1) + (output×5) + (cache_creation×1.25) + (cache_read×0.1)
 function handleReportUsage(params) {
   var nickname = (params.nickname || '').trim();
   var password = (params.password || '').trim();
   var date = (params.date || '').trim();
   var inputTokens = parseInt(params.input_tokens) || 0;
   var outputTokens = parseInt(params.output_tokens) || 0;
-  var cacheTokens = parseInt(params.cache_tokens) || 0;
+  var cacheCreationTokens = parseInt(params.cache_creation_tokens) || 0;
+  var cacheReadTokens = parseInt(params.cache_read_tokens) || 0;
+  var score = parseInt(params.score) || 0;
   var sessions = parseInt(params.sessions) || 0;
+
+  // 하위 호환: 이전 스크립트가 cache_tokens 하나로 보내는 경우
+  if (!cacheCreationTokens && !cacheReadTokens && params.cache_tokens) {
+    cacheCreationTokens = parseInt(params.cache_tokens) || 0;
+  }
+  // score가 없으면 서버에서 계산
+  if (!score) {
+    score = Math.round((inputTokens * 1) + (outputTokens * 5) + (cacheCreationTokens * 1.25) + (cacheReadTokens * 0.1));
+  }
 
   if (!nickname || !password || !date) return { success: false, error: '필수 파라미터가 누락되었습니다.' };
 
@@ -307,22 +320,21 @@ function handleReportUsage(params) {
   if (!authenticated) return { success: false, error: '인증 실패.' };
 
   var now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
-  var totalTokens = inputTokens + outputTokens + cacheTokens;
 
   // ① 사용량_raw: 보고 원본 + 시간대별 데이터 보존
   var rawSheet = ss.getSheetByName('사용량_raw');
   if (!rawSheet) {
     rawSheet = ss.insertSheet('사용량_raw');
-    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt', 'hourly']);
+    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt', 'hourly']);
   }
   var hourlyJson = params.hourly ? JSON.stringify(params.hourly) : '';
-  rawSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheTokens, sessions, now, hourlyJson]);
+  rawSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, score, sessions, now, hourlyJson]);
 
   // ② 사용량: 일별 최종값만 upsert (프론트 표시용)
   var usageSheet = ss.getSheetByName('사용량');
   if (!usageSheet) {
     usageSheet = ss.insertSheet('사용량');
-    usageSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt']);
+    usageSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt']);
   }
 
   var usageData = usageSheet.getDataRange().getValues();
@@ -334,26 +346,23 @@ function handleReportUsage(params) {
   }
 
   if (existingRow > 0) {
-    usageSheet.getRange(existingRow, 3, 1, 5).setValues([[inputTokens, outputTokens, cacheTokens, sessions, now]]);
+    usageSheet.getRange(existingRow, 3, 1, 7).setValues([[inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, score, sessions, now]]);
   } else {
-    usageSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheTokens, sessions, now]);
+    usageSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, score, sessions, now]);
   }
 
-  // 자동 인증: 50K → 1pt, 100K → 2pt (하루 최대 2pt)
-  var ioTokens = inputTokens + outputTokens;
-  var earnedPts = ioTokens >= 100000 ? 2 : (ioTokens >= 50000 ? 1 : 0);
+  // 자동 인증: score 기반 포인트 (50K → 1pt, 100K → 2pt)
+  var earnedPts = score >= 100000 ? 2 : (score >= 50000 ? 1 : 0);
   if (earnedPts > 0) {
     var recordSheet = ss.getSheetByName('인증기록');
     if (recordSheet) {
       var records = recordSheet.getDataRange().getValues();
       var alreadyExists = false;
       for (var k = 1; k < records.length; k++) {
-        // resetsAt(col 8) 또는 submittedAt(col 5)에서 날짜 매칭
         var storedDate = toDateStr(records[k][8]) || toDateStr(records[k][5]);
         if (String(records[k][0]) === nickname && String(records[k][6]) === 'auto' && storedDate === date) {
-          // 기존 기록의 포인트 + 토큰 업데이트
           recordSheet.getRange(k + 1, 5).setValue(earnedPts);
-          recordSheet.getRange(k + 1, 8).setValue(totalTokens);
+          recordSheet.getRange(k + 1, 8).setValue(score);
           recordSheet.getRange(k + 1, 9).setNumberFormat('@').setValue(date);
           alreadyExists = true;
           break;
@@ -369,12 +378,12 @@ function handleReportUsage(params) {
         var week = Math.ceil(((utcD - yearStart) / 86400000 + 1) / 7);
         var year = d.getFullYear();
 
-        recordSheet.appendRow([nickname, week, year, 'session', earnedPts, now, 'auto', totalTokens, "'" + date]);
+        recordSheet.appendRow([nickname, week, year, 'session', earnedPts, now, 'auto', score, "'" + date]);
       }
     }
   }
 
-  return { success: true, message: '사용량 보고 완료', date: date, totalTokens: totalTokens };
+  return { success: true, message: '사용량 보고 완료', date: date, score: score };
 }
 
 // ── 수동 스크린샷 업로드 ──
@@ -490,22 +499,27 @@ function handlePersonalStats(params) {
   if (!authenticated) return { success: false, error: '인증 실패.' };
 
   // 사용량_raw (시간별 스냅샷)
+  // 새 컬럼: nickname, date, input, output, cache_creation, cache_read, score, sessions, reportedAt, hourly
+  // 구 컬럼: nickname, date, input, output, cache_tokens, sessions, reportedAt, hourly
   var rawData = [];
   var rawSheet = ss.getSheetByName('사용량_raw');
   if (rawSheet && rawSheet.getLastRow() > 1) {
     var rows = rawSheet.getDataRange().getValues();
+    var rawHeaders = rows[0];
+    var hasScore = rawHeaders.length >= 10; // 새 형식 (score 컬럼 있음)
     for (var r = 1; r < rows.length; r++) {
       if (String(rows[r][0]).trim() === nickname) {
-        var hourlyStr = rows[r][7] || '';
+        var hourlyStr = hasScore ? (rows[r][9] || '') : (rows[r][7] || '');
         var hourly = null;
         if (hourlyStr) { try { hourly = JSON.parse(hourlyStr); } catch(e) {} }
+        var rowScore = hasScore ? (Number(rows[r][6]) || 0) : 0;
         rawData.push({
           date: toDateStr(rows[r][1]),
           input_tokens: Number(rows[r][2]) || 0,
           output_tokens: Number(rows[r][3]) || 0,
-          cache_tokens: Number(rows[r][4]) || 0,
-          sessions: Number(rows[r][5]) || 0,
-          reportedAt: toDateTimeStr(rows[r][6]),
+          score: rowScore,
+          sessions: Number(hasScore ? rows[r][7] : rows[r][5]) || 0,
+          reportedAt: toDateTimeStr(hasScore ? rows[r][8] : rows[r][6]),
           hourly: hourly
         });
       }
@@ -513,19 +527,24 @@ function handlePersonalStats(params) {
   }
 
   // 사용량 (일별 최종)
+  // 새 컬럼: nickname, date, input, output, cache_creation, cache_read, score, sessions, reportedAt
+  // 구 컬럼: nickname, date, input, output, cache_tokens, sessions, reportedAt
   var dailyData = [];
   var usageSheet = ss.getSheetByName('사용량');
   if (usageSheet && usageSheet.getLastRow() > 1) {
     var uRows = usageSheet.getDataRange().getValues();
+    var usageHeaders = uRows[0];
+    var hasUsageScore = usageHeaders.length >= 9;
     for (var u = 1; u < uRows.length; u++) {
       if (String(uRows[u][0]).trim() === nickname) {
+        var uScore = hasUsageScore ? (Number(uRows[u][6]) || 0) : 0;
         dailyData.push({
           date: toDateStr(uRows[u][1]),
           input_tokens: Number(uRows[u][2]) || 0,
           output_tokens: Number(uRows[u][3]) || 0,
-          cache_tokens: Number(uRows[u][4]) || 0,
-          sessions: Number(uRows[u][5]) || 0,
-          reportedAt: toDateTimeStr(uRows[u][6])
+          score: uScore,
+          sessions: Number(hasUsageScore ? uRows[u][7] : uRows[u][5]) || 0,
+          reportedAt: toDateTimeStr(hasUsageScore ? uRows[u][8] : uRows[u][6])
         });
       }
     }
