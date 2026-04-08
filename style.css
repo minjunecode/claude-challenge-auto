@@ -1858,21 +1858,6 @@ header h1 {
 .hour-hour-labels { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; margin-top: 4px; }
 .hour-hour-label { font-size: 0.5rem; color: var(--muted); text-align: center; }
 
-/* 포인트 테이블 */
-.pts-table { width: 100%; border-collapse: collapse; }
-.pts-table th {
-  font-size: 0.7rem; color: var(--muted); font-weight: 600; text-align: left;
-  padding: 6px 8px; border-bottom: 1px solid var(--border);
-}
-.pts-table td {
-  font-size: 0.8rem; color: var(--text); padding: 8px; border-bottom: 1px solid var(--border);
-}
-.pts-table tr:last-child td { border-bottom: none; }
-.pts-badge {
-  display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700;
-}
-.pts-badge.pts-2 { background: rgba(52,211,153,0.15); color: var(--accent); }
-.pts-badge.pts-1 { background: rgba(129,140,248,0.15); color: var(--primary); }
 
 @media (max-width: 600px) {
   .stats-summary { grid-template-columns: repeat(2, 1fr); }

@@ -157,7 +157,11 @@ async function showMain() {
   document.getElementById('user-info').textContent = currentUser.nickname + (currentUser.isAdmin ? ' (관리자)' : '');
   document.querySelectorAll('.admin-only').forEach(el => { el.style.display = currentUser.isAdmin ? '' : 'none'; });
   await loadDashboard();
-  switchTab('dashboard');
+  // URL hash에서 탭 복원 (새로고침 시 현재 탭 유지)
+  const hash = location.hash.replace('#', '');
+  const validTabs = ['dashboard', 'stats', 'cert', 'admin'];
+  const restoredTab = validTabs.includes(hash) ? hash : 'dashboard';
+  switchTab(restoredTab);
 }
 
 function switchTab(tabName) {
@@ -165,9 +169,20 @@ function switchTab(tabName) {
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
   document.getElementById(`tab-${tabName}`).classList.add('active');
+  // URL hash에 현재 탭 저장 (새로고침 시 복원용)
+  history.replaceState(null, '', '#' + tabName);
   if (tabName === 'dashboard') renderDashboard();
   if (tabName === 'cert') { renderAutoStatus(); }
-  if (tabName === 'stats') loadPersonalStats();
+  if (tabName === 'stats') {
+    // date picker 기본값을 오늘로 (API 응답 전에도 표시)
+    const picker = document.getElementById('stats-date-picker');
+    if (picker && !picker.value) {
+      const now = new Date();
+      const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      picker.value = kst.toISOString().split('T')[0];
+    }
+    loadPersonalStats();
+  }
   if (tabName === 'admin') renderAdminTab();
 }
 
@@ -865,9 +880,8 @@ function renderPersonalStats() {
   renderStatsSummary(daily, points);
   renderDailyTrendChart(daily);
   renderHourHeatmap(raw);
-  renderPointsTable(points);
 
-  // 날짜 선택기 초기화
+  // 날짜 선택기 초기화 — 기본값: 오늘
   const picker = document.getElementById('stats-date-picker');
   if (picker && !picker.dataset.init) {
     const today = new Date();
@@ -875,8 +889,9 @@ function renderPersonalStats() {
     picker.value = kst.toISOString().split('T')[0];
     picker.addEventListener('change', () => renderHourlyChart(raw, picker.value));
     picker.dataset.init = '1';
-    renderHourlyChart(raw, picker.value);
   }
+  // 매번 렌더 시 현재 선택된 날짜로 차트 갱신
+  if (picker) renderHourlyChart(raw, picker.value);
 }
 
 // ── 요약 카드 ──
@@ -1065,23 +1080,3 @@ function renderHourHeatmap(raw) {
 }
 
 // ── 포인트 이력 ──
-function renderPointsTable(points) {
-  const container = document.getElementById('stats-points-table');
-  if (!points || points.length === 0) {
-    container.innerHTML = '<div class="stats-placeholder">포인트 이력이 없습니다.</div>';
-    return;
-  }
-
-  const sorted = [...points].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const recent = sorted.slice(0, 20);
-
-  let html = '<table class="pts-table"><thead><tr><th>날짜</th><th>포인트</th><th>소스</th></tr></thead><tbody>';
-  recent.forEach(p => {
-    const d = normalizeDate(p.date) || '-';
-    const badge = p.points >= 2 ? 'pts-2' : 'pts-1';
-    const srcLabel = p.source === 'auto' ? '자동' : '수동';
-    html += `<tr><td>${d}</td><td><span class="pts-badge ${badge}">${p.points}pt</span></td><td>${srcLabel}</td></tr>`;
-  });
-  html += '</tbody></table>';
-  container.innerHTML = html;
-}

@@ -138,7 +138,7 @@ function handleInit(params) {
   var rawSheet = ss.getSheetByName('사용량_raw');
   if (!rawSheet) {
     rawSheet = ss.insertSheet('사용량_raw');
-    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt']);
+    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_tokens', 'sessions', 'reportedAt', 'hourly']);
   }
 
   return { success: true, message: '초기 설정 완료!' };
