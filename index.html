@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260408f">
+  <link rel="stylesheet" href="style.css?v=20260408g">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -67,7 +67,7 @@
                 <button id="btn-daily-next" class="daily-nav-btn">&rarr;</button>
               </div>
             </div>
-            <div class="daily-legend">100K+ → 1pt · 300K+ → 2pt (가중 스코어)</div>
+            <div class="daily-legend">300K+ → 1pt · 1M+ → 2pt (가중 스코어)</div>
             <div class="daily-table-wrapper">
               <table id="daily-table" class="daily-table">
                 <thead><tr id="daily-header"></tr></thead>
@@ -141,7 +141,7 @@
                 <div><span class="lt-name">Master</span><span class="lt-pts">150pt~</span></div>
                 <div><span class="lt-name">Legend</span><span class="lt-pts">250pt~</span></div>
               </div>
-              <div class="level-tooltip-footer">100K+ → 1pt · 300K+ → 2pt / 일 (가중 스코어)</div>
+              <div class="level-tooltip-footer">300K+ → 1pt · 1M+ → 2pt / 일 (가중 스코어)</div>
             </div>
           </div>
 
@@ -226,7 +226,7 @@
                 <tr><td>cache_creation</td><td>&times;1.25</td><td>input보다 25% 비쌈</td></tr>
                 <tr><td>cache_read</td><td>&times;0.1</td><td>input의 10% (거의 무료)</td></tr>
               </table>
-              <div class="score-points">1pt = 100K score (약 1시간) · 2pt = 300K score (약 3시간)</div>
+              <div class="score-points">1pt = 300K score (약 1시간) · 2pt = 1M score (약 3시간)</div>
             </div>
           </div>
 
@@ -237,11 +237,11 @@
               <div class="stat-value" id="stats-today-tokens">-</div>
               <div class="stat-goal-bar" id="stats-goal-bar">
                 <div class="stat-goal-fill" id="stats-goal-fill"></div>
-                <div class="stat-goal-mark" style="left:33.3%"></div>
+                <div class="stat-goal-mark" style="left:30%"></div>
                 <div class="stat-goal-mark stat-goal-mark-full" style="left:100%"></div>
               </div>
               <div class="stat-goal-labels">
-                <span>0</span><span>100K</span><span>300K</span>
+                <span>0</span><span>300K</span><span>1M</span>
               </div>
               <div class="stat-point-badge" id="stats-today-badge">0pt</div>
             </div>
@@ -317,6 +317,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260408f"></script>
+  <script src="app.js?v=20260408g"></script>
 </body>
 </html>

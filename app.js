@@ -292,8 +292,8 @@ function getScore(d) {
   return Math.round((inp * 1) + (out * 5) + (cc * 1.25) + (cr * 0.1));
 }
 // 포인트 기준 (가중 스코어 기반)
-const POINT_1_THRESHOLD = 100000;   // 1pt: 100K
-const POINT_2_THRESHOLD = 300000;   // 2pt: 300K
+const POINT_1_THRESHOLD = 300000;   // 1pt: 300K
+const POINT_2_THRESHOLD = 1000000;  // 2pt: 1M
 
 // 날짜 정규화: 어떤 형식이든 "YYYY-MM-DD"로 변환
 function normalizeDate(v) {
@@ -1006,7 +1006,7 @@ function renderStatsSummary(daily, points) {
   // Goal progress bar
   const goalFill = document.getElementById('stats-goal-fill');
   if (goalFill) {
-    const pct = Math.min((todayTokens / POINT_2_THRESHOLD) * 100, 100);
+    const pct = Math.min((todayTokens / POINT_2_THRESHOLD) * 100, 110); // allow slight overflow
     goalFill.style.width = pct + '%';
     goalFill.className = 'stat-goal-fill' +
       (todayTokens >= POINT_2_THRESHOLD ? ' goal-100k' : todayTokens >= POINT_1_THRESHOLD ? ' goal-50k' : '');
@@ -1076,21 +1076,22 @@ function renderHourlyChart(raw, date) {
     return;
   }
 
-  // Build hourly data from the latest report (input/output 분리)
+  // Build hourly data from the latest report (가중 스코어 적용)
   const hourlyIn = {}, hourlyOut = {};
   for (let h = 0; h < 24; h++) { hourlyIn[h] = 0; hourlyOut[h] = 0; }
   latest.hourly.forEach(item => {
     const h = item.h;
     if (h >= 0 && h < 24) {
-      hourlyIn[h] = item.in || 0;
-      hourlyOut[h] = item.out || 0;
+      // 가중치: input×1, output×5 (시간대별 cache 데이터 없으므로 in/out만 적용)
+      hourlyIn[h] = (item.in || 0) * 1;
+      hourlyOut[h] = (item.out || 0) * 5;
     }
   });
 
   const max = Math.max(...Array.from({length: 24}, (_, h) => hourlyIn[h] + hourlyOut[h]), 1);
 
   // Snap max to nice breakpoint for consistent scale
-  const barBreaks = [100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000];
+  const barBreaks = [1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000];
   const niceMax = barBreaks.find(b => b >= max) || max;
 
   let html = '<div class="bar-chart">';
@@ -1098,7 +1099,7 @@ function renderHourlyChart(raw, date) {
     const inp = hourlyIn[h], out = hourlyOut[h], total = inp + out;
     const totalPct = Math.min((total / niceMax) * 100, 100);
     const barHeight = total > 0 ? Math.max(totalPct, 4) : 0;
-    html += `<div class="bar-col" title="${h}시: input ${formatTokens(inp)}, output ${formatTokens(out)}">`;
+    html += `<div class="bar-col" title="${h}시: score ${formatTokens(total)} (input×1 + output×5)">`;
     if (total > 0) html += `<div class="bar-value">${formatTokens(total)}</div>`;
     html += `<div class="bar-stack" style="height:${barHeight}%">`;
     html += `<div class="bar-seg-output" style="height:${total > 0 ? (out/total)*100 : 0}%"></div>`;
@@ -1137,6 +1138,7 @@ function renderDailyTrendChart(daily) {
   let html = '<div class="hbar-chart">';
 
   // Scale label (max value on the right)
+  // Scale max label at the right end of the track area
   html += `<div class="hbar-scale-header"><span></span><span class="hbar-scale-max">${formatTokens(maxTotal)}</span></div>`;
 
   // Threshold lines container (positioned over the track area)
@@ -1154,13 +1156,19 @@ function renderDailyTrendChart(daily) {
   sorted.forEach(d => {
     const inp = d.input_tokens || 0;
     const out = d.output_tokens || 0;
+    const cc = d.cache_creation_tokens || 0;
+    const cr = d.cache_read_tokens || 0;
     const total = getScore(d);
     const tier = total >= POINT_2_THRESHOLD ? 'green' : total >= POINT_1_THRESHOLD ? 'blue' : 'gray';
-    const inPct = (inp / maxTotal) * 100;
-    const outPct = (out / maxTotal) * 100;
+    // 가중치 적용된 기여분으로 바 폭 계산
+    const wInp = (inp * 1) + (cc * 1.25) + (cr * 0.1);
+    const wOut = out * 5;
+    const totalPct = (total / maxTotal) * 100;
+    const inPct = total > 0 ? (wInp / total) * totalPct : 0;
+    const outPct = total > 0 ? (wOut / total) * totalPct : 0;
     const dateLabel = d.date.substring(5); // MM-DD
 
-    html += `<div class="hbar-row hbar-tier-${tier}" title="${d.date}: input ${formatTokens(inp)}, output ${formatTokens(out)}">`;
+    html += `<div class="hbar-row hbar-tier-${tier}" title="${d.date}: score ${formatTokens(total)} (in:${formatTokens(inp)} out:${formatTokens(out)})">`;
     html += `<div class="hbar-date">${dateLabel}</div>`;
     html += `<div class="hbar-track">`;
     html += `<div class="hbar-fill-input" style="width:${inPct}%"></div>`;
