@@ -1005,7 +1005,7 @@ function renderPersonalStats() {
 
 // ── 요약 카드 (오늘 / 이번 주 / 이번 달) ──
 function renderStatsSummary(daily, points) {
-  const today = normalizeDate(new Date().toISOString().split('T')[0]);
+  const today = getTodayStr();
 
   // ── 오늘 토큰 + 목표 프로그레스 ──
   const todayData = daily.find(d => normalizeDate(d.date) === today);
@@ -1031,14 +1031,13 @@ function renderStatsSummary(daily, points) {
 
   // ── 이번 주 (월~일) ──
   const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date));
-  // Get current week's Monday
+  // Get current week's Monday (로컬 시간 기준)
   const now = new Date();
-  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  const dayOfWeek = kstNow.getDay(); // 0=Sun
+  const dayOfWeek = now.getDay(); // 0=Sun
   const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const monday = new Date(kstNow);
+  const monday = new Date(now);
   monday.setDate(monday.getDate() - mondayOffset);
-  const mondayStr = monday.toISOString().split('T')[0];
+  const mondayStr = `${monday.getFullYear()}-${String(monday.getMonth()+1).padStart(2,'0')}-${String(monday.getDate()).padStart(2,'0')}`;
 
   const weekDays = sorted.filter(d => normalizeDate(d.date) >= mondayStr && normalizeDate(d.date) <= today);
   const weekTotal = weekDays.reduce((s, d) => s + getScore(d), 0);

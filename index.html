@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260409f">
+  <link rel="stylesheet" href="style.css?v=20260409g">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -237,15 +237,18 @@
             <div class="stat-card stat-card-today">
               <div class="stat-label">오늘</div>
               <div class="stat-value" id="stats-today-tokens">-</div>
-              <div class="stat-goal-bar" id="stats-goal-bar">
-                <div class="stat-goal-fill" id="stats-goal-fill"></div>
-                <div class="stat-goal-mark" style="left:10%"></div>
-                <div class="stat-goal-mark stat-goal-mark-full" style="left:100%"></div>
-              </div>
-              <div class="stat-goal-labels">
-                <span>0</span><span>1M</span><span>10M</span>
-              </div>
               <div class="stat-point-badge" id="stats-today-badge">0pt</div>
+              <div class="stat-goal-wrap">
+                <div class="stat-goal-bar" id="stats-goal-bar">
+                  <div class="stat-goal-fill" id="stats-goal-fill"></div>
+                  <div class="stat-goal-mark" style="left:10%"></div>
+                </div>
+                <div class="stat-goal-labels">
+                  <span style="left:0">0</span>
+                  <span style="left:10%">1M</span>
+                  <span style="left:100%">10M</span>
+                </div>
+              </div>
             </div>
             <div class="stat-card">
               <div class="stat-label">이번 주</div>
@@ -319,6 +322,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260409f"></script>
+  <script src="app.js?v=20260409g"></script>
 </body>
 </html>

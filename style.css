@@ -1856,38 +1856,43 @@ header h1 {
 }
 .stat-card-today { grid-row: span 1; }
 .stat-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
-.stat-value { font-size: 1.4rem; font-weight: 800; color: var(--text); }
+.stat-value { font-size: 1.4rem; font-weight: 800; color: var(--text); margin-bottom: 2px; }
 .stat-sub-value { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
 .stat-pts-inline { font-weight: 700; }
 
-/* Goal progress bar */
-.stat-goal-bar {
-  position: relative; height: 8px; background: var(--bg);
-  border-radius: 4px; margin-top: 10px; overflow: visible;
-}
-.stat-goal-fill {
-  height: 100%; border-radius: 4px; transition: width 0.4s ease;
-  background: var(--muted);
-}
-.stat-goal-fill.goal-50k { background: var(--primary); }
-.stat-goal-fill.goal-100k { background: var(--accent); }
-.stat-goal-mark {
-  position: absolute; top: -2px; width: 2px; height: 12px;
-  background: var(--muted); opacity: 0.4; transform: translateX(-1px);
-}
-.stat-goal-labels {
-  display: flex; justify-content: space-between;
-  font-size: 0.6rem; color: var(--muted); margin-top: 3px;
-}
-
 /* Point badge */
 .stat-point-badge {
-  display: inline-block; margin-top: 8px; padding: 3px 12px;
+  display: inline-block; margin-bottom: 8px; padding: 3px 12px;
   border-radius: 12px; font-size: 0.75rem; font-weight: 700;
 }
 .stat-point-badge.badge-0 { background: rgba(100,100,100,0.15); color: var(--muted); }
 .stat-point-badge.badge-1 { background: rgba(129,140,248,0.18); color: var(--primary); }
 .stat-point-badge.badge-2 { background: rgba(52,211,153,0.18); color: var(--accent); }
+
+/* Goal progress bar */
+.stat-goal-wrap { position: relative; margin-top: 4px; padding-bottom: 14px; }
+.stat-goal-bar {
+  position: relative; height: 6px; background: var(--bg);
+  border-radius: 3px; overflow: visible;
+}
+.stat-goal-fill {
+  height: 100%; border-radius: 3px; transition: width 0.4s ease;
+  background: var(--muted);
+}
+.stat-goal-fill.goal-50k { background: var(--primary); }
+.stat-goal-fill.goal-100k { background: var(--accent); }
+.stat-goal-mark {
+  position: absolute; top: -1px; width: 1.5px; height: 8px;
+  background: var(--muted); opacity: 0.35; transform: translateX(-1px);
+}
+.stat-goal-labels {
+  position: relative; height: 12px; margin-top: 2px;
+}
+.stat-goal-labels span {
+  position: absolute; font-size: 0.55rem; color: var(--muted);
+  transform: translateX(-50%); white-space: nowrap;
+}
+.stat-goal-labels span:first-child { transform: translateX(0); }
 
 .stats-section {
   background: var(--card); border: 1px solid var(--border);
