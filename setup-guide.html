@@ -257,21 +257,33 @@
         <div class="step-body">
           <div class="step-title">1시간마다 자동 실행 등록</div>
           <div class="step-desc">
-            아래 명령어에서 <strong>Python 경로를 본인 것으로 변경</strong>한 뒤 실행하세요.<br>
-            PC가 켜져 있는 동안 매 시간 자동으로 사용량을 보고합니다.
+            <strong>PowerShell을 관리자 권한으로</strong> 열고, 아래 명령어에서 <strong>Python 경로를 본인 것으로 변경</strong>한 뒤 실행하세요.<br>
+            배터리 모드에서도 실행되고, 놓친 실행은 자동 보충됩니다.
           </div>
-          <div class="code">
+          <div class="code" style="font-size:11.5px;">
             <span class="cm"># Python 경로를 본인 것으로 변경하세요:</span><br>
-            schtasks /create /tn "ClaudeChallenge"<br>
-            &nbsp;&nbsp;/tr "<span class="hl">C:\...\python.exe</span> %USERPROFILE%\.claude\challenge-report.py"<br>
-            &nbsp;&nbsp;/sc hourly /st 00:00 /f
+            $action = New-ScheduledTaskAction `<br>
+            &nbsp;&nbsp;-Execute "<span class="hl">C:\...\python.exe</span>" `<br>
+            &nbsp;&nbsp;-Argument "$env:USERPROFILE\.claude\challenge-report.py"<br><br>
+            $trigger = New-ScheduledTaskTrigger `<br>
+            &nbsp;&nbsp;-Once -At "00:00" `<br>
+            &nbsp;&nbsp;-RepetitionInterval (New-TimeSpan -Hours 1)<br><br>
+            $settings = New-ScheduledTaskSettingsSet `<br>
+            &nbsp;&nbsp;-AllowStartIfOnBatteries `<br>
+            &nbsp;&nbsp;-DontStopIfGoingOnBatteries `<br>
+            &nbsp;&nbsp;-StartWhenAvailable `<br>
+            &nbsp;&nbsp;-ExecutionTimeLimit (New-TimeSpan -Minutes 10)<br><br>
+            Register-ScheduledTask -TaskName "ClaudeChallenge" `<br>
+            &nbsp;&nbsp;-Action $action -Trigger $trigger -Settings $settings -Force
           </div>
           <div class="expected">
-            <span class="ok">성공: 예약된 작업 "ClaudeChallenge"이(가) 만들어졌습니다.</span>
+            <span class="ok">TaskPath  TaskName          State</span><br>
+            <span class="ok">--------  --------          -----</span><br>
+            <span class="ok">\         ClaudeChallenge   Ready</span>
           </div>
           <div class="alert alert-dim" style="margin-top:8px;">
-            <strong>예시 (한 줄로 입력):</strong><br>
-            <code style="color:#a1a1aa;font-size:11px;word-break:break-all;">schtasks /create /tn "ClaudeChallenge" /tr "C:\Users\내이름\AppData\Local\Python\bin\python.exe %USERPROFILE%\.claude\challenge-report.py" /sc hourly /st 00:00 /f</code>
+            <strong>⚠️ 중요:</strong> <code style="color:#ef4444;">schtasks /create</code> 대신 <strong>PowerShell</strong>을 사용해야 합니다.<br>
+            schtasks 기본 설정은 배터리 모드에서 실행이 차단되어 노트북에서 자동 보고가 안 됩니다.
           </div>
         </div>
       </div>
