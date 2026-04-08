@@ -72,23 +72,39 @@ function handleRequest(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// ── 로그인 ──
+// ── 로그인 (dashboard + personalStats 통합 응답) ──
 function handleLogin(params) {
   var nickname = (params.nickname || '').trim();
   var password = (params.password || '').trim();
   if (!nickname || !password) return { success: false, error: '닉네임과 비밀번호를 입력하세요.' };
 
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('멤버');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('멤버');
   if (!sheet) return { success: false, error: '"멤버" 시트를 찾을 수 없습니다.' };
 
   var data = sheet.getDataRange().getValues();
+  var loginSuccess = false;
+  var loginIsAdmin = false;
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim() === nickname && String(data[i][1]).trim() === password) {
-      var hasAutoReport = checkHasAutoReport(nickname);
-      return { success: true, nickname: nickname, isAdmin: data[i][2] === true || data[i][2] === 'TRUE', hasAutoReport: hasAutoReport };
+      loginSuccess = true;
+      loginIsAdmin = data[i][2] === true || data[i][2] === 'TRUE';
+      break;
     }
   }
-  return { success: false, error: '닉네임 또는 비밀번호가 틀렸습니다.' };
+  if (!loginSuccess) return { success: false, error: '닉네임 또는 비밀번호가 틀렸습니다.' };
+
+  // 로그인 성공 → dashboard 데이터를 함께 반환 (API 1회로 통합)
+  var dashResult = handleDashboard(params);
+  var hasAutoReport = checkHasAutoReport(nickname);
+
+  return {
+    success: true,
+    nickname: nickname,
+    isAdmin: loginIsAdmin,
+    hasAutoReport: hasAutoReport,
+    dashboard: dashResult
+  };
 }
 
 function handleRegister(params) {

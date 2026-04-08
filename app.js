@@ -125,6 +125,22 @@ async function handleLogin(e) {
   if (result.success) {
     currentUser = { nickname: result.nickname, isAdmin: result.isAdmin, hasAutoReport: result.hasAutoReport, password };
     localStorage.setItem('challengeUser', JSON.stringify(currentUser));
+
+    // 로그인 응답에 dashboard 데이터가 포함되어 있으면 즉시 캐시
+    if (result.dashboard && result.dashboard.success) {
+      const db = result.dashboard;
+      // myStats 분리 저장
+      if (db.myStats) {
+        const ps = { success: true, raw: db.myStats.raw, daily: db.myStats.daily, points: db.myStats.points };
+        personalStatsData = ps;
+        personalStatsLoaded = true;
+        localStorage.setItem('personalStatsCache', JSON.stringify(ps));
+        delete db.myStats;
+      }
+      dashboardData = db;
+      localStorage.setItem('dashboardCache', JSON.stringify(db));
+    }
+
     showMain();
   } else { errorEl.textContent = result.error; }
 }
@@ -274,22 +290,25 @@ function normalizeDate(v) {
 // ── 대시보드 ──
 async function loadDashboard() {
   // 1) 캐시에서 즉시 렌더
-  const cached = localStorage.getItem('dashboardCache');
-  if (cached) {
-    try {
-      dashboardData = JSON.parse(cached);
-      renderDashboard();
-    } catch { /* ignore */ }
+  if (!dashboardData) {
+    const cached = localStorage.getItem('dashboardCache');
+    if (cached) {
+      try { dashboardData = JSON.parse(cached); } catch { /* ignore */ }
+    }
   }
-  const psCached = localStorage.getItem('personalStatsCache');
-  if (psCached) {
-    try {
-      const ps = JSON.parse(psCached);
-      if (ps && ps.success) { personalStatsData = ps; personalStatsLoaded = true; }
-    } catch { /* ignore */ }
+  if (dashboardData) renderDashboard();
+
+  if (!personalStatsLoaded) {
+    const psCached = localStorage.getItem('personalStatsCache');
+    if (psCached) {
+      try {
+        const ps = JSON.parse(psCached);
+        if (ps && ps.success) { personalStatsData = ps; personalStatsLoaded = true; }
+      } catch { /* ignore */ }
+    }
   }
 
-  // 2) API에서 최신 데이터 가져오기 (personalStats도 함께 요청)
+  // 2) 백그라운드에서 최신 데이터 가져오기
   const params = {};
   if (currentUser && currentUser.nickname) params.nickname = currentUser.nickname;
   if (currentUser && currentUser.password) params.password = currentUser.password;
