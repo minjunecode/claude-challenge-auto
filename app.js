@@ -652,8 +652,27 @@ function renderDashboard() {
 
   const ranked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, ...scores[m.nickname] })).sort((a, b) => b.total - a.total);
 
-  // 월간 토큰 순위 계산
+  // 주간 토큰 순위 계산
   const now2 = new Date();
+  const dow = now2.getDay(); // 0=Sun
+  const monOff = dow === 0 ? 6 : dow - 1;
+  const mon = new Date(now2);
+  mon.setDate(mon.getDate() - monOff);
+  const monStr = `${mon.getFullYear()}-${String(mon.getMonth()+1).padStart(2,'0')}-${String(mon.getDate()).padStart(2,'0')}`;
+  const todayStr2 = getTodayStr();
+  const weeklyTokens = {};
+  members.forEach(m => { weeklyTokens[m.nickname] = 0; });
+  if (dashboardData.usage) {
+    dashboardData.usage.forEach(u => {
+      const ud = normalizeDate(u.date);
+      if (ud >= monStr && ud <= todayStr2 && weeklyTokens[u.nickname] !== undefined) {
+        weeklyTokens[u.nickname] += getScore(u);
+      }
+    });
+  }
+  const weeklyTokenRanked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, weekTokens: weeklyTokens[m.nickname] || 0, ...scores[m.nickname] })).sort((a, b) => b.weekTokens - a.weekTokens);
+
+  // 월간 토큰 순위 계산
   const curMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
   const monthlyTokens = {};
   members.forEach(m => { monthlyTokens[m.nickname] = 0; });
@@ -668,6 +687,7 @@ function renderDashboard() {
 
   // 저장 (renderPodium에서 사용)
   dashboardData._ranked = ranked;
+  dashboardData._weeklyTokenRanked = weeklyTokenRanked;
   dashboardData._tokenRanked = tokenRanked;
 
   // 일간 테이블
@@ -741,8 +761,9 @@ function switchRankView(view) {
 
 function renderPodium(view) {
   if (!dashboardData) return;
-  const isTokens = view === 'tokens';
-  const ranked = isTokens ? (dashboardData._tokenRanked || []) : (dashboardData._ranked || []);
+  const ranked = view === 'tokens' ? (dashboardData._tokenRanked || [])
+    : view === 'weeklyTokens' ? (dashboardData._weeklyTokenRanked || [])
+    : (dashboardData._ranked || []);
 
   const podium = document.getElementById('podium');
   podium.innerHTML = '';
@@ -751,15 +772,20 @@ function renderPodium(view) {
     const level = getLevel(r.total);
     const card = document.createElement('div');
     card.className = `podium-card${i === 0 ? ' first' : ''}`;
-    const mainStat = isTokens
-      ? `<div class="podium-pts">${formatTokens(r.monthTokens)}</div><div class="podium-weekly">이번 달 토큰</div>`
-      : `<div class="podium-pts">${r.total}pt</div><div class="podium-weekly">this week +${r.weekly}</div>`;
+    let mainStat;
+    if (view === 'tokens') {
+      mainStat = `<div class="podium-pts">${formatTokens(r.monthTokens)}</div><div class="podium-weekly">이번 달 토큰</div>`;
+    } else if (view === 'weeklyTokens') {
+      mainStat = `<div class="podium-pts">${formatTokens(r.weekTokens)}</div><div class="podium-weekly">이번 주 토큰</div>`;
+    } else {
+      mainStat = `<div class="podium-pts">${r.total}pt</div><div class="podium-weekly">this week +${r.weekly}</div>`;
+    }
     card.innerHTML = `
       <div class="podium-medal">${medals[i]}</div>
       <div class="podium-name">${escapeHtml(r.nickname)}</div>
       <div class="podium-level">${level.name}</div>
       ${mainStat}
-      ${!isTokens && r.streak > 0 ? `<span class="podium-streak${r.streak >= 3 ? ' hot' : ''}">${r.streak}w streak</span>` : ''}
+      ${view === 'points' && r.streak > 0 ? `<span class="podium-streak${r.streak >= 3 ? ' hot' : ''}">${r.streak}w streak</span>` : ''}
     `;
     podium.appendChild(card);
   });
@@ -775,12 +801,12 @@ function renderPodium(view) {
       const level = getLevel(r.total);
       const item = document.createElement('div');
       item.className = 'rest-rank-item';
-      const statText = isTokens ? formatTokens(r.monthTokens) : `${r.total}pt`;
+      const statText = view === 'tokens' ? formatTokens(r.monthTokens) : view === 'weeklyTokens' ? formatTokens(r.weekTokens) : `${r.total}pt`;
       item.innerHTML = `
         <span class="rest-rank-num">${i + 4}</span>
         <div class="rest-rank-info">
           <div class="rest-rank-name">${escapeHtml(r.nickname)}</div>
-          <div class="rest-rank-level">${level.name}${!isTokens && r.streak > 0 ? ` · ${r.streak}w streak` : ''}</div>
+          <div class="rest-rank-level">${level.name}${view === 'points' && r.streak > 0 ? ` · ${r.streak}w streak` : ''}</div>
         </div>
         <span class="rest-rank-pts">${statText}</span>
       `;
