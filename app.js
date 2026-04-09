@@ -302,6 +302,7 @@ function getScore(d) {
 // 포인트 기준 (가중 스코어 기반)
 const POINT_1_THRESHOLD = 1000000;    // 1pt: 1M
 const POINT_2_THRESHOLD = 10000000;   // 2pt: 10M
+const POINT_3_THRESHOLD = 50000000;   // 3pt: 50M
 
 // 날짜 정규화: 어떤 형식이든 "YYYY-MM-DD"로 변환
 function normalizeDate(v) {
@@ -479,7 +480,10 @@ function renderDailyTable(members, submissions) {
         td.classList.add('daily-td-future');
       } else if (d.date === today) {
         td.classList.add('daily-td-today');
-        if (tokens >= POINT_2_THRESHOLD) {
+        if (tokens >= POINT_3_THRESHOLD) {
+          td.classList.add('daily-td-done');
+          td.textContent = 'OOO';
+        } else if (tokens >= POINT_2_THRESHOLD) {
           td.classList.add('daily-td-done');
           td.textContent = 'OO';
         } else if (tokens >= POINT_1_THRESHOLD) {
@@ -490,7 +494,10 @@ function renderDailyTable(members, submissions) {
           td.textContent = '-';
         }
       } else {
-        if (tokens >= POINT_2_THRESHOLD) {
+        if (tokens >= POINT_3_THRESHOLD) {
+          td.classList.add('daily-td-done');
+          td.textContent = 'OOO';
+        } else if (tokens >= POINT_2_THRESHOLD) {
           td.classList.add('daily-td-done');
           td.textContent = 'OO';
         } else if (tokens >= POINT_1_THRESHOLD) {
@@ -1041,18 +1048,18 @@ function renderStatsSummary(daily, points) {
   // Goal progress bar
   const goalFill = document.getElementById('stats-goal-fill');
   if (goalFill) {
-    const pct = Math.min((todayTokens / POINT_2_THRESHOLD) * 100, 110); // allow slight overflow
+    const pct = Math.min((todayTokens / POINT_3_THRESHOLD) * 100, 110);
     goalFill.style.width = pct + '%';
     goalFill.className = 'stat-goal-fill' +
-      (todayTokens >= POINT_2_THRESHOLD ? ' goal-100k' : todayTokens >= POINT_1_THRESHOLD ? ' goal-50k' : '');
+      (todayTokens >= POINT_3_THRESHOLD ? ' goal-3pt' : todayTokens >= POINT_2_THRESHOLD ? ' goal-100k' : todayTokens >= POINT_1_THRESHOLD ? ' goal-50k' : '');
   }
 
   // Point badge
   const badge = document.getElementById('stats-today-badge');
   if (badge) {
-    const pts = todayTokens >= POINT_2_THRESHOLD ? 2 : todayTokens >= POINT_1_THRESHOLD ? 1 : 0;
+    const pts = todayTokens >= POINT_3_THRESHOLD ? 3 : todayTokens >= POINT_2_THRESHOLD ? 2 : todayTokens >= POINT_1_THRESHOLD ? 1 : 0;
     badge.textContent = pts + 'pt';
-    badge.className = 'stat-point-badge badge-' + pts;
+    badge.className = 'stat-point-badge badge-' + Math.min(pts, 2);
   }
 
   // ── 이번 주 (월~일) ──
@@ -1167,11 +1174,11 @@ function renderDailyTrendChart(daily) {
   // Build threshold positions
   const pct1pt = (POINT_1_THRESHOLD / maxTotal) * 100;
   const pct2pt = (POINT_2_THRESHOLD / maxTotal) * 100;
+  const pct3pt = (POINT_3_THRESHOLD / maxTotal) * 100;
 
   let html = '<div class="hbar-chart">';
 
   // Scale label (max value on the right)
-  // Scale max label at the right end of the track area
   html += `<div class="hbar-scale-header"><span></span><span class="hbar-scale-max">${formatTokens(maxTotal)}</span></div>`;
 
   // Threshold lines container (positioned over the track area)
@@ -1184,11 +1191,15 @@ function renderDailyTrendChart(daily) {
     html += `<div style="position:absolute;left:${pct2pt}%;top:0;bottom:0;width:0;border-left:1.5px dashed rgba(234,88,12,0.5);height:${sorted.length * 26 + 4}px;z-index:5;">
       <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:rgba(234,88,12,0.8);opacity:1;white-space:nowrap;">${formatTokens(POINT_2_THRESHOLD)} (2pt)</span></div>`;
   }
+  if (pct3pt <= 100) {
+    html += `<div style="position:absolute;left:${pct3pt}%;top:0;bottom:0;width:0;border-left:1.5px dashed rgba(220,38,38,0.5);height:${sorted.length * 26 + 4}px;z-index:5;">
+      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:rgba(220,38,38,0.8);opacity:1;white-space:nowrap;">${formatTokens(POINT_3_THRESHOLD)} (3pt)</span></div>`;
+  }
   html += '</div>';
 
   sorted.forEach(d => {
     const total = getScore(d);
-    const tier = total >= POINT_2_THRESHOLD ? 'green' : total >= POINT_1_THRESHOLD ? 'blue' : 'gray';
+    const tier = total >= POINT_3_THRESHOLD ? 'gold' : total >= POINT_2_THRESHOLD ? 'green' : total >= POINT_1_THRESHOLD ? 'blue' : 'gray';
     const totalPct = (total / maxTotal) * 100;
     const dateLabel = d.date.substring(5); // MM-DD
 

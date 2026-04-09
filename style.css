@@ -1881,6 +1881,7 @@ header h1 {
 }
 .stat-goal-fill.goal-50k { background: var(--primary); }
 .stat-goal-fill.goal-100k { background: var(--accent); }
+.stat-goal-fill.goal-3pt { background: rgba(245,158,11,0.85); }
 .stat-goal-mark {
   position: absolute; top: -1px; width: 1.5px; height: 8px;
   background: var(--muted); opacity: 0.35; transform: translateX(-1px);
@@ -1959,6 +1960,8 @@ header h1 {
 .hbar-tier-blue .hbar-fill-output { background: rgba(52,211,153,0.55); }
 .hbar-tier-green .hbar-fill-input,
 .hbar-tier-green .hbar-fill-output { background: rgba(52,211,153,0.7); }
+.hbar-tier-gold .hbar-fill-input,
+.hbar-tier-gold .hbar-fill-output { background: rgba(245,158,11,0.7); }
 
 /* Legend for daily chart */
 .hbar-legend {
