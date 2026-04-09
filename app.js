@@ -1178,8 +1178,8 @@ function renderDailyTrendChart(daily) {
     return;
   }
 
-  // 50M 고정 스케일
-  const maxTotal = 50000000;
+  // 60M 스케일 (50M 라인이 오른쪽 값과 겹치지 않도록 여유)
+  const maxTotal = 60000000;
 
   // Build threshold positions
   const pct1pt = (POINT_1_THRESHOLD / maxTotal) * 100;
