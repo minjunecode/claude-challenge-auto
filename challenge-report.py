@@ -69,7 +69,7 @@ def count_today_tokens():
     # 시간대별 집계 (0~23시)
     hourly = {}
     for h in range(24):
-        hourly[h] = {"input": 0, "output": 0}
+        hourly[h] = {"input": 0, "output": 0, "cc": 0, "cr": 0}
 
     for fpath in jsonl_files:
         with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
@@ -114,6 +114,8 @@ def count_today_tokens():
                             if kst_hour is not None:
                                 hourly[kst_hour]["input"] += inp
                                 hourly[kst_hour]["output"] += out
+                                hourly[kst_hour]["cc"] += cc
+                                hourly[kst_hour]["cr"] += cr
 
                             sid = obj.get("sessionId", "")
                             if sid:
@@ -129,8 +131,10 @@ def count_today_tokens():
     for h in range(24):
         inp = hourly[h]["input"]
         out = hourly[h]["output"]
-        if inp > 0 or out > 0:
-            hourly_list.append({"h": h, "in": inp, "out": out})
+        cc = hourly[h]["cc"]
+        cr = hourly[h]["cr"]
+        if inp > 0 or out > 0 or cc > 0 or cr > 0:
+            hourly_list.append({"h": h, "in": inp, "out": out, "cc": cc, "cr": cr})
 
     return {
         "date": today,

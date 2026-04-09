@@ -1993,6 +1993,8 @@ header h1 {
 }
 .bar-seg-input { width: 100%; background: rgba(129,140,248,0.25); }
 .bar-seg-output { width: 100%; background: rgba(129,140,248,0.5); }
+.bar-seg-cc { width: 100%; background: rgba(167,139,250,0.4); }
+.bar-seg-cr { width: 100%; background: rgba(167,139,250,0.2); }
 
 /* Activity pattern heatmap (7x24) */
 .activity-heatmap { width: 100%; }

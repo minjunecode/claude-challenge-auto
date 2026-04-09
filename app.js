@@ -1118,18 +1118,20 @@ function renderHourlyChart(raw, date) {
   }
 
   // Build hourly data from the latest report (가중 스코어 적용)
-  const hourlyIn = {}, hourlyOut = {};
-  for (let h = 0; h < 24; h++) { hourlyIn[h] = 0; hourlyOut[h] = 0; }
+  const hourlyScores = {};
+  for (let h = 0; h < 24; h++) { hourlyScores[h] = { inp: 0, out: 0, cc: 0, cr: 0, total: 0 }; }
   latest.hourly.forEach(item => {
     const h = item.h;
     if (h >= 0 && h < 24) {
-      // 가중치: input×1, output×5 (시간대별 cache 데이터 없으므로 in/out만 적용)
-      hourlyIn[h] = (item.in || 0) * 1;
-      hourlyOut[h] = (item.out || 0) * 5;
+      const inp = (item.in || 0) * 1;
+      const out = (item.out || 0) * 5;
+      const cc = (item.cc || 0) * 1.25;
+      const cr = (item.cr || 0) * 0.1;
+      hourlyScores[h] = { inp, out, cc, cr, total: inp + out + cc + cr };
     }
   });
 
-  const max = Math.max(...Array.from({length: 24}, (_, h) => hourlyIn[h] + hourlyOut[h]), 1);
+  const max = Math.max(...Array.from({length: 24}, (_, h) => hourlyScores[h].total), 1);
 
   // Snap max to nice breakpoint for consistent scale
   const barBreaks = [1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000];
@@ -1137,23 +1139,31 @@ function renderHourlyChart(raw, date) {
 
   let html = '<div class="bar-chart">';
   for (let h = 0; h < 24; h++) {
-    const inp = hourlyIn[h], out = hourlyOut[h], total = inp + out;
+    const s = hourlyScores[h];
+    const total = s.total;
     const totalPct = Math.min((total / niceMax) * 100, 100);
     const barHeight = total > 0 ? Math.max(totalPct, 4) : 0;
-    html += `<div class="bar-col" title="${h}시: score ${formatTokens(total)} (input×1 + output×5)">`;
+    html += `<div class="bar-col" title="${h}시: ${formatTokens(total)} (I×1+O×5+Cw×1.25+Cr×0.1)">`;
     if (total > 0) html += `<div class="bar-value">${formatTokens(total)}</div>`;
     html += `<div class="bar-stack" style="height:${barHeight}%">`;
-    html += `<div class="bar-seg-output" style="height:${total > 0 ? (out/total)*100 : 0}%"></div>`;
-    html += `<div class="bar-seg-input" style="height:${total > 0 ? (inp/total)*100 : 0}%"></div>`;
+    // 아래→위: cache_read, cache_write, output, input
+    if (total > 0) {
+      html += `<div class="bar-seg-cr" style="height:${(s.cr/total)*100}%"></div>`;
+      html += `<div class="bar-seg-cc" style="height:${(s.cc/total)*100}%"></div>`;
+      html += `<div class="bar-seg-output" style="height:${(s.out/total)*100}%"></div>`;
+      html += `<div class="bar-seg-input" style="height:${(s.inp/total)*100}%"></div>`;
+    }
     html += `</div>`;
     html += `<div class="bar-label">${h}</div>`;
     html += `</div>`;
   }
   html += '</div>';
   // Legend
-  html += '<div style="display:flex;gap:14px;justify-content:flex-end;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">';
+  html += '<div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">';
   html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(129,140,248,0.25);vertical-align:middle;margin-right:3px;"></span>input ×1</span>';
   html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(129,140,248,0.5);vertical-align:middle;margin-right:3px;"></span>output ×5</span>';
+  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(167,139,250,0.4);vertical-align:middle;margin-right:3px;"></span>cache write ×1.25</span>';
+  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(167,139,250,0.2);vertical-align:middle;margin-right:3px;"></span>cache read ×0.1</span>';
   html += '</div>';
   container.innerHTML = html;
 }
