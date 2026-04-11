@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Max 챌린지</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <style>
+    :root {
+      --bg: #06060a;
+      --surface: #0e0e14;
+      --surface2: #141420;
+      --border: #1e1e2e;
+      --text: #e5e5e5;
+      --muted: #777;
+      --accent: #818cf8;
+      --accent2: #6366f1;
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #f43f5e;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Pretendard Variable', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 60px 24px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(99,102,241,0.08) 0%, transparent 70%);
+      top: -100px; left: 50%; transform: translateX(-50%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 6px 16px;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 32px;
+    }
+    .hero-badge .dot {
+      width: 6px; height: 6px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .hero h1 {
+      font-size: clamp(2.4rem, 6vw, 4rem);
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      line-height: 1.15;
+      margin-bottom: 20px;
+    }
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, #818cf8 0%, #6366f1 40%, #a78bfa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-desc {
+      font-size: 1.1rem;
+      color: var(--muted);
+      max-width: 520px;
+      margin-bottom: 40px;
+      line-height: 1.8;
+    }
+    .hero-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent2);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 14px 36px;
+      border-radius: 12px;
+      text-decoration: none;
+      transition: all 0.2s;
+      border: none;
+      cursor: pointer;
+    }
+    .hero-cta:hover {
+      background: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 8px 30px rgba(99,102,241,0.3);
+    }
+    .hero-cta-sub {
+      display: block;
+      margin-top: 12px;
+      font-size: 0.78rem;
+      color: #555;
+    }
+
+    .scroll-hint {
+      position: absolute;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #333;
+      font-size: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      animation: float 2.5s ease-in-out infinite;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50% { transform: translateX(-50%) translateY(6px); }
+    }
+    .scroll-hint svg { width: 16px; height: 16px; stroke: #444; }
+
+    /* ── Section common ── */
+    section {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 100px 24px;
+    }
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: 1.8rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 16px;
+    }
+    .section-desc {
+      font-size: 1rem;
+      color: var(--muted);
+      max-width: 600px;
+      margin-bottom: 48px;
+      line-height: 1.8;
+    }
+
+    /* ── What is ── */
+    .what-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .what-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px 24px;
+      transition: border-color 0.2s;
+    }
+    .what-card:hover { border-color: #2e2e4e; }
+    .what-icon {
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      margin-bottom: 16px;
+    }
+    .what-icon.purple { background: rgba(99,102,241,0.12); }
+    .what-icon.green { background: rgba(16,185,129,0.12); }
+    .what-icon.amber { background: rgba(245,158,11,0.12); }
+    .what-card h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .what-card p {
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    /* ── How it works ── */
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      position: relative;
+    }
+    .step {
+      display: flex;
+      gap: 24px;
+      position: relative;
+    }
+    .step-line {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 40px;
+      flex-shrink: 0;
+    }
+    .step-num {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #fff;
+      background: var(--accent2);
+      flex-shrink: 0;
+      z-index: 1;
+    }
+    .step-connector {
+      width: 2px;
+      flex: 1;
+      background: var(--border);
+    }
+    .step-content {
+      flex: 1;
+      padding-bottom: 40px;
+    }
+    .step-content h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .step-content p {
+      font-size: 0.88rem;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+    .step-code {
+      background: #0c0c18;
+      border: 1px solid #1a1a30;
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin-top: 12px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 0.8rem;
+      color: #c4b5fd;
+      line-height: 1.7;
+      overflow-x: auto;
+    }
+    .step-code .dim { color: #555; }
+    .step-code .hl { color: #fbbf24; }
+    .step-code .val { color: #34d399; }
+
+    /* ── Points ── */
+    .points-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 36px;
+    }
+    .point-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .point-badge {
+      width: 56px; height: 56px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+    .point-badge.session { background: rgba(99,102,241,0.12); color: var(--accent); }
+    .point-badge.weekly { background: rgba(245,158,11,0.12); color: var(--amber); }
+    .point-info h3 { font-size: 1rem; font-weight: 700; margin-bottom: 4px; }
+    .point-info p { font-size: 0.82rem; color: var(--muted); }
+
+    /* ── Levels ── */
+    .levels-track {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+    }
+    .level-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 10px 0;
+    }
+    .level-row + .level-row { border-top: 1px solid #1a1a24; }
+    .level-name {
+      font-size: 0.85rem;
+      font-weight: 700;
+      min-width: 80px;
+    }
+    .level-bar-track {
+      flex: 1;
+      height: 6px;
+      background: #1a1a24;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .level-bar-fill { height: 100%; border-radius: 3px; }
+    .level-pts {
+      font-size: 0.75rem;
+      color: var(--muted);
+      min-width: 44px;
+      text-align: right;
+    }
+
+    /* ── FAQ ── */
+    .faq-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .faq-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    .faq-q {
+      padding: 20px 24px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+    }
+    .faq-q::after {
+      content: '+';
+      font-size: 1.2rem;
+      color: var(--muted);
+      font-weight: 400;
+      transition: transform 0.2s;
+    }
+    .faq-item.open .faq-q::after {
+      content: '-';
+    }
+    .faq-a {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+    .faq-a-inner {
+      padding: 0 24px 20px;
+      font-size: 0.88rem;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    /* ── CTA bottom ── */
+    .cta-section {
+      text-align: center;
+      padding: 80px 24px 120px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    .cta-section h2 {
+      font-size: 1.8rem;
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+    .cta-section p {
+      color: var(--muted);
+      margin-bottom: 32px;
+      font-size: 1rem;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      max-width: 960px;
+      margin: 0 auto;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Footer ── */
+    footer {
+      text-align: center;
+      padding: 40px 24px;
+      font-size: 0.75rem;
+      color: #333;
+    }
+
+    @media (max-width: 768px) {
+      .what-grid { grid-template-columns: 1fr; }
+      .points-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══ Hero ═══ -->
+  <div class="hero">
+    <div class="hero-badge">
+      <span class="dot"></span>
+      챌린지 진행 중
+    </div>
+    <h1>
+      Claude Max 구독,<br>
+      <span class="gradient">끝까지 써보는 챌린지.</span>
+    </h1>
+    <p class="hero-desc">
+      매달 결제하는 Claude Max.<br>
+      한도를 100% 쓰는 사람은 얼마나 될까요?<br>
+      친구들과 함께 매일 인증하고, 레벨업하세요.
+    </p>
+    <a href="https://minjunecode.github.io/claude-challenge-auto/" class="hero-cta">
+      챌린지 참여하기 &rarr;
+    </a>
+    <span class="hero-cta-sub">가입 후 바로 시작할 수 있습니다</span>
+
+    <div class="scroll-hint">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+    </div>
+  </div>
+
+
+  <!-- ═══ What is ═══ -->
+  <section>
+    <div class="section-label">What is this</div>
+    <h2 class="section-title">구독료만큼 쓰고 있나요?</h2>
+    <p class="section-desc">
+      Claude Max는 월 $100~$200의 프리미엄 AI 구독입니다.<br>
+      하지만 대부분의 사용자는 한도의 절반도 채우지 못합니다.<br>
+      이 챌린지는 <strong>사용량 한도를 매일 채우는 것</strong>을 목표로 합니다.
+    </p>
+
+    <div class="what-grid">
+      <div class="what-card">
+        <div class="what-icon purple">📊</div>
+        <h3>자동 사용량 추적</h3>
+        <p>OAuth 토큰을 한번 등록하면, 서버가 30분마다 사용량을 자동으로 체크합니다. 직접 인증할 필요 없습니다.</p>
+      </div>
+      <div class="what-card">
+        <div class="what-icon green">🏆</div>
+        <h3>포인트 & 랭킹</h3>
+        <p>세션 인증 +1점, 주간 인증 +5점. 포인트를 쌓아 Rookie에서 Legend까지 레벨업하고, 친구들과 경쟁하세요.</p>
+      </div>
+      <div class="what-card">
+        <div class="what-icon amber">📅</div>
+        <h3>매일 기록되는 캘린더</h3>
+        <p>주간/월간 캘린더로 인증 여부를 한눈에. 매일의 기록이 쌓여 습관이 됩니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+
+  <!-- ═══ How it works ═══ -->
+  <section>
+    <div class="section-label">How it works</div>
+    <h2 class="section-title">참여 방법</h2>
+    <p class="section-desc">
+      가입부터 자동 인증까지, 5분이면 충분합니다.
+    </p>
+
+    <div class="steps">
+      <!-- Step 1 -->
+      <div class="step">
+        <div class="step-line">
+          <div class="step-num">1</div>
+          <div class="step-connector"></div>
+        </div>
+        <div class="step-content">
+          <h3>계정 만들기</h3>
+          <p>챌린지 사이트에 접속해서 닉네임과 비밀번호를 만드세요.</p>
+          <div class="step-code">
+            닉네임: <span class="hl">Mj</span> <span class="dim">(이니셜이나 닉네임)</span><br>
+            비밀번호: <span class="hl">자유롭게 설정</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="step">
+        <div class="step-line">
+          <div class="step-num">2</div>
+          <div class="step-connector"></div>
+        </div>
+        <div class="step-content">
+          <h3>OAuth 토큰 찾기</h3>
+          <p>내 PC에 저장된 Claude Code의 OAuth 토큰을 찾습니다. 명령 프롬프트(cmd)에서 아래 명령어를 실행하세요.</p>
+          <div class="step-code">
+            <span class="dim">// Windows</span><br>
+            <span class="hl">type %USERPROFILE%\.claude\.credentials.json</span><br><br>
+            <span class="dim">// Mac / Linux</span><br>
+            <span class="hl">cat ~/.claude/.credentials.json</span><br><br>
+            <span class="dim">// 출력에서 accessToken 값을 복사</span><br>
+            {"claudeAiOauth":{"accessToken":"<span class="val">sk-ant-oat01-xxxxxxx...</span>"}}
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="step">
+        <div class="step-line">
+          <div class="step-num">3</div>
+          <div class="step-connector"></div>
+        </div>
+        <div class="step-content">
+          <h3>토큰 등록 (1회)</h3>
+          <p>사이트 [인증] 탭에서 복사한 토큰을 붙여넣고 [등록]을 누르세요. 이것으로 끝입니다.</p>
+          <div class="step-code">
+            <span class="dim">// 토큰 입력란에 붙여넣기</span><br>
+            <span class="val">sk-ant-oat01-2cHWeyOIZvjLA4e_WfOGr7...</span><br><br>
+            <span class="dim">→ [등록] 클릭 → 완료!</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="step">
+        <div class="step-line">
+          <div class="step-num">4</div>
+          <div class="step-connector" style="background:transparent;"></div>
+        </div>
+        <div class="step-content">
+          <h3>자동으로 인증됩니다</h3>
+          <p>
+            서버가 30분마다 사용량을 자동 체크합니다.<br>
+            5시간 세션 95% 이상 → <strong>세션 인증 (+1pt)</strong><br>
+            7일 한도 95% 이상 → <strong>주간 인증 (+5pt)</strong><br><br>
+            토큰 등록 후에는 <strong>아무것도 할 필요가 없습니다.</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+
+  <!-- ═══ Points & Levels ═══ -->
+  <section>
+    <div class="section-label">Gamification</div>
+    <h2 class="section-title">포인트 & 레벨</h2>
+    <p class="section-desc">
+      Claude를 많이 쓸수록 포인트가 쌓이고, 레벨이 올라갑니다.
+    </p>
+
+    <div class="points-row">
+      <div class="point-card">
+        <div class="point-badge session">+1</div>
+        <div class="point-info">
+          <h3>세션 인증</h3>
+          <p>5시간 세션 한도를 95% 이상 사용하면 자동 적립</p>
+        </div>
+      </div>
+      <div class="point-card">
+        <div class="point-badge weekly">+5</div>
+        <div class="point-info">
+          <h3>주간 인증</h3>
+          <p>7일 주간 한도를 95% 이상 사용하면 자동 적립</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="levels-track">
+      <div class="level-row">
+        <span class="level-name" style="color:#9ca3af;">Rookie</span>
+        <div class="level-bar-track"><div class="level-bar-fill" style="width:100%;background:#6b7280;"></div></div>
+        <span class="level-pts">0pt</span>
+      </div>
+      <div class="level-row">
+        <span class="level-name" style="color:#34d399;">Beginner</span>
+        <div class="level-bar-track"><div class="level-bar-fill" style="width:100%;background:#10b981;"></div></div>
+        <span class="level-pts">10pt</span>
+      </div>
+      <div class="level-row">
+        <span class="level-name" style="color:#60a5fa;">Regular</span>
+        <div class="level-bar-track"><div class="level-bar-fill" style="width:85%;background:#3b82f6;"></div></div>
+        <span class="level-pts">25pt</span>
+      </div>
+      <div class="level-row">
+        <span class="level-name" style="color:#a78bfa;">Dedicated</span>
+        <div class="level-bar-track"><div class="level-bar-fill" style="width:65%;background:#8b5cf6;"></div></div>
+        <span class="level-pts">50pt</span>
+      </div>
+      <div class="level-row">
+        <span class="level-name" style="color:#c084fc;">Pro</span>
+        <div class="level-bar-track"><div class="level-bar-fill" style="width:50%;background:#a855f7;"></div></div>
+        <span class="level-pts">80pt</span>
+      </div>
+      <div class="level-row">
+        <span class="level-name" style="color:#f59e0b;">Expert</span>
+        <div class="level-bar-track"><div class="level-bar-fill" style="width:38%;background:#f59e0b;"></div></div>
+        <span class="level-pts">120pt</span>
+      </div>
+      <div class="level-row">
+        <span class="level-name" style="color:#f43f5e;">Master</span>
+        <div class="level-bar-track"><div class="level-bar-fill" style="width:25%;background:#f43f5e;"></div></div>
+        <span class="level-pts">170pt</span>
+      </div>
+      <div class="level-row">
+        <span class="level-name" style="color:#fbbf24;">Legend</span>
+        <div class="level-bar-track"><div class="level-bar-fill" style="width:15%;background:linear-gradient(90deg,#f59e0b,#f43f5e);"></div></div>
+        <span class="level-pts">250pt</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+
+  <!-- ═══ FAQ ═══ -->
+  <section>
+    <div class="section-label">FAQ</div>
+    <h2 class="section-title">자주 묻는 질문</h2>
+    <p class="section-desc"></p>
+
+    <div class="faq-list">
+      <div class="faq-item">
+        <div class="faq-q">OAuth 토큰이 뭔가요? API Key인가요?</div>
+        <div class="faq-a"><div class="faq-a-inner">
+          아닙니다. OAuth 토큰은 <strong>Claude Max 구독의 사용량을 읽기만</strong> 할 수 있는 토큰입니다. API Key와 달리 과금이 발생하지 않고, 비밀번호나 결제 정보에 접근할 수 없습니다. 사용량 조회 전용입니다.
+        </div></div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">Claude Code가 뭔가요?</div>
+        <div class="faq-a"><div class="faq-a-inner">
+          Anthropic이 만든 AI 코딩 어시스턴트입니다. 터미널에서 <code>claude</code> 명령어로 실행하며, Claude Max 구독에 포함되어 있습니다. 이 챌린지는 Claude Code의 사용량 한도를 추적합니다.
+        </div></div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">Claude Code를 안 쓰면 참여할 수 없나요?</div>
+        <div class="faq-a"><div class="faq-a-inner">
+          자동 인증은 Claude Code 사용자만 가능하지만, <strong>수동 인증</strong>도 지원합니다. claude.ai 웹/앱의 사용량 스크린샷을 직접 업로드하면 됩니다. Ctrl+V 붙여넣기, 드래그앤드롭 모두 가능합니다.
+        </div></div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">토큰을 등록하면 내 계정이 위험한가요?</div>
+        <div class="faq-a"><div class="faq-a-inner">
+          토큰으로 할 수 있는 것은 <strong>사용량 읽기</strong>뿐입니다. 계정 비밀번호 변경, 결제 정보 접근, 구독 취소 등은 불가능합니다. 토큰이 만료되면 자동으로 무효화되며, 사이트에서 언제든 변경할 수 있습니다.
+        </div></div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">토큰을 등록한 후에 해야 할 일이 있나요?</div>
+        <div class="faq-a"><div class="faq-a-inner">
+          없습니다. 서버가 30분마다 자동으로 사용량을 체크하고, 조건이 충족되면 인증을 기록합니다. 토큰이 만료되었을 때만 갱신해주면 됩니다. (터미널에서 <code>claude</code> 한번 실행하면 자동 갱신)
+        </div></div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">사이트에 보이는 사용량은 무엇인가요?</div>
+        <div class="faq-a"><div class="faq-a-inner">
+          <strong>Claude Code 전용</strong> 사용량입니다. claude.ai 웹/앱의 사용량과는 별도의 한도입니다. Claude Max는 웹과 Code가 각각 독립적인 한도를 가지고 있습니다.
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ═══ CTA ═══ -->
+  <div class="divider"></div>
+  <div class="cta-section">
+    <h2>지금 시작하세요.</h2>
+    <p>구독료가 아깝지 않은 하루를 만들어보세요.</p>
+    <a href="https://minjunecode.github.io/claude-challenge-auto/" class="hero-cta">
+      챌린지 참여하기 &rarr;
+    </a>
+  </div>
+
+  <footer>
+    Claude Max 챌린지 &middot; Built with Claude Code
+  </footer>
+
+  <script>
+    document.querySelectorAll('.faq-q').forEach(q => {
+      q.addEventListener('click', () => {
+        const item = q.parentElement;
+        const answer = item.querySelector('.faq-a');
+        const isOpen = item.classList.contains('open');
+
+        // close all
+        document.querySelectorAll('.faq-item').forEach(i => {
+          i.classList.remove('open');
+          i.querySelector('.faq-a').style.maxHeight = '0';
+        });
+
+        if (!isOpen) {
+          item.classList.add('open');
+          answer.style.maxHeight = answer.scrollHeight + 'px';
+        }
+      });
+    });
+  </script>
+</body>
+</html>
