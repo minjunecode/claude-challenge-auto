@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260409k">
+  <link rel="stylesheet" href="style.css?v=20260412l">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -52,12 +52,6 @@
       <!-- 대시보드 탭 -->
       <div id="tab-dashboard" class="tab-content active">
         <div class="dashboard-container">
-          <!-- 뷰 전환 -->
-          <div class="view-tabs">
-            <button class="view-tab active" data-view="weekly">주간</button>
-            <button class="view-tab" data-view="monthly">월간</button>
-          </div>
-
           <!-- 주간 뷰 -->
           <div id="view-weekly" class="cert-view active">
             <div class="daily-nav-header">
@@ -67,27 +61,12 @@
                 <button id="btn-daily-next" class="daily-nav-btn">&rarr;</button>
               </div>
             </div>
-            <div class="daily-legend">1M+ → 1pt · 10M+ → 2pt · 50M+ → 3pt (가중 스코어)</div>
+            <div class="daily-legend">1M+ → 1pt · 10M+ → 2pt · 50M+ → 3pt (가중 스코어) · 🔥 = 직전 1시간 활동중</div>
             <div class="daily-table-wrapper">
               <table id="daily-table" class="daily-table">
                 <thead><tr id="daily-header"></tr></thead>
                 <tbody id="daily-body"></tbody>
               </table>
-            </div>
-          </div>
-
-          <!-- 월간 뷰 -->
-          <div id="view-monthly" class="cert-view">
-            <div class="daily-nav-header">
-              <div class="daily-nav-buttons">
-                <button id="btn-month-prev" class="daily-nav-btn">&larr;</button>
-                <span id="month-label" class="month-label"></span>
-                <button id="btn-month-next" class="daily-nav-btn">&rarr;</button>
-              </div>
-            </div>
-            <div class="calendar-wrapper">
-              <div class="calendar-grid" id="calendar-grid"></div>
-              <div id="month-total" class="month-total"></div>
             </div>
           </div>
 
@@ -233,6 +212,22 @@
             </div>
           </div>
 
+          <!-- 월간 캘린더 (구 대시보드 월간 뷰) -->
+          <div class="stats-section">
+            <div class="stats-section-header">
+              <h3>월간 캘린더</h3>
+              <div class="daily-nav-buttons">
+                <button id="btn-month-prev" class="daily-nav-btn">&larr;</button>
+                <span id="month-label" class="month-label"></span>
+                <button id="btn-month-next" class="daily-nav-btn">&rarr;</button>
+              </div>
+            </div>
+            <div class="calendar-wrapper">
+              <div class="calendar-grid" id="calendar-grid"></div>
+              <div id="month-total" class="month-total"></div>
+            </div>
+          </div>
+
           <!-- 요약 카드 (3장) -->
           <div class="stats-summary">
             <div class="stat-card stat-card-today">
@@ -292,6 +287,16 @@
             </div>
           </div>
 
+          <!-- 탑 티어 vs 나 (시간대별 비교) -->
+          <div class="stats-section">
+            <div class="stats-section-header">
+              <h3>탑 티어 vs 나 <span class="stats-sub" id="stats-compare-sub"></span></h3>
+            </div>
+            <div class="stats-chart-area" id="stats-compare-chart">
+              <div class="stats-placeholder">데이터 로딩 중...</div>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -325,6 +330,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260409k"></script>
+  <script src="app.js?v=20260412l"></script>
 </body>
 </html>

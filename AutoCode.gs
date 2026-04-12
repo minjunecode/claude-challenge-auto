@@ -352,7 +352,80 @@ function handleDashboard(params) {
     }
   }
 
-  return { success: true, members: members, submissions: submissions, usage: usage, myStats: myStats };
+  // ── 멤버별 최근 활동 (불꽃 표시용) + 주간 1위 hourly (비교 차트용) ──
+  // 모든 멤버의 가장 최근 raw 보고에서 hourly의 마지막 bucket 가중 스코어를 계산
+  var memberLastActivity = {};
+  var memberAllHourly = {}; // nickname -> 가장 최근 raw row의 hourly 배열
+  var rawSheet2 = ss.getSheetByName('사용량_raw');
+  if (rawSheet2 && rawSheet2.getLastRow() > 1) {
+    var rawRows2 = rawSheet2.getDataRange().getValues();
+    var rawHasNewFmt2 = (rawRows2[0].length >= 10) || (String(rawRows2[0][4] || '').indexOf('cache_creation') >= 0);
+    // 가장 최근 row를 닉네임별로 추적 (reportedAt 기준)
+    var latestByMember = {};
+    for (var rr = 1; rr < rawRows2.length; rr++) {
+      var rNick = String(rawRows2[rr][0] || '').trim();
+      if (!rNick) continue;
+      var rAt2 = rawHasNewFmt2 ? rawRows2[rr][8] : rawRows2[rr][6];
+      var rAtStr = toDateTimeStr(rAt2);
+      if (!latestByMember[rNick] || rAtStr > latestByMember[rNick].at) {
+        var rHourlyStr2 = rawHasNewFmt2 ? (rawRows2[rr][9] || '') : (rawRows2[rr][7] || '');
+        var rHourly2 = null;
+        if (rHourlyStr2) { try { rHourly2 = JSON.parse(rHourlyStr2); } catch(e) {} }
+        latestByMember[rNick] = { at: rAtStr, hourly: rHourly2 };
+      }
+    }
+    Object.keys(latestByMember).forEach(function(nick) {
+      var lat = latestByMember[nick];
+      memberAllHourly[nick] = lat.hourly;
+      // 가장 최근 hourly bucket 가중 스코어
+      if (lat.hourly && lat.hourly.length > 0) {
+        // 가장 큰 h 값을 가진 bucket을 "최근 활동"으로 간주
+        var maxH = -1, maxBucket = null;
+        for (var hh = 0; hh < lat.hourly.length; hh++) {
+          if (lat.hourly[hh].h > maxH) { maxH = lat.hourly[hh].h; maxBucket = lat.hourly[hh]; }
+        }
+        if (maxBucket) {
+          var bScore = ((maxBucket.in || 0) * 1) + ((maxBucket.out || 0) * 5) + ((maxBucket.cc || 0) * 1.25) + ((maxBucket.cr || 0) * 0.1);
+          memberLastActivity[nick] = { hour: maxH, score: Math.round(bScore), reportedAt: lat.at };
+        }
+      }
+    });
+  }
+
+  // ── 주간 1위 사용자의 hourly (탑 티어 vs 나 비교 차트용) ──
+  // 주간 가중 스코어 1위 멤버 계산
+  var nowKst = new Date();
+  var jsDay = nowKst.getDay();
+  var monOff = jsDay === 0 ? 6 : jsDay - 1;
+  var monD = new Date(nowKst);
+  monD.setDate(monD.getDate() - monOff);
+  var monStr = monD.getFullYear() + '-' + ('0' + (monD.getMonth() + 1)).slice(-2) + '-' + ('0' + monD.getDate()).slice(-2);
+  var todayStrSv = nowKst.getFullYear() + '-' + ('0' + (nowKst.getMonth() + 1)).slice(-2) + '-' + ('0' + nowKst.getDate()).slice(-2);
+  var weeklyScores = {};
+  for (var w2 = 0; w2 < usage.length; w2++) {
+    var wd = usage[w2].date;
+    if (wd >= monStr && wd <= todayStrSv) {
+      weeklyScores[usage[w2].nickname] = (weeklyScores[usage[w2].nickname] || 0) + (usage[w2].score || 0);
+    }
+  }
+  var topNick = null, topScore = 0;
+  Object.keys(weeklyScores).forEach(function(nk) {
+    if (weeklyScores[nk] > topScore) { topScore = weeklyScores[nk]; topNick = nk; }
+  });
+  var topUser = null;
+  if (topNick) {
+    topUser = { nickname: topNick, weekScore: topScore, hourly: memberAllHourly[topNick] || null };
+  }
+
+  return {
+    success: true,
+    members: members,
+    submissions: submissions,
+    usage: usage,
+    myStats: myStats,
+    memberLastActivity: memberLastActivity,
+    topUser: topUser
+  };
 }
 
 // ── 사용량 보고 (PC에서 Hook으로 전송) ──

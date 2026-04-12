@@ -113,11 +113,18 @@ localStorage에 `dashboardCache`, `personalStatsCache` 저장. 이슈 디버깅 
 
 ## 주요 UI 컴포넌트
 
-- **대시보드 주간뷰**: `renderDailyTable` — 월~오늘, 각 셀은 `OOO/OO/O/-/X`.
+- **대시보드 주간뷰**: `renderDailyTable` — 월~오늘, 각 셀은 `OOO/OO/O/-/X`. 멤버명 옆에는 직전 1시간 가중 스코어 ≥500K 인 사람만 🔥 표시 (`dashboardData.memberLastActivity` 사용). 기존 'auto' 텍스트 배지는 제거됨.
 - **TOP 3 순위표**: `renderPodium` — `포인트 | 주간 토큰 | 월간 토큰` 3개 탭.
 - **일간 사용량 차트**: `renderDailyTrendChart` — 최근 14일 수평 바. 스케일 60M 고정. 1M/10M/50M 3개 임계선 표시. 티어별 색상: 회색/파랑/초록/골드.
 - **시간대별 사용량**: `renderHourlyChart` — 24시간 스택 바 (input/output/cc/cr 4개 세그먼트). 날짜 선택기는 raw 데이터가 있는 최신 날짜를 자동 선택.
+- **탑 티어 vs 나 비교 차트**: `renderHourlyCompareChart` — 내 분석 탭. 24시간 페어 바, 노란 막대 = 주간 1위 사용자(`dashboardData.topUser`)의 hourly, 보라 막대 = 본인 raw 최신 hourly. 내가 1위면 비교 대상 없음 메시지.
+- **월간 캘린더**: `renderMonthlyCalendar` — **내 분석 탭으로 이동됨** (구 대시보드 월간 뷰). 본인 데이터 우선 (`personalStatsData.daily`), 없으면 `dashboardData.usage` fallback.
 - **게이지 바** (`stats-goal-fill`): 오늘 스코어를 50M 대비 진행률로 표시. 2%(1M)/20%(10M)/100%(50M) 위치에 마커.
+
+### 대시보드 vs 내 분석 구분
+- **대시보드 탭**: 타인/랭킹과의 비교. TOP3, 주간 표, 활동 피드.
+- **내 분석 탭**: 개인 사용량 분석. 월간 캘린더, 일간 트렌드, 시간대별, 활동 패턴, 탑 티어 비교.
+- 구 `view-tabs` (주간/월간 토글)는 제거됨.
 
 ## 배포 체크리스트
 
@@ -149,9 +156,13 @@ localStorage에 `dashboardCache`, `personalStatsCache` 저장. 이슈 디버깅 
 
 ---
 
-## 현재 상태 (2026-04-11 기준)
+## 현재 상태 (2026-04-12 기준)
 
 ### 최근 주요 변경사항
+- **🔥 활성 멤버 표시** — 주간 표 멤버명 옆 'auto' 텍스트 배지 → 🔥 이모지로 교체. 직전 1시간 가중 스코어 ≥500K 인 멤버만 표시 (`dashboardData.memberLastActivity` 신규 응답 필드 기반).
+- **탑 티어 vs 나 비교 차트** — 내 분석 탭에 24시간 페어 바 차트 추가. 주간 1위 사용자의 hourly와 본인 hourly 비교. 서버는 `dashboardData.topUser = {nickname, weekScore, hourly}` 필드 신규 반환.
+- **월간 캘린더 → 내 분석 탭으로 이동** — 구 대시보드 월간 뷰 제거. `view-tabs` (주간/월간 토글) 자체 삭제. 캘린더는 본인 daily 우선 사용.
+- **AutoCode.gs handleDashboard 확장** — `사용량_raw` 시트 전체 순회하며 멤버별 최신 hourly 추출. 마지막 보고의 가장 최근 시간 버킷에서 가중 스코어를 계산해 `memberLastActivity[nick] = {hour, score, reportedAt}` 생성. 주간 1위 닉의 전체 hourly를 `topUser.hourly`로 응답.
 - **50M=3pt 티어 추가** — `POINT_3_THRESHOLD = 50000000`. 주간뷰 `OOO`, 일간 차트 gold 티어, 게이지 바 50M 기준.
 - **시간대별 차트 cache 가중치 반영** — `hourly` 데이터에 `cc`/`cr` 필드 추가. 4개 컴포넌트 스택 바 (`I×1 + O×5 + Cw×1.25 + Cr×0.1`).
 - **`challenge-report.py` 업데이트** — Python 리포터가 hourly에 `cc`/`cr` 전송하도록 수정.
@@ -168,4 +179,4 @@ localStorage에 `dashboardCache`, `personalStatsCache` 저장. 이슈 디버깅 
 - **`claude-challenge-site` 레포 archive 필요** — GitHub UI에서 Settings → Archive (그리고 GitHub Pages 비활성화 권장).
 
 ### 캐시 버스터 현재 버전
-`v=20260409k` — 다음 변경 시 `l`로 증가.
+`v=20260412l` — 다음 변경 시 `m`으로 증가.

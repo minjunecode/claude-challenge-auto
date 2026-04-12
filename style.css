@@ -1761,6 +1761,49 @@ header h1 {
   letter-spacing: 0.03em;
 }
 
+.fire-badge {
+  font-size: 0.85rem;
+  margin-left: 4px;
+  display: inline-block;
+  animation: fire-pulse 1.4s ease-in-out infinite;
+  filter: drop-shadow(0 0 3px rgba(234, 88, 12, 0.6));
+  cursor: help;
+}
+
+@keyframes fire-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.95; }
+  50% { transform: scale(1.18); opacity: 1; }
+}
+
+/* ── 탑 티어 vs 나 비교 차트 ── */
+.compare-chart .bar-col-compare {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+}
+.compare-chart .bar-pair {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  flex: 1;
+}
+.compare-chart .bar-stack {
+  width: 6px;
+  border-radius: 2px 2px 0 0;
+  transition: height 0.3s ease;
+}
+.compare-chart .bar-compare-top {
+  background: linear-gradient(180deg, rgba(234, 179, 8, 0.95), rgba(234, 179, 8, 0.55));
+}
+.compare-chart .bar-compare-me {
+  background: linear-gradient(180deg, rgba(129, 140, 248, 0.95), rgba(129, 140, 248, 0.55));
+}
+
 /* ── 반응형 ── */
 @media (max-width: 600px) {
   .login-card { padding: 32px 24px; margin: 16px; }
