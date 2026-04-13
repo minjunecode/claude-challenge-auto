@@ -741,6 +741,10 @@ function renderDashboard() {
   const activeView = document.querySelector('.rank-toggle-btn.active')?.dataset.rank || 'points';
   renderPodium(activeView);
 
+  // 1:1 피어 비교
+  const myRaw = personalStatsData ? personalStatsData.raw : [];
+  initPeerCompare(myRaw);
+
   // 최근 활동
   const activityList = document.getElementById('activity-list');
   activityList.innerHTML = '';
@@ -1030,7 +1034,6 @@ function renderPersonalStats() {
   renderStatsSummary(daily, points);
   renderDailyTrendChart(daily);
   renderActivityPattern(raw);
-  initPeerCompare(raw);
 
   // 날짜 선택기 초기화 — 기본값: raw 데이터가 있는 최신 날짜 (없으면 오늘)
   const picker = document.getElementById('stats-date-picker');
