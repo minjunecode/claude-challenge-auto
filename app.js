@@ -1020,7 +1020,7 @@ function renderPersonalStats() {
   renderStatsSummary(daily, points);
   renderDailyTrendChart(daily);
   renderActivityPattern(raw);
-  renderHourlyCompareChart(raw);
+  initPeerCompare(raw);
 
   // 날짜 선택기 초기화 — 기본값: raw 데이터가 있는 최신 날짜 (없으면 오늘)
   const picker = document.getElementById('stats-date-picker');
@@ -1308,23 +1308,131 @@ function renderActivityPattern(raw) {
   container.innerHTML = html;
 }
 
-// ── 탑 티어 vs 나 (시간대별 비교) ──
-function renderHourlyCompareChart(raw) {
-  const container = document.getElementById('stats-compare-chart');
-  const subEl = document.getElementById('stats-compare-sub');
-  if (!container) return;
+// ── 1:1 피어 비교 ──
+function initPeerCompare(raw) {
+  const select = document.getElementById('peer-select');
+  const area = document.getElementById('peer-compare-area');
+  if (!select || !area || !dashboardData) return;
 
-  // 1) 탑 티어 hourly: dashboardData.topUser.hourly (서버에서 주간 1위 사용자)
-  const topUser = dashboardData && dashboardData.topUser;
-  if (!topUser || !topUser.hourly || !Array.isArray(topUser.hourly) || topUser.hourly.length === 0) {
-    container.innerHTML = '<div class="stats-info-msg">탑 티어 데이터는 자동 리포팅 업데이트 후 수집됩니다.</div>';
-    if (subEl) subEl.textContent = '';
-    return;
+  // 드롭다운 채우기: 주간 1위를 기본 선택
+  const myNick = currentUser ? currentUser.nickname : '';
+  const members = (dashboardData.members || []).filter(m => m.nickname !== myNick);
+  const topNick = dashboardData.topUser ? dashboardData.topUser.nickname : '';
+
+  select.innerHTML = '<option value="">비교 상대 선택...</option>';
+  members.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.nickname;
+    opt.textContent = m.nickname + (m.nickname === topNick ? ' ★ 주간 1위' : '');
+    select.appendChild(opt);
+  });
+
+  // 기본값: 주간 1위 (본인이 아니면)
+  if (topNick && topNick !== myNick) {
+    select.value = topNick;
+    renderPeerCompare(topNick, raw);
   }
 
-  // 2) 내 hourly: raw 데이터에서 가장 최근 날짜의 최신 보고
+  select.addEventListener('change', () => {
+    if (select.value) renderPeerCompare(select.value, raw);
+    else area.innerHTML = '<div class="stats-placeholder">비교 상대를 선택하세요.</div>';
+  });
+}
+
+function renderPeerCompare(peerNick, raw) {
+  const area = document.getElementById('peer-compare-area');
+  if (!area || !dashboardData) return;
+  const myNick = currentUser ? currentUser.nickname : '';
+  const usage = dashboardData.usage || [];
+  const today = getTodayStr();
+
+  // ── 날짜 유틸 ──
+  const now = new Date();
+  const dow = now.getDay() || 7;
+  const mon = new Date(now); mon.setDate(now.getDate() - dow + 1);
+  const monStr = `${mon.getFullYear()}-${String(mon.getMonth()+1).padStart(2,'0')}-${String(mon.getDate()).padStart(2,'0')}`;
+  const curMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const d7ago = new Date(now); d7ago.setDate(now.getDate() - 6);
+  const d7str = `${d7ago.getFullYear()}-${String(d7ago.getMonth()+1).padStart(2,'0')}-${String(d7ago.getDate()).padStart(2,'0')}`;
+
+  // ── 멤버별 집계 ──
+  function aggregate(nick) {
+    const rows = usage.filter(u => u.nickname === nick);
+    let todayScore = 0, weekScore = 0, monthScore = 0, activeDays7 = 0, bestDay = 0, totalScore = 0;
+    const days7set = new Set();
+    rows.forEach(u => {
+      const d = normalizeDate(u.date);
+      const sc = getScore(u);
+      totalScore += sc;
+      if (sc > bestDay) bestDay = sc;
+      if (d === today) todayScore = sc;
+      if (d >= monStr && d <= today) weekScore += sc;
+      if (d.startsWith(curMonth)) monthScore += sc;
+      if (d >= d7str && d <= today && sc > 0) days7set.add(d);
+    });
+    activeDays7 = days7set.size;
+    return { todayScore, weekScore, monthScore, activeDays7, bestDay, totalScore };
+  }
+
+  const me = aggregate(myNick);
+  const peer = aggregate(peerNick);
+
+  // ── 지표 정의 ──
+  const metrics = [
+    { label: '오늘 사용량', myVal: me.todayScore, peerVal: peer.todayScore, fmt: formatTokens },
+    { label: '이번 주 사용량', myVal: me.weekScore, peerVal: peer.weekScore, fmt: formatTokens },
+    { label: '이번 달 사용량', myVal: me.monthScore, peerVal: peer.monthScore, fmt: formatTokens },
+    { label: '최근 7일 활동일수', myVal: me.activeDays7, peerVal: peer.activeDays7, fmt: v => v + '일' },
+    { label: '최고 일간 기록', myVal: me.bestDay, peerVal: peer.bestDay, fmt: formatTokens },
+  ];
+
+  // ── 승패 요약 ──
+  let wins = 0, losses = 0;
+  metrics.forEach(m => { if (m.myVal > m.peerVal) wins++; else if (m.myVal < m.peerVal) losses++; });
+
+  let html = '';
+
+  // 요약 배너
+  const summaryClass = wins > losses ? 'peer-summary-win' : wins < losses ? 'peer-summary-lose' : 'peer-summary-draw';
+  const summaryText = wins > losses ? `${wins}:${losses} 앞서고 있어요! 💪` : wins < losses ? `${losses}:${wins} 뒤처지고 있어요... 🔥` : `${wins}:${losses} 동률입니다`;
+  html += `<div class="peer-summary ${summaryClass}">`;
+  html += `<span class="peer-summary-label">나 vs ${escapeHtml(peerNick)}</span>`;
+  html += `<span class="peer-summary-score">${summaryText}</span>`;
+  html += `</div>`;
+
+  // 지표 카드들
+  html += '<div class="peer-metrics">';
+  metrics.forEach(m => {
+    const max = Math.max(m.myVal, m.peerVal, 1);
+    const myPct = (m.myVal / max) * 100;
+    const peerPct = (m.peerVal / max) * 100;
+    const isWin = m.myVal > m.peerVal;
+    const isLose = m.myVal < m.peerVal;
+    const statusIcon = isWin ? '🟢' : isLose ? '🔴' : '⚪';
+
+    html += `<div class="peer-metric-card">`;
+    html += `<div class="peer-metric-label">${statusIcon} ${m.label}</div>`;
+    html += `<div class="peer-metric-bars">`;
+    // 내 바
+    html += `<div class="peer-bar-row">`;
+    html += `<span class="peer-bar-nick">나</span>`;
+    html += `<div class="peer-bar-track"><div class="peer-bar-fill peer-bar-me${isWin ? ' peer-bar-winner' : ''}" style="width:${Math.max(myPct, 3)}%"></div></div>`;
+    html += `<span class="peer-bar-val${isWin ? ' peer-val-win' : ''}">${m.fmt(m.myVal)}</span>`;
+    html += `</div>`;
+    // 상대 바
+    html += `<div class="peer-bar-row">`;
+    html += `<span class="peer-bar-nick">${escapeHtml(peerNick)}</span>`;
+    html += `<div class="peer-bar-track"><div class="peer-bar-fill peer-bar-opponent${isLose ? ' peer-bar-winner' : ''}" style="width:${Math.max(peerPct, 3)}%"></div></div>`;
+    html += `<span class="peer-bar-val${isLose ? ' peer-val-lose' : ''}">${m.fmt(m.peerVal)}</span>`;
+    html += `</div>`;
+    html += `</div>`;
+    html += `</div>`;
+  });
+  html += '</div>';
+
+  // ── 시간대별 비교 차트 ──
+  const peerHourly = dashboardData.memberHourly ? dashboardData.memberHourly[peerNick] : (dashboardData.topUser && dashboardData.topUser.nickname === peerNick ? dashboardData.topUser.hourly : null);
   let myHourly = null;
-  let myDate = null;
   if (raw && raw.length > 0) {
     const sorted = [...raw].sort((a, b) => {
       const ad = normalizeDate(a.date), bd = normalizeDate(b.date);
@@ -1332,68 +1440,56 @@ function renderHourlyCompareChart(raw) {
       return (b.reportedAt || '').localeCompare(a.reportedAt || '');
     });
     for (const r of sorted) {
-      if (r.hourly && Array.isArray(r.hourly) && r.hourly.length > 0) {
-        myHourly = r.hourly;
-        myDate = normalizeDate(r.date);
-        break;
-      }
+      if (r.hourly && Array.isArray(r.hourly) && r.hourly.length > 0) { myHourly = r.hourly; break; }
     }
   }
 
-  // 가중 스코어로 24시간 버킷 변환
   function toBuckets(hourly) {
     const arr = new Array(24).fill(0);
     if (!hourly) return arr;
     hourly.forEach(item => {
       const h = item.h;
-      if (h >= 0 && h < 24) {
-        arr[h] += ((item.in || 0) * 1) + ((item.out || 0) * 5) + ((item.cc || 0) * 1.25) + ((item.cr || 0) * 0.1);
-      }
+      if (h >= 0 && h < 24) arr[h] += ((item.in||0)*1)+((item.out||0)*5)+((item.cc||0)*1.25)+((item.cr||0)*0.1);
     });
     return arr;
   }
 
-  const topBuckets = toBuckets(topUser.hourly);
-  const myBuckets = toBuckets(myHourly);
+  if (peerHourly || myHourly) {
+    const pBuckets = toBuckets(peerHourly);
+    const mBuckets = toBuckets(myHourly);
+    const bMax = Math.max(...pBuckets, ...mBuckets, 1);
+    const barBreaks = [10000, 50000, 100000, 500000, 1000000, 5000000, 10000000];
+    const niceMax = barBreaks.find(b => b >= bMax) || bMax;
 
-  const isMe = currentUser && topUser.nickname === currentUser.nickname;
-  if (subEl) {
-    if (isMe) {
-      subEl.textContent = `(주간 1위: 본인 — 비교 대상 없음)`;
-    } else {
-      subEl.textContent = `(주간 1위: ${topUser.nickname}${myDate ? ' · 내 최근 ' + myDate : ''})`;
+    html += '<div class="peer-metric-card" style="margin-top:4px;">';
+    html += '<div class="peer-metric-label">⏰ 시간대별 비교 (최근 보고)</div>';
+    html += '<div class="bar-chart compare-chart">';
+    for (let h = 0; h < 24; h++) {
+      const p = pBuckets[h], m = mBuckets[h];
+      const pH = p > 0 ? Math.max(Math.min((p/niceMax)*100,100), 4) : 0;
+      const mH = m > 0 ? Math.max(Math.min((m/niceMax)*100,100), 4) : 0;
+      html += `<div class="bar-col bar-col-compare" title="${h}시 — ${peerNick}: ${formatTokens(p)} / 나: ${formatTokens(m)}">`;
+      html += `<div class="bar-pair">`;
+      html += `<div class="bar-stack bar-compare-top" style="height:${pH}%"></div>`;
+      html += `<div class="bar-stack bar-compare-me" style="height:${mH}%"></div>`;
+      html += `</div>`;
+      html += `<div class="bar-label">${h}</div>`;
+      html += `</div>`;
     }
+    html += '</div>';
+    html += '<div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">';
+    html += `<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(234,179,8,0.7);vertical-align:middle;margin-right:3px;"></span>${escapeHtml(peerNick)}</span>`;
+    html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(129,140,248,0.7);vertical-align:middle;margin-right:3px;"></span>나</span>';
+    html += '</div>';
+    html += '</div>';
+  } else {
+    html += '<div class="peer-metric-card" style="margin-top:4px;">';
+    html += '<div class="peer-metric-label">⏰ 시간대별 비교</div>';
+    html += '<div class="stats-info-msg">시간대별 데이터는 자동 리포팅 업데이트 후 수집됩니다.</div>';
+    html += '</div>';
   }
 
-  const max = Math.max(...topBuckets, ...myBuckets, 1);
-  const barBreaks = [10000, 50000, 100000, 500000, 1000000, 5000000, 10000000];
-  const niceMax = barBreaks.find(b => b >= max) || max;
-
-  let html = '<div class="bar-chart compare-chart">';
-  for (let h = 0; h < 24; h++) {
-    const t = topBuckets[h];
-    const m = myBuckets[h];
-    const tPct = Math.min((t / niceMax) * 100, 100);
-    const mPct = Math.min((m / niceMax) * 100, 100);
-    const tH = t > 0 ? Math.max(tPct, 4) : 0;
-    const mH = m > 0 ? Math.max(mPct, 4) : 0;
-    html += `<div class="bar-col bar-col-compare" title="${h}시 — 탑: ${formatTokens(t)} / 나: ${formatTokens(m)}">`;
-    html += `<div class="bar-pair">`;
-    html += `<div class="bar-stack bar-compare-top" style="height:${tH}%"></div>`;
-    html += `<div class="bar-stack bar-compare-me" style="height:${mH}%"></div>`;
-    html += `</div>`;
-    html += `<div class="bar-label">${h}</div>`;
-    html += `</div>`;
-  }
-  html += '</div>';
-
-  // Legend
-  html += '<div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">';
-  html += `<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(234,179,8,0.7);vertical-align:middle;margin-right:3px;"></span>탑 티어 (${topUser.nickname})</span>`;
-  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(129,140,248,0.7);vertical-align:middle;margin-right:3px;"></span>나</span>';
-  html += '</div>';
-
-  container.innerHTML = html;
+  area.innerHTML = html;
 }
 
 // ── 포인트 이력 ──

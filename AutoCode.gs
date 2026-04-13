@@ -424,7 +424,8 @@ function handleDashboard(params) {
     usage: usage,
     myStats: myStats,
     memberLastActivity: memberLastActivity,
-    topUser: topUser
+    topUser: topUser,
+    memberHourly: memberAllHourly
   };
 }
 

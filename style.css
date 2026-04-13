@@ -1804,6 +1804,114 @@ header h1 {
   background: linear-gradient(180deg, rgba(129, 140, 248, 0.95), rgba(129, 140, 248, 0.55));
 }
 
+/* ── 피어 비교 드롭다운 ── */
+.peer-select {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border-light);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.peer-select:focus { border-color: var(--primary); }
+
+/* ── 요약 배너 ── */
+.peer-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.peer-summary-label { font-size: 0.85rem; }
+.peer-summary-score { font-size: 0.9rem; }
+.peer-summary-win {
+  background: linear-gradient(135deg, rgba(34,197,94,0.12), rgba(34,197,94,0.04));
+  border: 1.5px solid rgba(34,197,94,0.25);
+  color: #16a34a;
+}
+.peer-summary-lose {
+  background: linear-gradient(135deg, rgba(239,68,68,0.12), rgba(239,68,68,0.04));
+  border: 1.5px solid rgba(239,68,68,0.25);
+  color: #dc2626;
+}
+.peer-summary-draw {
+  background: linear-gradient(135deg, rgba(129,140,248,0.12), rgba(129,140,248,0.04));
+  border: 1.5px solid rgba(129,140,248,0.25);
+  color: var(--primary);
+}
+
+/* ── 지표 카드 그리드 ── */
+.peer-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+@media (max-width: 600px) { .peer-metrics { grid-template-columns: 1fr; } }
+
+.peer-metric-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.peer-metric-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* ── 바 비교 행 ── */
+.peer-metric-bars { display: flex; flex-direction: column; gap: 5px; }
+.peer-bar-row { display: flex; align-items: center; gap: 6px; }
+.peer-bar-nick {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  min-width: 42px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.peer-bar-track {
+  flex: 1;
+  height: 18px;
+  background: var(--bg);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.peer-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+.peer-bar-me {
+  background: linear-gradient(90deg, rgba(129,140,248,0.6), rgba(129,140,248,0.9));
+}
+.peer-bar-opponent {
+  background: linear-gradient(90deg, rgba(234,179,8,0.5), rgba(234,179,8,0.85));
+}
+.peer-bar-winner {
+  box-shadow: 0 0 6px rgba(0,0,0,0.08);
+}
+.peer-bar-val {
+  font-size: 0.7rem;
+  font-weight: 600;
+  min-width: 50px;
+  text-align: left;
+  color: var(--text-muted);
+}
+.peer-val-win { color: #16a34a; }
+.peer-val-lose { color: #dc2626; }
+
 /* ── 반응형 ── */
 @media (max-width: 600px) {
   .login-card { padding: 32px 24px; margin: 16px; }
