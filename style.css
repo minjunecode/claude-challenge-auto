@@ -1804,20 +1804,92 @@ header h1 {
   background: linear-gradient(180deg, rgba(129, 140, 248, 0.95), rgba(129, 140, 248, 0.55));
 }
 
-/* ── 피어 비교 드롭다운 ── */
-.peer-select {
-  padding: 5px 10px;
-  border-radius: 8px;
+/* ── 피어 비교 커스텀 드롭다운 ── */
+.peer-dropdown {
+  position: relative;
+  display: inline-block;
+}
+.peer-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 10px;
   border: 1.5px solid var(--border-light);
-  background: var(--bg);
+  background: var(--card-bg);
   color: var(--text);
   font-size: 0.78rem;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  outline: none;
-  transition: border-color 0.2s;
+  transition: all 0.2s;
+  white-space: nowrap;
 }
-.peer-select:focus { border-color: var(--primary); }
+.peer-dropdown-btn:hover {
+  border-color: var(--primary);
+  background: rgba(129,140,248,0.06);
+}
+.peer-dropdown.open .peer-dropdown-btn {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(129,140,248,0.12);
+}
+.peer-dropdown-arrow {
+  transition: transform 0.2s;
+  color: var(--text-muted);
+}
+.peer-dropdown.open .peer-dropdown-arrow { transform: rotate(180deg); }
+
+.peer-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  background: var(--card-bg);
+  border: 1.5px solid var(--border-light);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  padding: 6px;
+  z-index: 100;
+  animation: peer-dd-in 0.15s ease;
+}
+.peer-dropdown.open .peer-dropdown-menu { display: block; }
+
+@keyframes peer-dd-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.peer-dropdown-item {
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.peer-dropdown-item:hover { background: rgba(129,140,248,0.08); }
+.peer-dropdown-item.selected {
+  background: rgba(129,140,248,0.12);
+  color: var(--primary);
+  font-weight: 700;
+}
+.peer-tag {
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+}
+.peer-tag-top {
+  background: linear-gradient(135deg, rgba(234,179,8,0.15), rgba(234,179,8,0.08));
+  color: #b45309;
+  border: 1px solid rgba(234,179,8,0.3);
+}
+.peer-tag-fire { font-size: 0.75rem; padding: 0; }
 
 /* ── 요약 배너 ── */
 .peer-summary {

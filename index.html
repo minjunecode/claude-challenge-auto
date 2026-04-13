@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260412m">
+  <link rel="stylesheet" href="style.css?v=20260412n">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -291,9 +291,13 @@
           <div class="stats-section">
             <div class="stats-section-header">
               <h3>1:1 비교</h3>
-              <select id="peer-select" class="peer-select">
-                <option value="">비교 상대 선택...</option>
-              </select>
+              <div class="peer-dropdown" id="peer-dropdown">
+                <button class="peer-dropdown-btn" id="peer-dropdown-btn">
+                  <span class="peer-dropdown-text">비교 상대 선택</span>
+                  <svg class="peer-dropdown-arrow" width="12" height="12" viewBox="0 0 12 12"><path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+                </button>
+                <div class="peer-dropdown-menu" id="peer-dropdown-menu"></div>
+              </div>
             </div>
             <div id="peer-compare-area">
               <div class="stats-placeholder">비교 상대를 선택하세요.</div>
@@ -333,6 +337,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260412m"></script>
+  <script src="app.js?v=20260412n"></script>
 </body>
 </html>

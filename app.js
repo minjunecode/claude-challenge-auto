@@ -183,7 +183,13 @@ async function showMain() {
   document.getElementById('user-info').textContent = currentUser.nickname + (currentUser.isAdmin ? ' (관리자)' : '');
   document.querySelectorAll('.admin-only').forEach(el => { el.style.display = currentUser.isAdmin ? '' : 'none'; });
 
-  // ② 탭 먼저 전환 (즉시 UI 표시) → API는 백그라운드
+  // ② dashboardData 캐시를 먼저 복원 (switchTab에서 stats 렌더 시 필요)
+  if (!dashboardData) {
+    const cached = localStorage.getItem('dashboardCache');
+    if (cached) { try { dashboardData = JSON.parse(cached); } catch { /* ignore */ } }
+  }
+
+  // ③ 탭 전환 (즉시 UI 표시) → API는 백그라운드
   switchTab(restoredTab);
   loadDashboard();
 }
@@ -348,6 +354,10 @@ async function loadDashboard() {
     }
     dashboardData = result;
     localStorage.setItem('dashboardCache', JSON.stringify(result));
+    // dashboardData 갱신 후 stats 탭 활성 시 피어 비교 재렌더 (members/memberHourly 필요)
+    if (personalStatsLoaded && document.getElementById('tab-stats').classList.contains('active')) {
+      renderPersonalStats();
+    }
   } else if (!dashboardData) {
     dashboardData = getDemoData();
   }
@@ -1309,34 +1319,75 @@ function renderActivityPattern(raw) {
 }
 
 // ── 1:1 피어 비교 ──
-function initPeerCompare(raw) {
-  const select = document.getElementById('peer-select');
-  const area = document.getElementById('peer-compare-area');
-  if (!select || !area || !dashboardData) return;
+let _peerRaw = null; // initPeerCompare에서 저장, 드롭다운 클릭 시 사용
 
-  // 드롭다운 채우기: 주간 1위를 기본 선택
+function initPeerCompare(raw) {
+  const btn = document.getElementById('peer-dropdown-btn');
+  const menu = document.getElementById('peer-dropdown-menu');
+  const area = document.getElementById('peer-compare-area');
+  if (!btn || !menu || !area || !dashboardData) return;
+  _peerRaw = raw;
+
   const myNick = currentUser ? currentUser.nickname : '';
   const members = (dashboardData.members || []).filter(m => m.nickname !== myNick);
   const topNick = dashboardData.topUser ? dashboardData.topUser.nickname : '';
 
-  select.innerHTML = '<option value="">비교 상대 선택...</option>';
+  // 메뉴 항목 생성
+  menu.innerHTML = '';
   members.forEach(m => {
-    const opt = document.createElement('option');
-    opt.value = m.nickname;
-    opt.textContent = m.nickname + (m.nickname === topNick ? ' ★ 주간 1위' : '');
-    select.appendChild(opt);
+    const item = document.createElement('div');
+    item.className = 'peer-dropdown-item';
+    item.dataset.nick = m.nickname;
+
+    // 활동 지표 뱃지
+    const act = dashboardData.memberLastActivity ? dashboardData.memberLastActivity[m.nickname] : null;
+    const isActive = act && act.score >= 500000 && act.reportedAt && (Date.now() - new Date(act.reportedAt).getTime()) <= 3600000;
+
+    let label = escapeHtml(m.nickname);
+    if (m.nickname === topNick) label += ' <span class="peer-tag peer-tag-top">주간 1위</span>';
+    if (isActive) label += ' <span class="peer-tag peer-tag-fire">🔥</span>';
+
+    item.innerHTML = label;
+    item.addEventListener('click', () => {
+      selectPeer(m.nickname);
+      closeDropdown();
+    });
+    menu.appendChild(item);
   });
 
   // 기본값: 주간 1위 (본인이 아니면)
   if (topNick && topNick !== myNick) {
-    select.value = topNick;
-    renderPeerCompare(topNick, raw);
+    selectPeer(topNick);
   }
 
-  select.addEventListener('change', () => {
-    if (select.value) renderPeerCompare(select.value, raw);
-    else area.innerHTML = '<div class="stats-placeholder">비교 상대를 선택하세요.</div>';
+  // 토글
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    const dd = document.getElementById('peer-dropdown');
+    dd.classList.toggle('open');
+  };
+  // 외부 클릭 시 닫기
+  document.addEventListener('click', (e) => {
+    const dd = document.getElementById('peer-dropdown');
+    if (dd && !dd.contains(e.target)) dd.classList.remove('open');
   });
+}
+
+function selectPeer(nick) {
+  const btnText = document.querySelector('#peer-dropdown-btn .peer-dropdown-text');
+  if (btnText) btnText.textContent = nick;
+
+  // 선택된 항목 하이라이트
+  document.querySelectorAll('.peer-dropdown-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.nick === nick);
+  });
+
+  renderPeerCompare(nick, _peerRaw);
+}
+
+function closeDropdown() {
+  const dd = document.getElementById('peer-dropdown');
+  if (dd) dd.classList.remove('open');
 }
 
 function renderPeerCompare(peerNick, raw) {
