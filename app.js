@@ -26,9 +26,14 @@ function getLevel(pts) { let l = LEVELS[0]; for (const x of LEVELS) { if (pts >=
 function getNextLevel(pts) { for (const x of LEVELS) { if (pts < x.min) return x; } return null; }
 
 // ── 멤버 색상 ──
-const COLOR_PRESETS = ['#6366f1', '#f43f5e', '#10b981', '#f59e0b', '#3b82f6', '#ec4899', '#8b5cf6', '#111111'];
+const COLOR_PRESETS = ['#6366f1', '#f43f5e', '#10b981', '#f59e0b', '#3b82f6', '#ec4899', '#8b5cf6', '#14b8a6'];
 const DEFAULT_DOT_COLOR = '#d1d5db';
-function getMemberColor(n) { return (JSON.parse(localStorage.getItem('memberColors') || '{}'))[n] || DEFAULT_DOT_COLOR; }
+function hashNick(n) { let h = 0; for (let i = 0; i < n.length; i++) h = ((h << 5) - h + n.charCodeAt(i)) | 0; return Math.abs(h); }
+function getMemberColor(n) {
+  const custom = (JSON.parse(localStorage.getItem('memberColors') || '{}'))[n];
+  if (custom) return custom;
+  return COLOR_PRESETS[hashNick(n) % COLOR_PRESETS.length];
+}
 function setMemberColor(n, c) { const s = JSON.parse(localStorage.getItem('memberColors') || '{}'); s[n] = c; localStorage.setItem('memberColors', JSON.stringify(s)); }
 
 // ── 초기화 ──
@@ -463,16 +468,17 @@ function renderDailyTable(members, submissions) {
     }
     nameTd.appendChild(dot);
     nameTd.appendChild(document.createTextNode(m.nickname));
-    // 직전 1시간 동안 500K+ 가중 스코어를 사용한 멤버에게 🔥 표시
+    // 오늘 500K+ 가중 스코어를 보고한 멤버에게 🔥 표시 (서버 시간 기준, 모든 사용자 동일)
     if (dashboardData && dashboardData.memberLastActivity) {
       const act = dashboardData.memberLastActivity[m.nickname];
       if (act && act.score >= 500000 && act.reportedAt) {
-        const reportedMs = new Date(act.reportedAt).getTime();
-        if (!isNaN(reportedMs) && (Date.now() - reportedMs) <= 60 * 60 * 1000) {
+        const reportedDate = act.reportedAt.substring(0, 10);
+        const today = getTodayStr();
+        if (reportedDate === today) {
           const fire = document.createElement('span');
           fire.className = 'fire-badge';
           fire.textContent = '🔥';
-          fire.title = `직전 1시간 ${(act.score / 1000).toFixed(0)}K (가중)`;
+          fire.title = `오늘 ${(act.score / 1000).toFixed(0)}K (가중)`;
           nameTd.appendChild(fire);
         }
       }
