@@ -678,14 +678,26 @@ function renderDashboard() {
 
   const ranked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, ...scores[m.nickname] })).sort((a, b) => b.total - a.total);
 
-  // 주간 토큰 순위 계산
+  // 일간 토큰 순위 계산
   const now2 = new Date();
+  const todayStr2 = getTodayStr();
+  const dailyTokens = {};
+  members.forEach(m => { dailyTokens[m.nickname] = 0; });
+  if (dashboardData.usage) {
+    dashboardData.usage.forEach(u => {
+      if (normalizeDate(u.date) === todayStr2 && dailyTokens[u.nickname] !== undefined) {
+        dailyTokens[u.nickname] += getScore(u);
+      }
+    });
+  }
+  const dailyTokenRanked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, dayTokens: dailyTokens[m.nickname] || 0, ...scores[m.nickname] })).sort((a, b) => b.dayTokens - a.dayTokens);
+
+  // 주간 토큰 순위 계산
   const dow = now2.getDay(); // 0=Sun
   const monOff = dow === 0 ? 6 : dow - 1;
   const mon = new Date(now2);
   mon.setDate(mon.getDate() - monOff);
   const monStr = `${mon.getFullYear()}-${String(mon.getMonth()+1).padStart(2,'0')}-${String(mon.getDate()).padStart(2,'0')}`;
-  const todayStr2 = getTodayStr();
   const weeklyTokens = {};
   members.forEach(m => { weeklyTokens[m.nickname] = 0; });
   if (dashboardData.usage) {
@@ -713,6 +725,7 @@ function renderDashboard() {
 
   // 저장 (renderPodium에서 사용)
   dashboardData._ranked = ranked;
+  dashboardData._dailyTokenRanked = dailyTokenRanked;
   dashboardData._weeklyTokenRanked = weeklyTokenRanked;
   dashboardData._tokenRanked = tokenRanked;
 
@@ -793,6 +806,7 @@ function renderPodium(view) {
   if (!dashboardData) return;
   const ranked = view === 'tokens' ? (dashboardData._tokenRanked || [])
     : view === 'weeklyTokens' ? (dashboardData._weeklyTokenRanked || [])
+    : view === 'dailyTokens' ? (dashboardData._dailyTokenRanked || [])
     : (dashboardData._ranked || []);
 
   const podium = document.getElementById('podium');
@@ -807,6 +821,8 @@ function renderPodium(view) {
       mainStat = `<div class="podium-pts">${formatTokens(r.monthTokens)}</div><div class="podium-weekly">이번 달 토큰</div>`;
     } else if (view === 'weeklyTokens') {
       mainStat = `<div class="podium-pts">${formatTokens(r.weekTokens)}</div><div class="podium-weekly">이번 주 토큰</div>`;
+    } else if (view === 'dailyTokens') {
+      mainStat = `<div class="podium-pts">${formatTokens(r.dayTokens)}</div><div class="podium-weekly">오늘 토큰</div>`;
     } else {
       mainStat = `<div class="podium-pts">${r.total}pt</div><div class="podium-weekly">this week +${r.weekly}</div>`;
     }
@@ -831,7 +847,7 @@ function renderPodium(view) {
       const level = getLevel(r.total);
       const item = document.createElement('div');
       item.className = 'rest-rank-item';
-      const statText = view === 'tokens' ? formatTokens(r.monthTokens) : view === 'weeklyTokens' ? formatTokens(r.weekTokens) : `${r.total}pt`;
+      const statText = view === 'tokens' ? formatTokens(r.monthTokens) : view === 'weeklyTokens' ? formatTokens(r.weekTokens) : view === 'dailyTokens' ? formatTokens(r.dayTokens) : `${r.total}pt`;
       item.innerHTML = `
         <span class="rest-rank-num">${i + 4}</span>
         <div class="rest-rank-info">
