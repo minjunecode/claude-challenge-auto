@@ -28,13 +28,19 @@ function getNextLevel(pts) { for (const x of LEVELS) { if (pts < x.min) return x
 // ── 멤버 색상 ──
 const COLOR_PRESETS = ['#6366f1', '#f43f5e', '#10b981', '#f59e0b', '#3b82f6', '#ec4899', '#8b5cf6', '#14b8a6'];
 const DEFAULT_DOT_COLOR = '#d1d5db';
-function hashNick(n) { let h = 0; for (let i = 0; i < n.length; i++) h = ((h << 5) - h + n.charCodeAt(i)) | 0; return Math.abs(h); }
 function getMemberColor(n) {
-  const custom = (JSON.parse(localStorage.getItem('memberColors') || '{}'))[n];
-  if (custom) return custom;
-  return COLOR_PRESETS[hashNick(n) % COLOR_PRESETS.length];
+  if (dashboardData && dashboardData.memberColors && dashboardData.memberColors[n]) return dashboardData.memberColors[n];
+  return DEFAULT_DOT_COLOR;
 }
-function setMemberColor(n, c) { const s = JSON.parse(localStorage.getItem('memberColors') || '{}'); s[n] = c; localStorage.setItem('memberColors', JSON.stringify(s)); }
+async function setMemberColor(n, c) {
+  if (dashboardData) {
+    if (!dashboardData.memberColors) dashboardData.memberColors = {};
+    dashboardData.memberColors[n] = c;
+  }
+  try {
+    await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'setColor', nickname: currentUser.nickname, password: currentUser.password, color: c }) });
+  } catch { /* ignore */ }
+}
 
 // ── 초기화 ──
 document.addEventListener('DOMContentLoaded', () => {

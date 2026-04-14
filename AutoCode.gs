@@ -104,6 +104,7 @@ function handleRequest(e) {
     case 'upload':       result = handleUpload(params); break;
     case 'addMember':    result = handleAddMember(params); break;
     case 'deleteMember': result = handleDeleteMember(params); break;
+    case 'setColor':     result = handleSetColor(params); break;
     case 'personalStats': result = handlePersonalStats(params); break;
     default: result = { success: false, error: '알 수 없는 action: ' + action };
   }
@@ -213,6 +214,7 @@ function handleDashboard(params) {
 
   var memberData = memberSheet.getDataRange().getValues();
   var members = [];
+  var memberColors = {};
   for (var i = 1; i < memberData.length; i++) {
     if (memberData[i][0]) {
       members.push({
@@ -220,6 +222,7 @@ function handleDashboard(params) {
         isAdmin: memberData[i][2] === true || memberData[i][2] === 'TRUE',
         hasAutoReport: checkHasAutoReport(memberData[i][0])
       });
+      if (memberData[i][3]) memberColors[memberData[i][0]] = String(memberData[i][3]);
     }
   }
 
@@ -425,7 +428,8 @@ function handleDashboard(params) {
     myStats: myStats,
     memberLastActivity: memberLastActivity,
     topUser: topUser,
-    memberHourly: memberAllHourly
+    memberHourly: memberAllHourly,
+    memberColors: memberColors
   };
 }
 
@@ -616,6 +620,24 @@ function handleAddMember(params) {
   }
   sheet.appendRow([nickname, password, false]);
   return { success: true };
+}
+
+function handleSetColor(params) {
+  var nickname = (params.nickname || '').trim();
+  var password = (params.password || '').trim();
+  var color = (params.color || '').trim();
+  if (!nickname || !password) return { success: false, error: '인증 정보가 필요합니다.' };
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) return { success: false, error: '올바른 색상 코드가 아닙니다.' };
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('멤버');
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === nickname && String(data[i][1]).trim() === password) {
+      sheet.getRange(i + 1, 4).setValue(color);
+      return { success: true };
+    }
+  }
+  return { success: false, error: '인증 실패' };
 }
 
 function handleDeleteMember(params) {
