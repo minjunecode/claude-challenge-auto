@@ -36,10 +36,18 @@ async function setMemberColor(n, c) {
   if (dashboardData) {
     if (!dashboardData.memberColors) dashboardData.memberColors = {};
     dashboardData.memberColors[n] = c;
+    // localStorage 캐시도 즉시 갱신 — 새로고침 시 옛 색상 플래시 방지
+    try { localStorage.setItem('dashboardCache', JSON.stringify(dashboardData)); } catch { /* ignore */ }
   }
-  try {
-    await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'setColor', nickname: currentUser.nickname, password: currentUser.password, color: c }) });
-  } catch { /* ignore */ }
+  // apiCall 경유 (Content-Type text/plain — CORS preflight 회피)
+  const result = await apiCall('setColor', {
+    nickname: currentUser.nickname,
+    password: currentUser.password,
+    color: c
+  });
+  if (!result || !result.success) {
+    console.warn('setColor 실패:', result && result.error);
+  }
 }
 
 // ── 초기화 ──
