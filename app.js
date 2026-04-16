@@ -838,7 +838,7 @@ function renderDashboard() {
   updateMyStatusCard(allMembers, submissions, currentWeek, currentYear);
 
   // TOP 3 — 현재 선택된 뷰로 렌더
-  const activeView = document.querySelector('.rank-toggle-btn.active')?.dataset.rank || 'points';
+  const activeView = document.querySelector('.rank-toggle-btn.active')?.dataset.rank || 'dailyTokens';
   renderPodium(activeView);
 
   // 1:1 피어 비교
