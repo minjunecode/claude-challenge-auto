@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260414d">
+  <link rel="stylesheet" href="style.css?v=20260416a">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -52,6 +52,28 @@
       <!-- 대시보드 탭 -->
       <div id="tab-dashboard" class="tab-content active">
         <div class="dashboard-container">
+          <!-- 리그 탭 -->
+          <div class="league-tabs-wrap">
+            <div class="league-tabs" id="league-tabs">
+              <button class="league-tab-btn active" data-league="ALL">전체 리그</button>
+              <button class="league-tab-btn" data-league="1M">1M 목표 리그</button>
+              <button class="league-tab-btn" data-league="10M">10M 목표 리그</button>
+            </div>
+            <span class="info-icon" id="league-info-btn">i</span>
+            <div class="league-tooltip hidden" id="league-tooltip">
+              <div class="level-tooltip-title">리그 시스템</div>
+              <div class="league-tooltip-section">
+                <div class="league-tt-row"><span class="league-tt-name">1M 목표 리그</span><span class="league-tt-pts">1M / 10M / 25M</span></div>
+                <div class="league-tt-row"><span class="league-tt-name">10M 목표 리그</span><span class="league-tt-pts">10M / 50M / 100M</span></div>
+              </div>
+              <div class="league-tooltip-rules">
+                <div class="league-tt-rule"><strong>승격</strong>: 1M 리그에서 <strong>3일 연속 10M 이상</strong> → 10M 리그</div>
+                <div class="league-tt-rule"><strong>강등</strong>: 10M 리그에서 <strong>3일 연속 10M 미만</strong> → 1M 리그</div>
+                <div class="league-tt-rule-note">매일 자정(KST) 자동 판정. 3일 중 미보고 있으면 판정 보류.</div>
+              </div>
+            </div>
+          </div>
+
           <!-- 주간 뷰 -->
           <div id="view-weekly" class="cert-view active">
             <div class="daily-nav-header">
@@ -61,66 +83,12 @@
                 <button id="btn-daily-next" class="daily-nav-btn">&rarr;</button>
               </div>
             </div>
-            <div class="daily-legend">1M+ → 1pt · 10M+ → 2pt · 50M+ → 3pt (가중 스코어) · 🔥 = 오늘 활동중</div>
+            <div class="daily-legend" id="daily-legend">각 멤버 리그 기준으로 계산 · 🔥 = 오늘 활동중</div>
             <div class="daily-table-wrapper">
               <table id="daily-table" class="daily-table">
                 <thead><tr id="daily-header"></tr></thead>
                 <tbody id="daily-body"></tbody>
               </table>
-            </div>
-          </div>
-
-          <!-- 내 현황 카드 -->
-          <div id="my-status-card" class="my-status-card">
-            <div class="my-status-left">
-              <div id="my-rank-badge" class="rank-badge">-</div>
-              <div class="my-status-info">
-                <div class="my-status-name" id="my-status-name">-</div>
-                <div class="my-status-level" id="my-status-level">-</div>
-              </div>
-            </div>
-            <div class="my-status-right">
-              <div class="my-stat">
-                <span class="my-stat-value" id="my-weekly-pts">0</span>
-                <span class="my-stat-label">이번 주</span>
-              </div>
-              <div class="my-stat">
-                <span class="my-stat-value" id="my-total-pts">0</span>
-                <span class="my-stat-label">누적</span>
-              </div>
-              <div class="my-stat">
-                <span class="my-stat-value" id="my-streak">0</span>
-                <span class="my-stat-label">연속</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 레벨 진행률 -->
-          <div class="level-progress-card">
-            <div class="level-progress-header">
-              <span id="level-current">-</span>
-              <div style="display:flex;align-items:center;gap:6px;">
-                <span id="level-next">-</span>
-                <span class="info-icon" id="level-info-btn">i</span>
-              </div>
-            </div>
-            <div class="level-progress-bar">
-              <div class="level-progress-fill" id="level-progress-fill"></div>
-            </div>
-            <div class="level-progress-text" id="level-progress-text">-</div>
-            <div class="level-tooltip hidden" id="level-tooltip">
-              <div class="level-tooltip-title">레벨 시스템</div>
-              <div class="level-tooltip-list">
-                <div><span class="lt-name">Rookie</span><span class="lt-pts">0pt~</span></div>
-                <div><span class="lt-name">Beginner</span><span class="lt-pts">5pt~</span></div>
-                <div><span class="lt-name">Regular</span><span class="lt-pts">15pt~</span></div>
-                <div><span class="lt-name">Dedicated</span><span class="lt-pts">30pt~</span></div>
-                <div><span class="lt-name">Pro</span><span class="lt-pts">60pt~</span></div>
-                <div><span class="lt-name">Expert</span><span class="lt-pts">100pt~</span></div>
-                <div><span class="lt-name">Master</span><span class="lt-pts">150pt~</span></div>
-                <div><span class="lt-name">Legend</span><span class="lt-pts">250pt~</span></div>
-              </div>
-              <div class="level-tooltip-footer">1M+ → 1pt · 10M+ → 2pt · 50M+ → 3pt / 일 (가중 스코어)</div>
             </div>
           </div>
 
@@ -210,6 +178,63 @@
       <div id="tab-stats" class="tab-content">
         <div class="stats-container">
 
+          <!-- 내 현황 카드 (대시보드에서 이동) -->
+          <div id="my-status-card" class="my-status-card">
+            <div class="my-status-left">
+              <div id="my-rank-badge" class="rank-badge">-</div>
+              <div class="my-status-info">
+                <div class="my-status-name">
+                  <span id="my-status-name">-</span>
+                  <span id="my-league-badge" class="my-league-badge"></span>
+                </div>
+                <div class="my-status-level" id="my-status-level">-</div>
+              </div>
+            </div>
+            <div class="my-status-right">
+              <div class="my-stat">
+                <span class="my-stat-value" id="my-weekly-pts">0</span>
+                <span class="my-stat-label">이번 주</span>
+              </div>
+              <div class="my-stat">
+                <span class="my-stat-value" id="my-total-pts">0</span>
+                <span class="my-stat-label">누적</span>
+              </div>
+              <div class="my-stat">
+                <span class="my-stat-value" id="my-streak">0</span>
+                <span class="my-stat-label">연속</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 레벨 진행률 (대시보드에서 이동) -->
+          <div class="level-progress-card">
+            <div class="level-progress-header">
+              <span id="level-current">-</span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span id="level-next">-</span>
+                <span class="info-icon" id="level-info-btn">i</span>
+              </div>
+            </div>
+            <div class="level-progress-bar">
+              <div class="level-progress-fill" id="level-progress-fill"></div>
+            </div>
+            <div class="level-progress-text" id="level-progress-text">-</div>
+            <div class="level-tooltip hidden" id="level-tooltip">
+              <div class="level-tooltip-title">레벨 시스템</div>
+              <div class="level-tooltip-list">
+                <div><span class="lt-name">Rookie</span><span class="lt-pts">0pt~</span></div>
+                <div><span class="lt-name">Beginner</span><span class="lt-pts">5pt~</span></div>
+                <div><span class="lt-name">Regular</span><span class="lt-pts">15pt~</span></div>
+                <div><span class="lt-name">Dedicated</span><span class="lt-pts">30pt~</span></div>
+                <div><span class="lt-name">Pro</span><span class="lt-pts">60pt~</span></div>
+                <div><span class="lt-name">Expert</span><span class="lt-pts">100pt~</span></div>
+                <div><span class="lt-name">Master</span><span class="lt-pts">150pt~</span></div>
+                <div><span class="lt-name">Legend</span><span class="lt-pts">250pt~</span></div>
+              </div>
+              <div class="level-tooltip-footer" id="level-tooltip-footer">1M+ → 1pt · 10M+ → 2pt · 25M+ → 3pt / 일 (1M 리그 기준)</div>
+            </div>
+          </div>
+
           <!-- 토큰 산정 방식 안내 -->
           <div class="score-info-banner" id="score-info-banner">
             <span class="score-info-toggle" id="score-info-toggle">
@@ -226,7 +251,7 @@
                 <tr><td>C<sub>r</sub></td><td>Cache Read</td><td>0.1</td><td>$0.30 / 1M tokens (Input 대비 0.1배)</td></tr>
               </table>
               <p class="score-ref">* 단가 기준: <a href="https://www.anthropic.com/pricing" target="_blank" rel="noopener">anthropic.com/pricing</a> (Claude 3.5 Sonnet)</p>
-              <div class="score-points">1pt = 1M · 2pt = 10M · 3pt = 50M (일간 가중 스코어 기준)</div>
+              <div class="score-points" id="score-points-text">1pt = 1M · 2pt = 10M · 3pt = 25M (1M 리그 · 일간 가중 스코어 기준)</div>
             </div>
           </div>
 
@@ -255,15 +280,8 @@
               <div class="stat-goal-wrap">
                 <div class="stat-goal-bar" id="stats-goal-bar">
                   <div class="stat-goal-fill" id="stats-goal-fill"></div>
-                  <div class="stat-goal-mark" style="left:2%"></div>
-                  <div class="stat-goal-mark" style="left:20%"></div>
                 </div>
-                <div class="stat-goal-labels">
-                  <span style="left:0">0</span>
-                  <span style="left:2%">1M</span>
-                  <span style="left:20%">10M</span>
-                  <span style="left:100%">50M</span>
-                </div>
+                <div class="stat-goal-labels" id="stats-goal-labels"></div>
               </div>
             </div>
             <div class="stat-card">
@@ -339,6 +357,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260414d"></script>
+  <script src="app.js?v=20260416a"></script>
 </body>
 </html>

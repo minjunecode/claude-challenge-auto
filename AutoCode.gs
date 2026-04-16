@@ -3,6 +3,35 @@
 // Hook 기반 자동 사용량 수집 (OAuth 불필요)
 // ============================================
 
+// ── 리그 설정 ──
+// 리그 시스템 시작일: 이 날짜 이전 기록은 구 기준(1M/10M/50M) 사용
+var LEAGUE_ERA_START = '2026-04-17';
+var LEAGUE_1M = '1M';
+var LEAGUE_10M = '10M';
+// 리그별 포인트 임계값 [1pt, 2pt, 3pt]
+var LEAGUE_THRESHOLDS = {
+  '1M':  [1000000,  10000000, 25000000],   // 1M / 10M / 25M
+  '10M': [10000000, 50000000, 100000000]   // 10M / 50M / 100M
+};
+// 구 기준 (LEAGUE_ERA_START 이전 기록에 사용)
+var LEGACY_THRESHOLDS = [1000000, 10000000, 50000000];
+
+// 리그별 획득 포인트 계산
+function calcPointsForLeague_(score, league) {
+  var t = LEAGUE_THRESHOLDS[league] || LEAGUE_THRESHOLDS['1M'];
+  if (score >= t[2]) return 3;
+  if (score >= t[1]) return 2;
+  if (score >= t[0]) return 1;
+  return 0;
+}
+// 구 기준 포인트 (LEAGUE_ERA_START 이전)
+function calcPointsLegacy_(score) {
+  if (score >= LEGACY_THRESHOLDS[2]) return 3;
+  if (score >= LEGACY_THRESHOLDS[1]) return 2;
+  if (score >= LEGACY_THRESHOLDS[0]) return 1;
+  return 0;
+}
+
 /** 어떤 형태의 값이든 "YYYY-MM-DD"로 변환 */
 function toDateStr(v) {
   if (!v) return '';
@@ -46,6 +75,51 @@ function toDateTimeStr(v) {
  */
 function migrateSheetIfNeeded_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // ── 멤버 시트: league 컬럼(E) 보장 ──
+  var memSheet = ss.getSheetByName('멤버');
+  if (memSheet && memSheet.getLastRow() >= 1) {
+    var memLastCol = memSheet.getLastColumn();
+    // E열(5번째) 헤더가 'league'가 아니면 추가
+    if (memLastCol < 5) {
+      memSheet.getRange(1, 5).setValue('league');
+    } else {
+      var eHeader = String(memSheet.getRange(1, 5).getValue() || '').toLowerCase();
+      if (eHeader !== 'league') memSheet.getRange(1, 5).setValue('league');
+    }
+    // 기존 멤버 중 league가 비어있으면 '1M' 기본값 할당
+    if (memSheet.getLastRow() > 1) {
+      var memRange = memSheet.getRange(2, 5, memSheet.getLastRow() - 1, 1);
+      var memVals = memRange.getValues();
+      var changed = false;
+      for (var mi = 0; mi < memVals.length; mi++) {
+        if (!memVals[mi][0] || String(memVals[mi][0]).trim() === '') {
+          memVals[mi][0] = LEAGUE_1M;
+          changed = true;
+        }
+      }
+      if (changed) memRange.setValues(memVals);
+    }
+  }
+
+  // ── 인증기록 시트: league 컬럼(J=10) 보장 ──
+  var recSheet = ss.getSheetByName('인증기록');
+  if (recSheet && recSheet.getLastRow() >= 1) {
+    var recLastCol = recSheet.getLastColumn();
+    if (recLastCol < 10) {
+      recSheet.getRange(1, 10).setValue('league');
+    } else {
+      var jHeader = String(recSheet.getRange(1, 10).getValue() || '').toLowerCase();
+      if (jHeader !== 'league') recSheet.getRange(1, 10).setValue('league');
+    }
+  }
+
+  // ── 리그이동기록 시트: 없으면 생성 ──
+  var leagueLogSheet = ss.getSheetByName('리그이동기록');
+  if (!leagueLogSheet) {
+    leagueLogSheet = ss.insertSheet('리그이동기록');
+    leagueLogSheet.appendRow(['timestamp', 'nickname', 'fromLeague', 'toLeague', 'reason']);
+  }
 
   // ── 사용량 시트: 구형(7열) → 신형(9열) ──
   var usageSheet = ss.getSheetByName('사용량');
@@ -162,7 +236,7 @@ function handleRegister(params) {
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] === nickname) return { success: false, error: '이미 존재하는 닉네임입니다.' };
   }
-  sheet.appendRow([nickname, password, false]);
+  sheet.appendRow([nickname, password, false, '', LEAGUE_1M]);
   return { success: true };
 }
 
@@ -176,15 +250,21 @@ function handleInit(params) {
   var memberSheet = ss.getSheetByName('멤버');
   if (!memberSheet) {
     memberSheet = ss.insertSheet('멤버');
-    memberSheet.appendRow(['nickname', 'password', 'isAdmin']);
+    memberSheet.appendRow(['nickname', 'password', 'isAdmin', 'color', 'league']);
   }
   if (memberSheet.getLastRow() > 1) return { success: false, error: '이미 초기화되어 있습니다.' };
-  memberSheet.appendRow([nickname, password, true]);
+  memberSheet.appendRow([nickname, password, true, '', LEAGUE_1M]);
 
   var recordSheet = ss.getSheetByName('인증기록');
   if (!recordSheet) {
     recordSheet = ss.insertSheet('인증기록');
-    recordSheet.appendRow(['nickname', 'week', 'year', 'type', 'points', 'submittedAt', 'source', 'tokens', 'resetsAt']);
+    recordSheet.appendRow(['nickname', 'week', 'year', 'type', 'points', 'submittedAt', 'source', 'tokens', 'resetsAt', 'league']);
+  }
+
+  var leagueLogSheet = ss.getSheetByName('리그이동기록');
+  if (!leagueLogSheet) {
+    leagueLogSheet = ss.insertSheet('리그이동기록');
+    leagueLogSheet.appendRow(['timestamp', 'nickname', 'fromLeague', 'toLeague', 'reason']);
   }
 
   var usageSheet = ss.getSheetByName('사용량');
@@ -215,13 +295,18 @@ function handleDashboard(params) {
   var memberData = memberSheet.getDataRange().getValues();
   var members = [];
   var memberColors = {};
+  var memberLeagues = {};
   for (var i = 1; i < memberData.length; i++) {
     if (memberData[i][0]) {
+      var mLeague = String(memberData[i][4] || '').trim() || LEAGUE_1M;
+      if (mLeague !== LEAGUE_1M && mLeague !== LEAGUE_10M) mLeague = LEAGUE_1M;
       members.push({
         nickname: memberData[i][0],
         isAdmin: memberData[i][2] === true || memberData[i][2] === 'TRUE',
-        hasAutoReport: checkHasAutoReport(memberData[i][0])
+        hasAutoReport: checkHasAutoReport(memberData[i][0]),
+        league: mLeague
       });
+      memberLeagues[memberData[i][0]] = mLeague;
       if (memberData[i][3]) memberColors[memberData[i][0]] = String(memberData[i][3]);
     }
   }
@@ -242,7 +327,8 @@ function handleDashboard(params) {
           submittedAt: toDateTimeStr(recordData[j][5]),
           source: recordData[j][6] || 'auto',
           tokens: Number(recordData[j][7]) || 0,
-          resetsAt: recordData[j][8] || ''
+          resetsAt: recordData[j][8] || '',
+          league: String(recordData[j][9] || '').trim()  // 보고 시점의 리그 ('' = legacy)
         });
       }
     }
@@ -467,9 +553,13 @@ function handleReportUsage(params) {
 
   var memberData = memberSheet.getDataRange().getValues();
   var authenticated = false;
+  var userLeague = LEAGUE_1M;
   for (var i = 1; i < memberData.length; i++) {
     if (String(memberData[i][0]).trim() === nickname && String(memberData[i][1]).trim() === password) {
-      authenticated = true; break;
+      authenticated = true;
+      var uL = String(memberData[i][4] || '').trim();
+      userLeague = (uL === LEAGUE_10M) ? LEAGUE_10M : LEAGUE_1M;
+      break;
     }
   }
   if (!authenticated) return { success: false, error: '인증 실패.' };
@@ -506,8 +596,11 @@ function handleReportUsage(params) {
     usageSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, score, sessions, now]);
   }
 
-  // 자동 인증: score 기반 포인트 (1M → 1pt, 10M → 2pt, 50M → 3pt)
-  var earnedPts = score >= 50000000 ? 3 : (score >= 10000000 ? 2 : (score >= 1000000 ? 1 : 0));
+  // 자동 인증: 리그별 포인트 계산
+  // 보고 날짜가 LEAGUE_ERA_START 이전이면 구 기준(1M/10M/50M), 이후면 해당 멤버의 리그 기준
+  var isLegacy = (date < LEAGUE_ERA_START);
+  var recordLeague = isLegacy ? '' : userLeague;  // legacy 기록은 league 컬럼 비움
+  var earnedPts = isLegacy ? calcPointsLegacy_(score) : calcPointsForLeague_(score, userLeague);
   if (earnedPts > 0) {
     var recordSheet = ss.getSheetByName('인증기록');
     if (recordSheet) {
@@ -520,6 +613,7 @@ function handleReportUsage(params) {
           recordSheet.getRange(k + 1, 6).setValue(now);  // submittedAt도 최신 보고 시간으로 갱신
           recordSheet.getRange(k + 1, 8).setValue(score);
           recordSheet.getRange(k + 1, 9).setNumberFormat('@').setValue(date);
+          recordSheet.getRange(k + 1, 10).setValue(recordLeague); // 보고 시점의 리그 갱신
           alreadyExists = true;
           break;
         }
@@ -534,7 +628,7 @@ function handleReportUsage(params) {
         var week = Math.ceil(((utcD - yearStart) / 86400000 + 1) / 7);
         var year = d.getFullYear();
 
-        recordSheet.appendRow([nickname, week, year, 'session', earnedPts, now, 'auto', score, "'" + date]);
+        recordSheet.appendRow([nickname, week, year, 'session', earnedPts, now, 'auto', score, "'" + date, recordLeague]);
       }
     }
   }
@@ -618,7 +712,7 @@ function handleAddMember(params) {
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] === nickname) return { success: false, error: '이미 존재하는 닉네임입니다.' };
   }
-  sheet.appendRow([nickname, password, false]);
+  sheet.appendRow([nickname, password, false, '', LEAGUE_1M]);
   return { success: true };
 }
 
@@ -791,4 +885,113 @@ function checkHasAutoReport(nickname) {
     if (data[i][0] === nickname && toDateStr(data[i][1]) >= cutoff) return true;
   }
   return false;
+}
+
+// ============================================
+// ── 리그 자정 배치 ──
+// ============================================
+// 매일 00:00 KST 실행. 최근 3일 (오늘 포함) 일일 스코어를 보고,
+// - 1M 리그 유저: 3일 모두 >= 10M → 10M 리그로 승격
+// - 10M 리그 유저: 3일 모두 < 10M → 1M 리그로 강등
+// - 3일 중 하나라도 보고 없음 → 판정 보류 (리그 유지)
+
+function runDailyLeagueBatch_() {
+  migrateSheetIfNeeded_();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var memberSheet = ss.getSheetByName('멤버');
+  var usageSheet = ss.getSheetByName('사용량');
+  var logSheet = ss.getSheetByName('리그이동기록');
+  if (!memberSheet || !usageSheet || !logSheet) return;
+
+  // 최근 3일 날짜 계산 (오늘 포함, KST)
+  var today = new Date();
+  var dates = [];
+  for (var d = 0; d < 3; d++) {
+    var t = new Date(today.getTime() - d * 24 * 60 * 60 * 1000);
+    dates.push(Utilities.formatDate(t, 'Asia/Seoul', 'yyyy-MM-dd'));
+  }
+
+  // 각 멤버의 최근 3일 스코어 수집
+  var usage = usageSheet.getDataRange().getValues();
+  var usageHasScore = usage[0].length >= 9;
+  var scoresByMember = {};  // nick → { date: score }
+  for (var i = 1; i < usage.length; i++) {
+    var nk = String(usage[i][0]).trim();
+    if (!nk) continue;
+    var dStr = toDateStr(usage[i][1]);
+    if (dates.indexOf(dStr) < 0) continue;
+    var uInp = safeInt(usage[i][2]);
+    var uOut = safeInt(usage[i][3]);
+    var uCC = usageHasScore ? safeInt(usage[i][4]) : 0;
+    var uCR = usageHasScore ? safeInt(usage[i][5]) : 0;
+    var sc = Math.round((uInp * 1) + (uOut * 5) + (uCC * 1.25) + (uCR * 0.1));
+    if (!scoresByMember[nk]) scoresByMember[nk] = {};
+    scoresByMember[nk][dStr] = sc;
+  }
+
+  var members = memberSheet.getDataRange().getValues();
+  var now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
+  var THRESH = 10000000;  // 10M
+
+  for (var mi = 1; mi < members.length; mi++) {
+    var nick = String(members[mi][0]).trim();
+    if (!nick) continue;
+    var curLeague = String(members[mi][4] || '').trim() || LEAGUE_1M;
+    var memberScores = scoresByMember[nick] || {};
+
+    // 3일 모두 보고가 있는지 확인
+    var allReported = true;
+    var allAbove = true;
+    var allBelow = true;
+    for (var di = 0; di < 3; di++) {
+      var dayScore = memberScores[dates[di]];
+      if (dayScore === undefined) {
+        allReported = false;
+        break;
+      }
+      if (dayScore < THRESH) allAbove = false;
+      if (dayScore >= THRESH) allBelow = false;
+    }
+    if (!allReported) continue;
+
+    var newLeague = curLeague;
+    var reason = '';
+    if (curLeague === LEAGUE_1M && allAbove) {
+      newLeague = LEAGUE_10M;
+      reason = '3일 연속 10M 이상 → 승격';
+    } else if (curLeague === LEAGUE_10M && allBelow) {
+      newLeague = LEAGUE_1M;
+      reason = '3일 연속 10M 미만 → 강등';
+    }
+
+    if (newLeague !== curLeague) {
+      memberSheet.getRange(mi + 1, 5).setValue(newLeague);
+      logSheet.appendRow([now, nick, curLeague, newLeague, reason]);
+    }
+  }
+}
+
+// 자정 트리거 설치 (1회 실행: Apps Script 에디터에서 직접 실행)
+function installDailyLeagueBatchTrigger() {
+  // 기존 같은 이름 트리거 제거
+  var existing = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getHandlerFunction() === 'runDailyLeagueBatch_') {
+      ScriptApp.deleteTrigger(existing[i]);
+    }
+  }
+  // 매일 0시 ~ 1시 사이 실행 (Apps Script의 일간 트리거 정밀도)
+  ScriptApp.newTrigger('runDailyLeagueBatch_')
+    .timeBased()
+    .everyDays(1)
+    .atHour(0)
+    .inTimezone('Asia/Seoul')
+    .create();
+  return '리그 자정 배치 트리거 설치 완료';
+}
+
+// 수동 테스트용 (Apps Script 에디터에서 직접 실행 가능)
+function manualRunDailyLeagueBatch() {
+  runDailyLeagueBatch_();
+  return '리그 배치 수동 실행 완료';
 }

@@ -102,6 +102,54 @@ function setupEventListeners() {
   // 모달
   document.querySelector('.modal-overlay').addEventListener('click', () => { document.getElementById('image-modal').classList.add('hidden'); });
   document.querySelector('.modal-close').addEventListener('click', () => { document.getElementById('image-modal').classList.add('hidden'); });
+
+  // 리그 탭
+  setupLeagueTabs();
+}
+
+// 리그 탭 클릭 + i 툴팁 토글
+function setupLeagueTabs() {
+  // 저장된 탭 복원 (기본 ALL)
+  try {
+    const saved = localStorage.getItem('selectedLeagueTab');
+    if (saved === LEAGUE_1M || saved === LEAGUE_10M || saved === LEAGUE_ALL) {
+      selectedLeagueTab = saved;
+    }
+  } catch { /* ignore */ }
+
+  document.querySelectorAll('.league-tab-btn').forEach(btn => {
+    if (btn.dataset.league === selectedLeagueTab) btn.classList.add('active');
+    else btn.classList.remove('active');
+    btn.addEventListener('click', () => {
+      selectedLeagueTab = btn.dataset.league;
+      try { localStorage.setItem('selectedLeagueTab', selectedLeagueTab); } catch {}
+      document.querySelectorAll('.league-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.league === selectedLeagueTab));
+      renderDashboard();
+    });
+  });
+
+  // i 아이콘 툴팁
+  const lInfoBtn = document.getElementById('league-info-btn');
+  const lTip = document.getElementById('league-tooltip');
+  if (lInfoBtn && lTip) {
+    lInfoBtn.addEventListener('mouseenter', () => lTip.classList.remove('hidden'));
+    lInfoBtn.addEventListener('mouseleave', () => lTip.classList.add('hidden'));
+    lInfoBtn.addEventListener('click', (e) => { e.stopPropagation(); lTip.classList.toggle('hidden'); });
+    document.addEventListener('click', (e) => {
+      if (!lTip.classList.contains('hidden') && !lTip.contains(e.target) && e.target !== lInfoBtn) {
+        lTip.classList.add('hidden');
+      }
+    });
+  }
+}
+
+// 현재 선택된 리그로 멤버 필터링 (ALL이면 전부)
+function filterMembersByLeague(members) {
+  if (selectedLeagueTab === LEAGUE_ALL) return members;
+  return members.filter(m => {
+    const lg = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
+    return lg === selectedLeagueTab;
+  });
 }
 
 // ── API ──
@@ -314,9 +362,40 @@ function getScore(d) {
   return 0;
 }
 // 포인트 기준 (가중 스코어 기반)
+// ── 구 기준 (legacy, LEAGUE_ERA_START 이전 기록 + 내 분석 일부 호환용)
 const POINT_1_THRESHOLD = 1000000;    // 1pt: 1M
 const POINT_2_THRESHOLD = 10000000;   // 2pt: 10M
 const POINT_3_THRESHOLD = 50000000;   // 3pt: 50M
+
+// ── 리그 시스템 ──
+const LEAGUE_ERA_START = '2026-04-17';
+const LEAGUE_1M = '1M';
+const LEAGUE_10M = '10M';
+const LEAGUE_ALL = 'ALL';  // "전체 리그" 탭 (필터 없음)
+// 리그별 포인트 임계값 [1pt, 2pt, 3pt]
+const LEAGUE_THRESHOLDS = {
+  '1M':  [1000000,  10000000, 25000000],   // 1M / 10M / 25M
+  '10M': [10000000, 50000000, 100000000]   // 10M / 50M / 100M
+};
+const LEGACY_THRESHOLDS = [1000000, 10000000, 50000000];
+
+// 멤버의 현재 리그 반환 (기본 1M)
+function getMemberLeague(nickname) {
+  if (!dashboardData || !dashboardData.members) return LEAGUE_1M;
+  const m = dashboardData.members.find(x => x.nickname === nickname);
+  if (m && (m.league === LEAGUE_10M || m.league === LEAGUE_1M)) return m.league;
+  return LEAGUE_1M;
+}
+
+// 특정 날짜/리그 조합에서 사용할 임계값 반환 (과거 데이터 호환)
+function getThresholdsFor(date, league) {
+  // LEAGUE_ERA_START 이전 → 무조건 legacy
+  if (date && date < LEAGUE_ERA_START) return LEGACY_THRESHOLDS;
+  return LEAGUE_THRESHOLDS[league] || LEAGUE_THRESHOLDS[LEAGUE_1M];
+}
+
+// 현재 선택된 리그 탭 (ALL = 전체)
+let selectedLeagueTab = LEAGUE_ALL;
 
 // 날짜 정규화: 어떤 형식이든 "YYYY-MM-DD"로 변환
 function normalizeDate(v) {
@@ -499,21 +578,25 @@ function renderDailyTable(members, submissions) {
     }
     tr.appendChild(nameTd);
 
+    // 멤버의 현재 리그 (LEAGUE_ERA_START 이후 임계값 결정용)
+    const memLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
     days.forEach(d => {
       const td = document.createElement('td');
       const info = dailyMap[m.nickname][d.date];
       const tokens = info ? info.tokens : 0;
+      // 날짜+리그에 맞는 임계값 (legacy 기간엔 1M/10M/50M)
+      const t = getThresholdsFor(d.date, memLeague);
       if (d.date > today) {
         td.classList.add('daily-td-future');
       } else if (d.date === today) {
         td.classList.add('daily-td-today');
-        if (tokens >= POINT_3_THRESHOLD) {
+        if (tokens >= t[2]) {
           td.classList.add('daily-td-done');
           td.textContent = 'OOO';
-        } else if (tokens >= POINT_2_THRESHOLD) {
+        } else if (tokens >= t[1]) {
           td.classList.add('daily-td-done');
           td.textContent = 'OO';
-        } else if (tokens >= POINT_1_THRESHOLD) {
+        } else if (tokens >= t[0]) {
           td.classList.add('daily-td-done');
           td.textContent = 'O';
         } else {
@@ -521,13 +604,13 @@ function renderDailyTable(members, submissions) {
           td.textContent = '-';
         }
       } else {
-        if (tokens >= POINT_3_THRESHOLD) {
+        if (tokens >= t[2]) {
           td.classList.add('daily-td-done');
           td.textContent = 'OOO';
-        } else if (tokens >= POINT_2_THRESHOLD) {
+        } else if (tokens >= t[1]) {
           td.classList.add('daily-td-done');
           td.textContent = 'OO';
-        } else if (tokens >= POINT_1_THRESHOLD) {
+        } else if (tokens >= t[0]) {
           td.classList.add('daily-td-done');
           td.textContent = 'O';
         } else {
@@ -536,8 +619,7 @@ function renderDailyTable(members, submissions) {
         }
       }
       if (tokens > 0) {
-        const all = (info && info.allTokens) ? info.allTokens : 0;
-        td.title = `가중 스코어: ${tokens.toLocaleString()}`;
+        td.title = `가중 스코어: ${tokens.toLocaleString()} (${memLeague} 리그 기준)`;
       }
       tr.appendChild(td);
     });
@@ -623,6 +705,7 @@ function renderMonthlyCalendar() {
   }
 
   let monthlyTotal = 0;
+  const myLeague = getMemberLeague(currentUser.nickname);
 
   let dayNum = 1 - startOffset;
   while (dayNum <= daysInMonth) {
@@ -640,6 +723,8 @@ function renderMonthlyCalendar() {
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
         const tokens = tokenMap[dateStr] || 0;
         if (tokens > 0) monthlyTotal += tokens;
+        // 날짜+리그 기준 임계값
+        const t = getThresholdsFor(dateStr, myLeague);
 
         let innerHtml = `<span class="cal-num">${dayNum}</span>`;
         if (tokens > 0) innerHtml += `<span class="cal-tokens">${formatTokens(tokens)}</span>`;
@@ -648,9 +733,9 @@ function renderMonthlyCalendar() {
         if (dateStr > today) el.classList.add('future');
         else if (dateStr === today) {
           el.classList.add('today');
-          el.classList.add(tokens >= POINT_1_THRESHOLD ? 'done' : 'pending');
+          el.classList.add(tokens >= t[0] ? 'done' : 'pending');
         } else {
-          el.classList.add(tokens >= POINT_1_THRESHOLD ? 'done' : 'miss');
+          el.classList.add(tokens >= t[0] ? 'done' : 'miss');
         }
       }
       grid.appendChild(el);
@@ -675,7 +760,9 @@ function getStreak(nickname, submissions, currentWeek, currentYear) {
 
 function renderDashboard() {
   if (!dashboardData) return;
-  const { members, submissions } = dashboardData;
+  const { members: allMembers, submissions } = dashboardData;
+  // 리그 필터 적용 (주간뷰/TOP3/주간토큰만 영향, 1:1 비교는 전체 유지)
+  const members = filterMembersByLeague(allMembers);
   const currentWeek = getISOWeek(new Date());
   const currentYear = new Date().getFullYear();
 
@@ -690,7 +777,7 @@ function renderDashboard() {
   });
   members.forEach(m => { scores[m.nickname].streak = getStreak(m.nickname, submissions, currentWeek, currentYear); });
 
-  const ranked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, ...scores[m.nickname] })).sort((a, b) => b.total - a.total);
+  const ranked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, league: m.league, ...scores[m.nickname] })).sort((a, b) => b.total - a.total);
 
   // 일간 토큰 순위 계산
   const now2 = new Date();
@@ -704,7 +791,7 @@ function renderDashboard() {
       }
     });
   }
-  const dailyTokenRanked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, dayTokens: dailyTokens[m.nickname] || 0, ...scores[m.nickname] })).sort((a, b) => b.dayTokens - a.dayTokens);
+  const dailyTokenRanked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, league: m.league, dayTokens: dailyTokens[m.nickname] || 0, ...scores[m.nickname] })).sort((a, b) => b.dayTokens - a.dayTokens);
 
   // 주간 토큰 순위 계산
   const dow = now2.getDay(); // 0=Sun
@@ -722,7 +809,7 @@ function renderDashboard() {
       }
     });
   }
-  const weeklyTokenRanked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, weekTokens: weeklyTokens[m.nickname] || 0, ...scores[m.nickname] })).sort((a, b) => b.weekTokens - a.weekTokens);
+  const weeklyTokenRanked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, league: m.league, weekTokens: weeklyTokens[m.nickname] || 0, ...scores[m.nickname] })).sort((a, b) => b.weekTokens - a.weekTokens);
 
   // 월간 토큰 순위 계산
   const curMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
@@ -735,7 +822,7 @@ function renderDashboard() {
       }
     });
   }
-  const tokenRanked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, monthTokens: monthlyTokens[m.nickname] || 0, ...scores[m.nickname] })).sort((a, b) => b.monthTokens - a.monthTokens);
+  const tokenRanked = members.map(m => ({ nickname: m.nickname, hasAutoReport: m.hasAutoReport, league: m.league, monthTokens: monthlyTokens[m.nickname] || 0, ...scores[m.nickname] })).sort((a, b) => b.monthTokens - a.monthTokens);
 
   // 저장 (renderPodium에서 사용)
   dashboardData._ranked = ranked;
@@ -743,32 +830,12 @@ function renderDashboard() {
   dashboardData._weeklyTokenRanked = weeklyTokenRanked;
   dashboardData._tokenRanked = tokenRanked;
 
-  // 일간 테이블
+  // 일간 테이블 (필터된 멤버 전달)
   renderDailyTable(members, submissions);
 
-  // 내 현황
-  const myIdx = ranked.findIndex(r => r.nickname === currentUser.nickname);
-  const my = myIdx >= 0 ? ranked[myIdx] : { weekly: 0, total: 0, streak: 0 };
-  const myLevel = getLevel(my.total);
-  const myNext = getNextLevel(my.total);
-
-  document.getElementById('my-rank-badge').textContent = myIdx >= 0 ? myIdx + 1 : '-';
-  document.getElementById('my-status-name').textContent = currentUser.nickname;
-  document.getElementById('my-status-level').textContent = myLevel.name;
-  document.getElementById('my-weekly-pts').textContent = my.weekly;
-  document.getElementById('my-total-pts').textContent = my.total;
-  document.getElementById('my-streak').textContent = my.streak;
-
-  document.getElementById('level-current').textContent = myLevel.name;
-  if (myNext) {
-    document.getElementById('level-next').textContent = myNext.name;
-    document.getElementById('level-progress-fill').style.width = `${Math.min(100, ((my.total - myLevel.min) / (myNext.min - myLevel.min)) * 100)}%`;
-    document.getElementById('level-progress-text').textContent = `${myNext.min - my.total}pt more to ${myNext.name}`;
-  } else {
-    document.getElementById('level-next').textContent = 'MAX';
-    document.getElementById('level-progress-fill').style.width = '100%';
-    document.getElementById('level-progress-text').textContent = 'Maximum level reached';
-  }
+  // ── 내 현황은 '내 분석' 탭에서 렌더하지만, 대시보드 진입 시점에도 캐시된 personalStatsData가 있으면
+  //   닉네임/포인트 카드를 갱신해 둔다. 여기서는 항상 전체 멤버 기준으로 누적 포인트를 계산.
+  updateMyStatusCard(allMembers, submissions, currentWeek, currentYear);
 
   // TOP 3 — 현재 선택된 뷰로 렌더
   const activeView = document.querySelector('.rank-toggle-btn.active')?.dataset.rank || 'points';
@@ -807,6 +874,68 @@ function formatDateTime(date) {
   const y = date.getFullYear(), mo = String(date.getMonth()+1).padStart(2,'0'), d = String(date.getDate()).padStart(2,'0');
   const h = String(date.getHours()).padStart(2,'0'), mi = String(date.getMinutes()).padStart(2,'0'), s = String(date.getSeconds()).padStart(2,'0');
   return `${y}-${mo}-${d} ${h}:${mi}:${s}`;
+}
+
+// 내 분석 탭의 상단 닉네임/포인트/레벨 카드 갱신.
+// 누적 포인트 순위는 항상 '전체 멤버 기준'으로 계산.
+function updateMyStatusCard(allMembers, submissions, currentWeek, currentYear) {
+  if (!currentUser) return;
+  const allScores = {};
+  allMembers.forEach(m => { allScores[m.nickname] = { weekly: 0, total: 0, streak: 0 }; });
+  submissions.forEach(s => {
+    const pts = s.points || (s.type === 'weekly' ? 5 : 1);
+    if (allScores[s.nickname]) {
+      allScores[s.nickname].total += pts;
+      if (s.year === currentYear && s.week === currentWeek) allScores[s.nickname].weekly += pts;
+    }
+  });
+  allMembers.forEach(m => { allScores[m.nickname].streak = getStreak(m.nickname, submissions, currentWeek, currentYear); });
+  const allRanked = allMembers.map(m => ({ nickname: m.nickname, ...allScores[m.nickname] })).sort((a, b) => b.total - a.total);
+  const myIdx = allRanked.findIndex(r => r.nickname === currentUser.nickname);
+  const my = myIdx >= 0 ? allRanked[myIdx] : { weekly: 0, total: 0, streak: 0 };
+  const myLevel = getLevel(my.total);
+  const myNext = getNextLevel(my.total);
+  const myLeague = getMemberLeague(currentUser.nickname);
+
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+  setText('my-rank-badge', myIdx >= 0 ? myIdx + 1 : '-');
+  setText('my-status-name', currentUser.nickname);
+  setText('my-status-level', myLevel.name);
+  setText('my-weekly-pts', my.weekly);
+  setText('my-total-pts', my.total);
+  setText('my-streak', my.streak);
+
+  // 리그 뱃지
+  const badge = document.getElementById('my-league-badge');
+  if (badge) {
+    badge.textContent = myLeague + ' 리그';
+    badge.classList.toggle('league-10M', myLeague === LEAGUE_10M);
+  }
+
+  setText('level-current', myLevel.name);
+  const fill = document.getElementById('level-progress-fill');
+  if (myNext) {
+    setText('level-next', myNext.name);
+    if (fill) fill.style.width = `${Math.min(100, ((my.total - myLevel.min) / (myNext.min - myLevel.min)) * 100)}%`;
+    setText('level-progress-text', `${myNext.min - my.total}pt more to ${myNext.name}`);
+  } else {
+    setText('level-next', 'MAX');
+    if (fill) fill.style.width = '100%';
+    setText('level-progress-text', 'Maximum level reached');
+  }
+
+  // 레벨 툴팁 푸터: 내 리그 기준 임계값 노출
+  const tooltipFooter = document.getElementById('level-tooltip-footer');
+  const t = LEAGUE_THRESHOLDS[myLeague] || LEAGUE_THRESHOLDS[LEAGUE_1M];
+  if (tooltipFooter) {
+    tooltipFooter.textContent = `${formatTokens(t[0])}+ → 1pt · ${formatTokens(t[1])}+ → 2pt · ${formatTokens(t[2])}+ → 3pt / 일 (${myLeague} 리그 기준)`;
+  }
+  // 토큰 산정 방식 안내 푸터
+  const sptText = document.getElementById('score-points-text');
+  if (sptText) {
+    sptText.textContent = `1pt = ${formatTokens(t[0])} · 2pt = ${formatTokens(t[1])} · 3pt = ${formatTokens(t[2])} (${myLeague} 리그 · 일간 가중 스코어 기준)`;
+  }
 }
 
 // ── 관리자 ──
@@ -894,7 +1023,9 @@ function renderAdminTab() {
   list.innerHTML = '';
   dashboardData.members.forEach(m => {
     const li = document.createElement('li');
-    li.innerHTML = `<span><span class="member-name">${escapeHtml(m.nickname)}</span>${m.isAdmin ? '<span class="member-badge">관리자</span>' : ''}${m.hasAutoReport ? '<span class="auto-badge">auto</span>' : ''}</span>`;
+    const lg = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
+    const lgBadge = `<span class="my-league-badge ${lg === LEAGUE_10M ? 'league-10M' : ''}">${lg}</span>`;
+    li.innerHTML = `<span><span class="member-name">${escapeHtml(m.nickname)}</span>${lgBadge}${m.isAdmin ? '<span class="member-badge">관리자</span>' : ''}${m.hasAutoReport ? '<span class="auto-badge">auto</span>' : ''}</span>`;
     if (!m.isAdmin) {
       const delBtn = document.createElement('button');
       delBtn.className = 'btn btn-danger btn-small';
@@ -1066,6 +1197,13 @@ function renderPersonalStats() {
   if (!personalStatsData) return;
   const { raw, daily, points } = personalStatsData;
 
+  // 닉네임/포인트/레벨 카드 동기화 (대시보드에서 이동됨)
+  if (dashboardData && dashboardData.members && dashboardData.submissions) {
+    const cw = getISOWeek(new Date());
+    const cy = new Date().getFullYear();
+    updateMyStatusCard(dashboardData.members, dashboardData.submissions, cw, cy);
+  }
+
   renderMonthlyCalendar();
   renderStatsSummary(daily, points);
   renderDailyTrendChart(daily);
@@ -1099,19 +1237,38 @@ function renderStatsSummary(daily, points) {
   const todayTokens = todayData ? getScore(todayData) : 0;
   document.getElementById('stats-today-tokens').textContent = formatTokens(todayTokens);
 
+  // 내 리그 기준 임계값
+  const myLeague = currentUser ? getMemberLeague(currentUser.nickname) : LEAGUE_1M;
+  const t = getThresholdsFor(today, myLeague);
+  // 게이지 스케일 — 3pt 임계값 기준 (110%까지 허용)
+  const goalMax = t[2];
+
   // Goal progress bar
   const goalFill = document.getElementById('stats-goal-fill');
   if (goalFill) {
-    const pct = Math.min((todayTokens / POINT_3_THRESHOLD) * 100, 110);
+    const pct = Math.min((todayTokens / goalMax) * 100, 110);
     goalFill.style.width = pct + '%';
     goalFill.className = 'stat-goal-fill' +
-      (todayTokens >= POINT_3_THRESHOLD ? ' goal-3pt' : todayTokens >= POINT_2_THRESHOLD ? ' goal-100k' : todayTokens >= POINT_1_THRESHOLD ? ' goal-50k' : '');
+      (todayTokens >= t[2] ? ' goal-3pt' : todayTokens >= t[1] ? ' goal-100k' : todayTokens >= t[0] ? ' goal-50k' : '');
+  }
+
+  // 동적 라벨 (0 / 1pt / 2pt / 3pt 위치)
+  const goalLabels = document.getElementById('stats-goal-labels');
+  if (goalLabels) {
+    const pct1 = Math.min((t[0] / goalMax) * 100, 100);
+    const pct2 = Math.min((t[1] / goalMax) * 100, 100);
+    goalLabels.innerHTML = `
+      <span style="left:0%;transform:translateX(0);">0</span>
+      <span style="left:${pct1}%;">${formatTokens(t[0])}</span>
+      <span style="left:${pct2}%;">${formatTokens(t[1])}</span>
+      <span style="left:100%;transform:translateX(-100%);">${formatTokens(t[2])}</span>
+    `;
   }
 
   // Point badge
   const badge = document.getElementById('stats-today-badge');
   if (badge) {
-    const pts = todayTokens >= POINT_3_THRESHOLD ? 3 : todayTokens >= POINT_2_THRESHOLD ? 2 : todayTokens >= POINT_1_THRESHOLD ? 1 : 0;
+    const pts = todayTokens >= t[2] ? 3 : todayTokens >= t[1] ? 2 : todayTokens >= t[0] ? 1 : 0;
     badge.textContent = pts + 'pt';
     badge.className = 'stat-point-badge badge-' + Math.min(pts, 2);
   }
@@ -1232,38 +1389,45 @@ function renderDailyTrendChart(daily) {
     return;
   }
 
-  // 60M 스케일 (50M 라인이 오른쪽 값과 겹치지 않도록 여유)
-  const maxTotal = 60000000;
+  // 내 리그 기준 임계값 (오늘 기준)
+  const today = getTodayStr();
+  const myLeague = currentUser ? getMemberLeague(currentUser.nickname) : LEAGUE_1M;
+  const t = getThresholdsFor(today, myLeague);
+
+  // 스케일: 3pt 임계값에 20% 여유
+  const maxTotal = Math.max(t[2] * 1.2, 60000000);
 
   // Build threshold positions
-  const pct1pt = (POINT_1_THRESHOLD / maxTotal) * 100;
-  const pct2pt = (POINT_2_THRESHOLD / maxTotal) * 100;
-  const pct3pt = (POINT_3_THRESHOLD / maxTotal) * 100;
+  const pct1pt = (t[0] / maxTotal) * 100;
+  const pct2pt = (t[1] / maxTotal) * 100;
+  const pct3pt = (t[2] / maxTotal) * 100;
 
   let html = '<div class="hbar-chart">';
 
-  // Scale label (max value on the right)
-  html += `<div class="hbar-scale-header"><span></span><span class="hbar-scale-max">${formatTokens(maxTotal)}</span></div>`;
+  // Scale label (max value on the right + 리그 표시)
+  html += `<div class="hbar-scale-header"><span style="font-size:0.6rem;color:var(--text-muted);">${myLeague} 리그 기준</span><span class="hbar-scale-max">${formatTokens(maxTotal)}</span></div>`;
 
   // Threshold lines container (positioned over the track area)
   html += '<div style="position:relative;margin-left:58px;margin-right:56px;height:0;pointer-events:none;z-index:2;">';
   if (pct1pt <= 100) {
     html += `<div style="position:absolute;left:${pct1pt}%;top:0;bottom:0;width:0;border-left:1.5px dashed rgba(129,140,248,0.5);height:${sorted.length * 26 + 4}px;z-index:5;">
-      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--primary);opacity:0.8;white-space:nowrap;">${formatTokens(POINT_1_THRESHOLD)} (1pt)</span></div>`;
+      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:var(--primary);opacity:0.8;white-space:nowrap;">${formatTokens(t[0])} (1pt)</span></div>`;
   }
   if (pct2pt <= 100) {
     html += `<div style="position:absolute;left:${pct2pt}%;top:0;bottom:0;width:0;border-left:1.5px dashed rgba(234,88,12,0.5);height:${sorted.length * 26 + 4}px;z-index:5;">
-      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:rgba(234,88,12,0.8);opacity:1;white-space:nowrap;">${formatTokens(POINT_2_THRESHOLD)} (2pt)</span></div>`;
+      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:rgba(234,88,12,0.8);opacity:1;white-space:nowrap;">${formatTokens(t[1])} (2pt)</span></div>`;
   }
   if (pct3pt <= 100) {
     html += `<div style="position:absolute;left:${pct3pt}%;top:0;bottom:0;width:0;border-left:1.5px dashed rgba(220,38,38,0.5);height:${sorted.length * 26 + 4}px;z-index:5;">
-      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:rgba(220,38,38,0.8);opacity:1;white-space:nowrap;">${formatTokens(POINT_3_THRESHOLD)} (3pt)</span></div>`;
+      <span style="position:absolute;top:-14px;left:2px;font-size:0.5rem;color:rgba(220,38,38,0.8);opacity:1;white-space:nowrap;">${formatTokens(t[2])} (3pt)</span></div>`;
   }
   html += '</div>';
 
   sorted.forEach(d => {
     const total = getScore(d);
-    const tier = total >= POINT_3_THRESHOLD ? 'gold' : total >= POINT_2_THRESHOLD ? 'green' : total >= POINT_1_THRESHOLD ? 'blue' : 'gray';
+    // 행별 임계값 — 과거 날짜는 legacy, era 이후는 내 리그 기준
+    const tr = getThresholdsFor(normalizeDate(d.date), myLeague);
+    const tier = total >= tr[2] ? 'gold' : total >= tr[1] ? 'green' : total >= tr[0] ? 'blue' : 'gray';
     const totalPct = (total / maxTotal) * 100;
     const dateLabel = d.date.substring(5); // MM-DD
 
