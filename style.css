@@ -2137,6 +2137,35 @@ header h1 {
 }
 .stats-date-input::-webkit-calendar-picker-indicator { filter: invert(0.7); }
 
+/* 시간대별 차트 컨트롤 (뷰 드롭다운 + 날짜) */
+.stats-hourly-controls {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.stats-view-select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 26px 6px 12px; font-size: 0.8rem;
+  font-family: inherit; cursor: pointer;
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23999' d='M0 0l5 6 5-6z'/></svg>");
+  background-repeat: no-repeat; background-position: right 10px center;
+}
+.stats-view-select:hover { border-color: var(--primary); }
+.stats-view-select:focus { outline: none; border-color: var(--primary); }
+
+/* 시간대별 차트 범례 */
+.hourly-legend {
+  display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap;
+  margin-top: 8px; font-size: 0.65rem; color: var(--text-muted);
+}
+.hourly-legend span { display: inline-flex; align-items: center; }
+.legend-swatch {
+  display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+  vertical-align: middle; margin-right: 4px;
+}
+
+/* 뷰 모드별 스택 세그먼트 (색상은 인라인 style로 주입) */
+.bar-seg { width: 100%; }
+
 .stats-chart-area { min-height: 120px; }
 .stats-placeholder { color: var(--muted); font-size: 0.8rem; text-align: center; padding: 40px 0; }
 .stats-info-msg {

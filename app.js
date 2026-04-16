@@ -344,22 +344,68 @@ function formatTokens(n) {
   return String(n);
 }
 
-// 가중치 스코어: score 필드 있으면 사용, 없으면 가중치 공식 적용
+// ── v2 가중치 (Claude + Codex 통합) ──
+// Claude Sonnet 기준 단가 $3/1M = weight 1.0
+// Codex (GPT-5.4): I=$2.50, O=$15, Cr=$0.25 per 1M
+const W_CL_IN = 1.0, W_CL_OUT = 5.0, W_CL_CW = 1.25, W_CL_CR = 0.1;
+const W_CX_IN = 0.8333, W_CX_OUT = 5.0, W_CX_CR = 0.0833;
+
+// 가중치 스코어 (v2: 7필드 Claude+Codex, 구 필드 fallback)
 function getScore(d) {
-  // 항상 컴포넌트에서 직접 계산 (Date→epoch 오염 방지)
-  const inp = d.input_tokens || 0;
-  const out = d.output_tokens || 0;
-  const cc = d.cache_creation_tokens || 0;
-  const cr = d.cache_read_tokens || 0;
-  // 컴포넌트가 있으면 공식으로 계산
-  if (inp > 0 || out > 0) {
-    return Math.round((inp * 1) + (out * 5) + (cc * 1.25) + (cr * 0.1));
+  const clIn  = d.claude_input_tokens != null ? d.claude_input_tokens : (d.input_tokens || 0);
+  const clOut = d.claude_output_tokens != null ? d.claude_output_tokens : (d.output_tokens || 0);
+  const clCw  = d.claude_cache_creation_tokens != null ? d.claude_cache_creation_tokens : (d.cache_creation_tokens || 0);
+  const clCr  = d.claude_cache_read_tokens != null ? d.claude_cache_read_tokens : (d.cache_read_tokens || 0);
+  const cxIn  = d.codex_input_tokens || 0;
+  const cxOut = d.codex_output_tokens || 0;
+  const cxCr  = d.codex_cache_read_tokens || 0;
+
+  if (clIn > 0 || clOut > 0 || cxIn > 0 || cxOut > 0) {
+    return Math.round(
+      clIn * W_CL_IN + clOut * W_CL_OUT + clCw * W_CL_CW + clCr * W_CL_CR +
+      cxIn * W_CX_IN + cxOut * W_CX_OUT + cxCr * W_CX_CR
+    );
   }
-  // 컴포넌트 없고 score만 있는 경우 — 10B 이하만 신뢰
   if (d.score && typeof d.score === 'number' && d.score < 10000000000) {
     return d.score;
   }
   return 0;
+}
+
+// 레코드를 v2 7필드로 정규화 (Codex 누락 = 0)
+function normalizeRecord(d) {
+  if (!d) return d;
+  return Object.assign({}, d, {
+    claude_input_tokens: d.claude_input_tokens != null ? d.claude_input_tokens : (d.input_tokens || 0),
+    claude_output_tokens: d.claude_output_tokens != null ? d.claude_output_tokens : (d.output_tokens || 0),
+    claude_cache_creation_tokens: d.claude_cache_creation_tokens != null ? d.claude_cache_creation_tokens : (d.cache_creation_tokens || 0),
+    claude_cache_read_tokens: d.claude_cache_read_tokens != null ? d.claude_cache_read_tokens : (d.cache_read_tokens || 0),
+    codex_input_tokens: d.codex_input_tokens || 0,
+    codex_output_tokens: d.codex_output_tokens || 0,
+    codex_cache_read_tokens: d.codex_cache_read_tokens || 0
+  });
+}
+
+// hourly bucket의 통합 가중 스코어 (v2/v1 포맷 모두 처리)
+function getBucketScore(b) {
+  if (!b) return 0;
+  const cl = b.cl || { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 };
+  const cx = b.cx || { in: 0, out: 0, cr: 0 };
+  return Math.round(
+    (cl.in || 0) * W_CL_IN + (cl.out || 0) * W_CL_OUT + (cl.cc || 0) * W_CL_CW + (cl.cr || 0) * W_CL_CR +
+    (cx.in || 0) * W_CX_IN + (cx.out || 0) * W_CX_OUT + (cx.cr || 0) * W_CX_CR
+  );
+}
+
+// hourly bucket을 v2 형식으로 정규화
+function normalizeBucket(b) {
+  if (!b) return b;
+  if (b.cl) return b;
+  return {
+    h: b.h,
+    cl: { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 },
+    cx: { in: 0, out: 0, cr: 0 }
+  };
 }
 // 포인트 기준 (가중 스코어 기반)
 // ── 구 기준 (legacy, LEAGUE_ERA_START 이전 기록 + 내 분석 일부 호환용)
@@ -1225,6 +1271,12 @@ function renderPersonalStats() {
     picker.addEventListener('change', () => renderHourlyChart(raw, picker.value));
     picker.dataset.init = '1';
   }
+  // 뷰 드롭다운 이벤트 바인딩 (1회)
+  const viewSel = document.getElementById('stats-hourly-view');
+  if (viewSel && !viewSel.dataset.init) {
+    viewSel.addEventListener('change', () => renderHourlyChart(raw, picker ? picker.value : getTodayStr()));
+    viewSel.dataset.init = '1';
+  }
   if (picker) renderHourlyChart(raw, picker.value);
 }
 
@@ -1300,7 +1352,38 @@ function renderStatsSummary(daily, points) {
   document.getElementById('stats-month-pts').textContent = monthPts + 'pt';
 }
 
-// ── 시간대별 차트 ──
+// ── 시간대별 차트 (v2: 6뷰 지원) ──
+// 필드 고정 색상 (세련된 주황/파랑)
+const HOURLY_COLORS = {
+  cl_in:  '#F5A623', // Claude input — 앰버
+  cl_out: '#D97706', // Claude output — 진한 오렌지
+  cl_cw:  '#EAB308', // Claude cache write — 머스터드
+  cl_cr:  '#FCD34D', // Claude cache read — 크림 옐로
+  cx_in:  '#60A5FA', // Codex input — 스카이
+  cx_out: '#2563EB', // Codex output — 딥 블루
+  cx_cr:  '#BFDBFE'  // Codex cache read — 페일 블루
+};
+const HOURLY_LABELS = {
+  cl_in: 'Claude input ×1',        cl_out: 'Claude output ×5',
+  cl_cw: 'Claude cache write ×1.25', cl_cr: 'Claude cache read ×0.1',
+  cx_in: 'Codex input ×0.83',       cx_out: 'Codex output ×5',
+  cx_cr: 'Codex cache read ×0.08'
+};
+const HOURLY_WEIGHTS = {
+  cl_in: W_CL_IN, cl_out: W_CL_OUT, cl_cw: W_CL_CW, cl_cr: W_CL_CR,
+  cx_in: W_CX_IN, cx_out: W_CX_OUT, cx_cr: W_CX_CR
+};
+
+// 뷰 모드 → 스택 순서 (아래→위 렌더 순서, 맨 앞이 바닥)
+const HOURLY_VIEWS = {
+  all:    ['cl_cr', 'cx_cr', 'cl_cw', 'cl_in', 'cx_in', 'cl_out', 'cx_out'],
+  claude: ['cl_cr', 'cl_cw', 'cl_in', 'cl_out'],
+  codex:  ['cx_cr', 'cx_in', 'cx_out'],
+  input:  ['cl_in', 'cx_in'],
+  output: ['cl_out', 'cx_out'],
+  cache:  ['cl_cr', 'cx_cr', 'cl_cw']
+};
+
 function renderHourlyChart(raw, date) {
   const container = document.getElementById('stats-hourly-chart');
 
@@ -1313,12 +1396,10 @@ function renderHourlyChart(raw, date) {
     return;
   }
 
-  // Check if ANY record for this date has hourly data
   const latest = dayRecords[dayRecords.length - 1];
   const hasHourly = latest.hourly && Array.isArray(latest.hourly) && latest.hourly.length > 0;
 
   if (!hasHourly) {
-    // No hourly data — show informational message instead of faking it
     const total = getScore(latest);
     container.innerHTML =
       '<div class="stats-info-msg">' +
@@ -1328,54 +1409,82 @@ function renderHourlyChart(raw, date) {
     return;
   }
 
-  // Build hourly data from the latest report (가중 스코어 적용)
-  const hourlyScores = {};
-  for (let h = 0; h < 24; h++) { hourlyScores[h] = { inp: 0, out: 0, cc: 0, cr: 0, total: 0 }; }
-  latest.hourly.forEach(item => {
+  // 뷰 모드
+  const viewSel = document.getElementById('stats-hourly-view');
+  const view = (viewSel && viewSel.value) || 'all';
+  const stackKeys = HOURLY_VIEWS[view] || HOURLY_VIEWS.all;
+
+  // 시간대별 raw 토큰 집계 (v2 {cl, cx} 형식 / 구 {in, out, cc, cr} 모두 처리)
+  const hourlyTokens = {};
+  for (let h = 0; h < 24; h++) {
+    hourlyTokens[h] = { cl_in: 0, cl_out: 0, cl_cw: 0, cl_cr: 0, cx_in: 0, cx_out: 0, cx_cr: 0 };
+  }
+  latest.hourly.forEach(raw_item => {
+    const item = normalizeBucket(raw_item);
     const h = item.h;
     if (h >= 0 && h < 24) {
-      const inp = (item.in || 0) * 1;
-      const out = (item.out || 0) * 5;
-      const cc = (item.cc || 0) * 1.25;
-      const cr = (item.cr || 0) * 0.1;
-      hourlyScores[h] = { inp, out, cc, cr, total: inp + out + cc + cr };
+      const cl = item.cl || {};
+      const cx = item.cx || {};
+      hourlyTokens[h] = {
+        cl_in:  cl.in  || 0, cl_out: cl.out || 0, cl_cw: cl.cc || 0, cl_cr: cl.cr || 0,
+        cx_in:  cx.in  || 0, cx_out: cx.out || 0, cx_cr: cx.cr || 0
+      };
     }
   });
 
-  const max = Math.max(...Array.from({length: 24}, (_, h) => hourlyScores[h].total), 1);
+  // 가중 적용한 뷰별 스코어
+  const hourlyWeighted = {};
+  for (let h = 0; h < 24; h++) {
+    const t = hourlyTokens[h];
+    const seg = {};
+    let total = 0;
+    for (const key of stackKeys) {
+      const v = (t[key] || 0) * HOURLY_WEIGHTS[key];
+      seg[key] = v; total += v;
+    }
+    hourlyWeighted[h] = { seg, total };
+  }
 
-  // Snap max to nice breakpoint for consistent scale
+  const max = Math.max(...Array.from({length: 24}, (_, h) => hourlyWeighted[h].total), 1);
   const barBreaks = [1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000];
   const niceMax = barBreaks.find(b => b >= max) || max;
 
   let html = '<div class="bar-chart">';
   for (let h = 0; h < 24; h++) {
-    const s = hourlyScores[h];
-    const total = s.total;
+    const { seg, total } = hourlyWeighted[h];
     const totalPct = Math.min((total / niceMax) * 100, 100);
     const barHeight = total > 0 ? Math.max(totalPct, 4) : 0;
-    html += `<div class="bar-col" title="${h}시: ${formatTokens(total)} (I×1+O×5+Cw×1.25+Cr×0.1)">`;
+    // tooltip: 뷰에 포함된 필드의 원시 토큰 요약
+    const tipParts = stackKeys.map(k => {
+      const raw = hourlyTokens[h][k] || 0;
+      return raw > 0 ? `${HOURLY_LABELS[k].split(' ')[0]}:${formatTokens(raw)}` : null;
+    }).filter(Boolean);
+    const tip = `${h}시 · ${formatTokens(total)}` + (tipParts.length ? ` (${tipParts.join(' / ')})` : '');
+    html += `<div class="bar-col" title="${tip}">`;
     if (total > 0) html += `<div class="bar-value">${formatTokens(total)}</div>`;
     html += `<div class="bar-stack" style="height:${barHeight}%">`;
-    // 아래→위: cache_read, cache_write, output, input
     if (total > 0) {
-      html += `<div class="bar-seg-cr" style="height:${(s.cr/total)*100}%"></div>`;
-      html += `<div class="bar-seg-cc" style="height:${(s.cc/total)*100}%"></div>`;
-      html += `<div class="bar-seg-output" style="height:${(s.out/total)*100}%"></div>`;
-      html += `<div class="bar-seg-input" style="height:${(s.inp/total)*100}%"></div>`;
+      // stackKeys 순서대로 바닥부터 쌓기 (DOM 순서: 첫번째가 맨 아래)
+      for (const key of stackKeys) {
+        const v = seg[key];
+        if (v > 0) {
+          html += `<div class="bar-seg" style="height:${(v/total)*100}%;background:${HOURLY_COLORS[key]}"></div>`;
+        }
+      }
     }
     html += `</div>`;
     html += `<div class="bar-label">${h}</div>`;
     html += `</div>`;
   }
   html += '</div>';
+
   // Legend
-  html += '<div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">';
-  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(129,140,248,0.25);vertical-align:middle;margin-right:3px;"></span>input ×1</span>';
-  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(129,140,248,0.5);vertical-align:middle;margin-right:3px;"></span>output ×5</span>';
-  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(167,139,250,0.4);vertical-align:middle;margin-right:3px;"></span>cache write ×1.25</span>';
-  html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(167,139,250,0.2);vertical-align:middle;margin-right:3px;"></span>cache read ×0.1</span>';
+  html += '<div class="hourly-legend">';
+  for (const key of stackKeys) {
+    html += `<span><span class="legend-swatch" style="background:${HOURLY_COLORS[key]}"></span>${HOURLY_LABELS[key]}</span>`;
+  }
   html += '</div>';
+
   container.innerHTML = html;
 }
 

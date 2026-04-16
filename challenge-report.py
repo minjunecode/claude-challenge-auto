@@ -1,7 +1,13 @@
 """
-Claude Max 챌린지 — 자동 사용량 리포트
-~/.claude/ JSONL에서 오늘의 토큰 사용량을 집계해 챌린지 서버에 전송합니다.
+Claude Max 챌린지 — 자동 사용량 리포트 (v2.0)
+~/.claude/ + ~/.codex/ JSONL에서 오늘의 토큰 사용량을 집계해 챌린지 서버에 전송합니다.
 OAuth 토큰 불필요. 로컬 파일만 읽습니다.
+
+v2.0 변경사항:
+  - Codex CLI 사용량도 함께 수집 (~/.codex/sessions/**/*.jsonl)
+  - Claude/Codex 분리 필드로 전송: claude_*, codex_*
+  - 하위 호환: Codex 디렉토리가 없으면 Claude만 보고 (기존 동작 유지)
+  - 가격 가중치는 서버 측에서 계산 (이 스크립트는 순수 토큰만 수집)
 """
 
 import json, glob, os, sys, io, urllib.request, urllib.error
@@ -47,102 +53,193 @@ def setup_config():
     return cfg
 
 
-def count_today_tokens():
-    """~/.claude/ JSONL 파일에서 오늘(KST) 토큰 사용량 집계 (시간대별 포함)
+def _empty_hourly():
+    """시간대별 집계 버킷 초기화 (0~23시)"""
+    return {h: {"cl_in": 0, "cl_out": 0, "cl_cc": 0, "cl_cr": 0,
+                "cx_in": 0, "cx_out": 0, "cx_cr": 0} for h in range(24)}
 
-    glob을 **/*.jsonl로 사용하여 subagent JSONL도 포함.
 
-    가중치 스코어:
-      score = (input × 1) + (output × 5) + (cache_creation × 1.25) + (cache_read × 0.1)
-    """
+def _parse_kst_hour(ts, today):
+    """ISO 타임스탬프를 KST 시(0-23)로 변환. 오늘이 아니면 None."""
+    if not ts or "T" not in ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        kst_dt = dt.astimezone(KST)
+        if kst_dt.strftime("%Y-%m-%d") != today:
+            return None
+        return kst_dt.hour
+    except Exception:
+        return None
+
+
+def count_claude_tokens(today, hourly, sessions):
+    """~/.claude/projects/**/*.jsonl에서 오늘(KST) Claude 토큰 집계."""
     home = os.path.expanduser("~")
-    # **/*.jsonl → subagents/ 하위 폴더까지 매칭
     jsonl_files = glob.glob(os.path.join(home, ".claude", "projects", "**", "*.jsonl"), recursive=True)
 
-    today = datetime.now(KST).strftime("%Y-%m-%d")
-    input_tokens = 0
-    output_tokens = 0
-    cache_creation_tokens = 0
-    cache_read_tokens = 0
-    sessions = set()
-
-    # 시간대별 집계 (0~23시)
-    hourly = {}
-    for h in range(24):
-        hourly[h] = {"input": 0, "output": 0, "cc": 0, "cr": 0}
+    total = {"in": 0, "out": 0, "cc": 0, "cr": 0}
 
     for fpath in jsonl_files:
-        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                try:
-                    obj = json.loads(line)
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
                     ts = obj.get("timestamp", "")
-                    kst_hour = None
-
-                    if ts.startswith(today):
-                        try:
-                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                            kst_hour = dt.astimezone(KST).hour
-                        except:
-                            pass
-                    elif ts and "T" in ts:
-                        try:
-                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                            kst_dt = dt.astimezone(KST)
-                            if kst_dt.strftime("%Y-%m-%d") != today:
-                                continue
-                            kst_hour = kst_dt.hour
-                        except:
-                            continue
-                    else:
+                    kst_hour = _parse_kst_hour(ts, today)
+                    if kst_hour is None:
                         continue
 
                     msg = obj.get("message", {})
-                    if isinstance(msg, dict):
-                        usage = msg.get("usage", {})
-                        if usage and usage.get("output_tokens", 0) > 0:
-                            inp = usage.get("input_tokens", 0)
-                            out = usage.get("output_tokens", 0)
-                            cc = usage.get("cache_creation_input_tokens", 0)
-                            cr = usage.get("cache_read_input_tokens", 0)
+                    if not isinstance(msg, dict):
+                        continue
+                    usage = msg.get("usage", {})
+                    if not usage or usage.get("output_tokens", 0) <= 0:
+                        continue
 
-                            input_tokens += inp
-                            output_tokens += out
-                            cache_creation_tokens += cc
-                            cache_read_tokens += cr
+                    inp = usage.get("input_tokens", 0) or 0
+                    out = usage.get("output_tokens", 0) or 0
+                    cc  = usage.get("cache_creation_input_tokens", 0) or 0
+                    cr  = usage.get("cache_read_input_tokens", 0) or 0
 
-                            if kst_hour is not None:
-                                hourly[kst_hour]["input"] += inp
-                                hourly[kst_hour]["output"] += out
-                                hourly[kst_hour]["cc"] += cc
-                                hourly[kst_hour]["cr"] += cr
+                    total["in"] += inp
+                    total["out"] += out
+                    total["cc"] += cc
+                    total["cr"] += cr
 
-                            sid = obj.get("sessionId", "")
+                    hourly[kst_hour]["cl_in"] += inp
+                    hourly[kst_hour]["cl_out"] += out
+                    hourly[kst_hour]["cl_cc"] += cc
+                    hourly[kst_hour]["cl_cr"] += cr
+
+                    sid = obj.get("sessionId", "")
+                    if sid:
+                        sessions.add(sid)
+        except Exception:
+            continue
+
+    return total
+
+
+def count_codex_tokens(today, hourly, sessions):
+    """~/.codex/sessions/**/*.jsonl에서 오늘(KST) Codex 토큰 집계.
+
+    Codex 세션 라인 포맷: {type, timestamp, payload}
+    token_count 이벤트:
+        payload.type == "token_count"
+        payload.info.last_token_usage = {
+            input_tokens, cached_input_tokens, output_tokens,
+            reasoning_output_tokens, total_tokens
+        }
+    last_token_usage는 해당 턴의 delta이므로 그대로 합산하면 됨.
+
+    디렉토리가 없으면 조용히 0 반환 (Codex 사용 안 하는 유저).
+    """
+    home = os.path.expanduser("~")
+    codex_dir = os.path.join(home, ".codex", "sessions")
+    total = {"in": 0, "out": 0, "cr": 0}
+
+    if not os.path.isdir(codex_dir):
+        return total
+
+    jsonl_files = glob.glob(os.path.join(codex_dir, "**", "*.jsonl"), recursive=True)
+
+    for fpath in jsonl_files:
+        session_id = None
+        had_usage = False
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    # 세션 ID 추적 (session_meta 이벤트 or 파일명 fallback)
+                    if session_id is None:
+                        payload = obj.get("payload", {})
+                        if isinstance(payload, dict):
+                            sid = payload.get("id") or payload.get("session_id")
                             if sid:
-                                sessions.add(sid)
-                except:
-                    pass
+                                session_id = sid
 
-    # 가중치 스코어 계산
-    score = (input_tokens * 1) + (output_tokens * 5) + (cache_creation_tokens * 1.25) + (cache_read_tokens * 0.1)
+                    # token_count 이벤트만 집계
+                    payload = obj.get("payload", {})
+                    if not isinstance(payload, dict):
+                        continue
+                    if payload.get("type") != "token_count":
+                        continue
 
-    # 시간대별 데이터를 간결한 리스트로 변환 (0시~23시)
+                    ts = obj.get("timestamp", "")
+                    kst_hour = _parse_kst_hour(ts, today)
+                    if kst_hour is None:
+                        continue
+
+                    info = payload.get("info", {}) or {}
+                    last = info.get("last_token_usage") or {}
+                    if not last:
+                        continue
+
+                    # Codex의 input_tokens는 fresh(캐시 아닌) 입력, cached_input_tokens는 별도
+                    inp = last.get("input_tokens", 0) or 0
+                    cr  = last.get("cached_input_tokens", 0) or 0
+                    out = last.get("output_tokens", 0) or 0
+                    # reasoning_output_tokens는 이미 output_tokens에 포함됨 (별도 합산 안 함)
+
+                    if inp == 0 and out == 0 and cr == 0:
+                        continue
+                    had_usage = True
+
+                    total["in"] += inp
+                    total["out"] += out
+                    total["cr"] += cr
+
+                    hourly[kst_hour]["cx_in"] += inp
+                    hourly[kst_hour]["cx_out"] += out
+                    hourly[kst_hour]["cx_cr"] += cr
+        except Exception:
+            continue
+
+        # 세션 ID fallback: 파일명 사용
+        if had_usage:
+            if session_id is None:
+                session_id = os.path.basename(fpath)
+            sessions.add("codex:" + str(session_id))
+
+    return total
+
+
+def collect_usage():
+    """오늘(KST)의 Claude + Codex 사용량 집계."""
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    hourly = _empty_hourly()
+    sessions = set()
+
+    claude = count_claude_tokens(today, hourly, sessions)
+    codex  = count_codex_tokens(today, hourly, sessions)
+
+    # 시간대별 리스트 (v2 형식: {h, cl: {...}, cx: {...}})
     hourly_list = []
     for h in range(24):
-        inp = hourly[h]["input"]
-        out = hourly[h]["output"]
-        cc = hourly[h]["cc"]
-        cr = hourly[h]["cr"]
-        if inp > 0 or out > 0 or cc > 0 or cr > 0:
-            hourly_list.append({"h": h, "in": inp, "out": out, "cc": cc, "cr": cr})
+        b = hourly[h]
+        if any(b[k] > 0 for k in b):
+            hourly_list.append({
+                "h": h,
+                "cl": {"in": b["cl_in"], "out": b["cl_out"], "cc": b["cl_cc"], "cr": b["cl_cr"]},
+                "cx": {"in": b["cx_in"], "out": b["cx_out"], "cr": b["cx_cr"]},
+            })
 
     return {
         "date": today,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "cache_creation_tokens": cache_creation_tokens,
-        "cache_read_tokens": cache_read_tokens,
-        "score": int(score),
+        "claude_input_tokens": claude["in"],
+        "claude_output_tokens": claude["out"],
+        "claude_cache_creation_tokens": claude["cc"],
+        "claude_cache_read_tokens": claude["cr"],
+        "codex_input_tokens": codex["in"],
+        "codex_output_tokens": codex["out"],
+        "codex_cache_read_tokens": codex["cr"],
         "sessions": len(sessions),
         "hourly": hourly_list,
     }
@@ -170,7 +267,6 @@ def report_usage(cfg, usage):
             result = json.loads(resp.read().decode("utf-8"))
             return result
     except urllib.error.HTTPError as e:
-        # Apps Script redirects — follow it
         if e.code in (301, 302, 303, 307, 308):
             redirect_url = e.headers.get("Location", "")
             if redirect_url:
@@ -187,19 +283,22 @@ def main():
     if not cfg.get("nickname") or not cfg.get("password"):
         cfg = setup_config()
 
-    usage = count_today_tokens()
-    score = usage["score"]
+    usage = collect_usage()
+
+    cl_total = (usage["claude_input_tokens"] + usage["claude_output_tokens"]
+                + usage["claude_cache_creation_tokens"] + usage["claude_cache_read_tokens"])
+    cx_total = (usage["codex_input_tokens"] + usage["codex_output_tokens"]
+                + usage["codex_cache_read_tokens"])
 
     print(f"[{datetime.now(KST).strftime('%H:%M')}] {cfg['nickname']} | "
           f"{usage['date']} | "
-          f"score: {score:,} | "
-          f"in:{usage['input_tokens']:,} out:{usage['output_tokens']:,} "
-          f"cc:{usage['cache_creation_tokens']:,} cr:{usage['cache_read_tokens']:,} | "
+          f"Claude in:{usage['claude_input_tokens']:,} out:{usage['claude_output_tokens']:,} "
+          f"cc:{usage['claude_cache_creation_tokens']:,} cr:{usage['claude_cache_read_tokens']:,} | "
+          f"Codex in:{usage['codex_input_tokens']:,} out:{usage['codex_output_tokens']:,} "
+          f"cr:{usage['codex_cache_read_tokens']:,} | "
           f"{usage['sessions']} sessions", end="")
 
-    total = score
-
-    if total == 0:
+    if cl_total == 0 and cx_total == 0:
         print(" | skip (no usage)")
         return
 

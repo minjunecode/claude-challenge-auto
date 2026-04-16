@@ -1,7 +1,47 @@
 // ============================================
 // Claude Max 챌린지 - Google Apps Script
 // Hook 기반 자동 사용량 수집 (OAuth 불필요)
+// v2.0: Claude + Codex 다중 서비스 지원
 // ============================================
+
+// ── 가격 가중치 (v2.0) ──
+// 기준 단가: Claude Sonnet 4 input $3/1M = 가중치 1.0
+// Claude Sonnet: I=$3 / O=$15 / Cw=$3.75 / Cr=$0.30 per 1M
+// Codex (GPT-5.4):  I=$2.50 / O=$15 / Cr=$0.25 per 1M
+// 가중치 = price / 3.0
+var W_CL_IN = 1.0;        // Claude input
+var W_CL_OUT = 5.0;       // Claude output
+var W_CL_CW = 1.25;       // Claude cache write
+var W_CL_CR = 0.1;        // Claude cache read
+var W_CX_IN = 0.8333;     // Codex input  ($2.50 / $3)
+var W_CX_OUT = 5.0;       // Codex output ($15 / $3)
+var W_CX_CR = 0.0833;     // Codex cache read ($0.25 / $3)
+
+/** v2 통합 가중 스코어. 객체가 claude_*/codex_* 필드를 가지면 사용, 없으면 구 필드로 fallback */
+function calcScoreV2_(t) {
+  var clIn  = safeInt(t.claude_input_tokens != null ? t.claude_input_tokens : t.input_tokens);
+  var clOut = safeInt(t.claude_output_tokens != null ? t.claude_output_tokens : t.output_tokens);
+  var clCw  = safeInt(t.claude_cache_creation_tokens != null ? t.claude_cache_creation_tokens : t.cache_creation_tokens);
+  var clCr  = safeInt(t.claude_cache_read_tokens != null ? t.claude_cache_read_tokens : t.cache_read_tokens);
+  var cxIn  = safeInt(t.codex_input_tokens);
+  var cxOut = safeInt(t.codex_output_tokens);
+  var cxCr  = safeInt(t.codex_cache_read_tokens);
+  return Math.round(
+    clIn * W_CL_IN + clOut * W_CL_OUT + clCw * W_CL_CW + clCr * W_CL_CR +
+    cxIn * W_CX_IN + cxOut * W_CX_OUT + cxCr * W_CX_CR
+  );
+}
+
+/** hourly bucket 하나의 가중 스코어. 신형(cl/cx) + 구형(in/out/cc/cr) 모두 처리 */
+function calcBucketScoreV2_(b) {
+  if (!b) return 0;
+  var cl = b.cl || { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 };
+  var cx = b.cx || { in: 0, out: 0, cr: 0 };
+  return Math.round(
+    (cl.in || 0) * W_CL_IN + (cl.out || 0) * W_CL_OUT + (cl.cc || 0) * W_CL_CW + (cl.cr || 0) * W_CL_CR +
+    (cx.in || 0) * W_CX_IN + (cx.out || 0) * W_CX_OUT + (cx.cr || 0) * W_CX_CR
+  );
+}
 
 // ── 리그 설정 ──
 // 리그 시스템 시작일: 이 날짜 이전 기록은 구 기준(1M/10M/50M) 사용
@@ -121,29 +161,113 @@ function migrateSheetIfNeeded_() {
     leagueLogSheet.appendRow(['timestamp', 'nickname', 'fromLeague', 'toLeague', 'reason']);
   }
 
-  // ── 사용량 시트: 구형(7열) → 신형(9열) ──
+  // ── 사용량 시트: 구형(7열) → v1(9열) → v2(12열) ──
   var usageSheet = ss.getSheetByName('사용량');
   if (usageSheet) {
     var uHeaders = usageSheet.getRange(1, 1, 1, usageSheet.getLastColumn()).getValues()[0];
     var uHeaderStr = uHeaders.join(',');
-    // 구형 판별: cache_creation_tokens 헤더가 없으면 구형
-    if (uHeaderStr.indexOf('cache_creation_tokens') < 0 && uHeaderStr.indexOf('score') < 0) {
-      // 데이터 삭제 (헤더 포함 전부)
+    var uIsV2 = uHeaderStr.indexOf('claude_input_tokens') >= 0;
+    var uIsV1 = !uIsV2 && uHeaderStr.indexOf('cache_creation_tokens') >= 0;
+
+    if (uIsV2) {
+      // 이미 v2: 아무 것도 안 함
+    } else if (uIsV1) {
+      // v1 → v2: 데이터 보존하면서 컬럼 확장
+      migrateUsageV1ToV2_(usageSheet, false);
+    } else if (uHeaderStr.indexOf('cache_creation_tokens') < 0 && uHeaderStr.indexOf('score') < 0) {
+      // 아주 구형: 클리어
       usageSheet.clear();
-      usageSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt']);
+      usageSheet.appendRow(USAGE_V2_HEADERS_);
     }
   }
 
-  // ── 사용량_raw 시트: 구형(8열) → 신형(10열) ──
+  // ── 사용량_raw 시트: 구형(8열) → v1(10열) → v2(13열) ──
   var rawSheet = ss.getSheetByName('사용량_raw');
   if (rawSheet) {
     var rHeaders = rawSheet.getRange(1, 1, 1, rawSheet.getLastColumn()).getValues()[0];
     var rHeaderStr = rHeaders.join(',');
-    if (rHeaderStr.indexOf('cache_creation_tokens') < 0 && rHeaderStr.indexOf('score') < 0) {
+    var rIsV2 = rHeaderStr.indexOf('claude_input_tokens') >= 0;
+    var rIsV1 = !rIsV2 && rHeaderStr.indexOf('cache_creation_tokens') >= 0;
+
+    if (rIsV2) {
+      // 이미 v2
+    } else if (rIsV1) {
+      migrateUsageV1ToV2_(rawSheet, true);
+    } else if (rHeaderStr.indexOf('cache_creation_tokens') < 0 && rHeaderStr.indexOf('score') < 0) {
       rawSheet.clear();
-      rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt', 'hourly']);
+      rawSheet.appendRow(RAW_V2_HEADERS_);
     }
   }
+}
+
+// v2 컬럼 헤더
+var USAGE_V2_HEADERS_ = [
+  'nickname', 'date',
+  'claude_input_tokens', 'claude_output_tokens', 'claude_cache_creation_tokens', 'claude_cache_read_tokens',
+  'codex_input_tokens', 'codex_output_tokens', 'codex_cache_read_tokens',
+  'score', 'sessions', 'reportedAt'
+];
+var RAW_V2_HEADERS_ = USAGE_V2_HEADERS_.concat(['hourly']);
+
+/**
+ * 사용량/사용량_raw 시트 v1 → v2 in-place 마이그레이션.
+ * v1: nickname, date, input, output, cache_creation, cache_read, score, sessions, reportedAt, [hourly]
+ * v2: nickname, date, claude_input, claude_output, claude_cc, claude_cr, codex_input, codex_output, codex_cr, score, sessions, reportedAt, [hourly]
+ * 기존 Claude 토큰은 claude_* 필드로, codex_* 는 모두 0으로.
+ * hourly JSON도 {cl: {...}, cx: {in:0,out:0,cr:0}} 형태로 변환.
+ */
+function migrateUsageV1ToV2_(sheet, isRaw) {
+  var rows = sheet.getDataRange().getValues();
+  var newHeaders = isRaw ? RAW_V2_HEADERS_ : USAGE_V2_HEADERS_;
+  var newRows = [newHeaders];
+
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r[0]) continue;  // 빈 행 skip
+    var nick = r[0];
+    var dateStr = toDateStr(r[1]);
+    var clIn = safeInt(r[2]);
+    var clOut = safeInt(r[3]);
+    var clCw = safeInt(r[4]);
+    var clCr = safeInt(r[5]);
+    var oldScore = safeInt(r[6]);
+    var sess = safeInt(r[7]);
+    var repAt = toDateTimeStr(r[8]);
+    // v2 score 재계산 (codex=0이므로 Claude만)
+    var newScore = calcScoreV2_({
+      claude_input_tokens: clIn, claude_output_tokens: clOut,
+      claude_cache_creation_tokens: clCw, claude_cache_read_tokens: clCr
+    });
+    var row = [nick, "'" + dateStr, clIn, clOut, clCw, clCr, 0, 0, 0, newScore, sess, repAt];
+
+    if (isRaw) {
+      // hourly JSON 변환: {h, in, out, cc, cr} → {h, cl: {in, out, cc, cr}, cx: {in:0, out:0, cr:0}}
+      var hourlyStr = r[9] || '';
+      var newHourlyStr = '';
+      if (hourlyStr) {
+        try {
+          var parsed = JSON.parse(hourlyStr);
+          if (Array.isArray(parsed)) {
+            var converted = parsed.map(function(b) {
+              // 이미 v2 형식이면 그대로
+              if (b && b.cl) return b;
+              return {
+                h: b.h,
+                cl: { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 },
+                cx: { in: 0, out: 0, cr: 0 }
+              };
+            });
+            newHourlyStr = JSON.stringify(converted);
+          }
+        } catch (e) { newHourlyStr = hourlyStr; }  // 파싱 실패 시 원본 보존
+      }
+      row.push(newHourlyStr);
+    }
+    newRows.push(row);
+  }
+
+  sheet.clear();
+  sheet.getRange(1, 1, newRows.length, newHeaders.length).setValues(newRows);
 }
 
 /** 셀 값을 안전한 정수로 변환 (Date 객체 → 0, 문자열 → 0) */
@@ -270,13 +394,13 @@ function handleInit(params) {
   var usageSheet = ss.getSheetByName('사용량');
   if (!usageSheet) {
     usageSheet = ss.insertSheet('사용량');
-    usageSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt']);
+    usageSheet.appendRow(USAGE_V2_HEADERS_);
   }
 
   var rawSheet = ss.getSheetByName('사용량_raw');
   if (!rawSheet) {
     rawSheet = ss.insertSheet('사용량_raw');
-    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt', 'hourly']);
+    rawSheet.appendRow(RAW_V2_HEADERS_);
   }
 
   return { success: true, message: '초기 설정 완료!' };
@@ -334,31 +458,67 @@ function handleDashboard(params) {
     }
   }
 
-  // 사용량
+  // 사용량 (v2: 12컬럼 / v1: 9컬럼 / 구형: 7컬럼)
   var usageSheet = ss.getSheetByName('사용량');
   var usage = [];
   if (usageSheet && usageSheet.getLastRow() > 1) {
     var usageData = usageSheet.getDataRange().getValues();
-    var usageHasScore = usageData[0].length >= 9;
+    var usageHdr0 = usageData[0];
+    var isUsageV2 = String(usageHdr0[2] || '').indexOf('claude_') === 0;
+    var usageHasV1 = usageHdr0.length >= 9;
     for (var k = 1; k < usageData.length; k++) {
       if (usageData[k][0]) {
-        var uInp = safeInt(usageData[k][2]);
-        var uOut = safeInt(usageData[k][3]);
-        var uCC = usageHasScore ? safeInt(usageData[k][4]) : 0;
-        var uCR = usageHasScore ? safeInt(usageData[k][5]) : 0;
-        var uScore = usageHasScore ? safeInt(usageData[k][6]) : 0;
-        // score 항상 공식으로 재계산 (Date→epoch 오염 방지)
-        uScore = Math.round((uInp * 1) + (uOut * 5) + (uCC * 1.25) + (uCR * 0.1));
+        var clIn, clOut, clCw, clCr, cxIn, cxOut, cxCr, uSess, uAt;
+        if (isUsageV2) {
+          clIn  = safeInt(usageData[k][2]);
+          clOut = safeInt(usageData[k][3]);
+          clCw  = safeInt(usageData[k][4]);
+          clCr  = safeInt(usageData[k][5]);
+          cxIn  = safeInt(usageData[k][6]);
+          cxOut = safeInt(usageData[k][7]);
+          cxCr  = safeInt(usageData[k][8]);
+          uSess = safeInt(usageData[k][10]);
+          uAt   = usageData[k][11];
+        } else if (usageHasV1) {
+          clIn  = safeInt(usageData[k][2]);
+          clOut = safeInt(usageData[k][3]);
+          clCw  = safeInt(usageData[k][4]);
+          clCr  = safeInt(usageData[k][5]);
+          cxIn = 0; cxOut = 0; cxCr = 0;
+          uSess = safeInt(usageData[k][7]);
+          uAt   = usageData[k][8];
+        } else {
+          clIn  = safeInt(usageData[k][2]);
+          clOut = safeInt(usageData[k][3]);
+          clCw = 0; clCr = 0; cxIn = 0; cxOut = 0; cxCr = 0;
+          uSess = safeInt(usageData[k][5]);
+          uAt   = usageData[k][6];
+        }
+        // score 항상 v2 공식으로 재계산
+        var uScore = calcScoreV2_({
+          claude_input_tokens: clIn, claude_output_tokens: clOut,
+          claude_cache_creation_tokens: clCw, claude_cache_read_tokens: clCr,
+          codex_input_tokens: cxIn, codex_output_tokens: cxOut,
+          codex_cache_read_tokens: cxCr
+        });
         usage.push({
           nickname: String(usageData[k][0]),
           date: toDateStr(usageData[k][1]),
-          input_tokens: uInp,
-          output_tokens: uOut,
-          cache_creation_tokens: uCC,
-          cache_read_tokens: uCR,
+          claude_input_tokens: clIn,
+          claude_output_tokens: clOut,
+          claude_cache_creation_tokens: clCw,
+          claude_cache_read_tokens: clCr,
+          codex_input_tokens: cxIn,
+          codex_output_tokens: cxOut,
+          codex_cache_read_tokens: cxCr,
+          // 하위 호환 aliases (프론트 구 코드용)
+          input_tokens: clIn + cxIn,
+          output_tokens: clOut + cxOut,
+          cache_creation_tokens: clCw,
+          cache_read_tokens: clCr + cxCr,
           score: uScore,
-          sessions: safeInt(usageHasScore ? usageData[k][7] : usageData[k][5]),
-          reportedAt: toDateTimeStr(usageHasScore ? usageData[k][8] : usageData[k][6])
+          sessions: uSess,
+          reportedAt: toDateTimeStr(uAt)
         });
       }
     }
@@ -381,36 +541,77 @@ function handleDashboard(params) {
       var rawSheet = ss.getSheetByName('사용량_raw');
       if (rawSheet && rawSheet.getLastRow() > 1) {
         var rawRows = rawSheet.getDataRange().getValues();
-        // 새 형식(10열): nickname,date,input,output,cache_creation,cache_read,score,sessions,reportedAt,hourly
-        // 구 형식(8열): nickname,date,input,output,cache_tokens,sessions,reportedAt,hourly
-        var rawHasNewFmt = (rawRows[0].length >= 10) || (String(rawRows[0][4] || '').indexOf('cache_creation') >= 0);
+        var rawHdr0 = rawRows[0];
+        var isRawV2 = String(rawHdr0[2] || '').indexOf('claude_') === 0;
+        var rawHasV1 = rawHdr0.length >= 10;
         for (var r = 1; r < rawRows.length; r++) {
           if (String(rawRows[r][0]).trim() === reqNickname) {
-            var rInp = safeInt(rawRows[r][2]);
-            var rOut = safeInt(rawRows[r][3]);
-            var rCC, rCR, rScore, rSess, rAt, rHourlyStr;
-            if (rawHasNewFmt) {
-              rCC = safeInt(rawRows[r][4]);
-              rCR = safeInt(rawRows[r][5]);
+            var rClIn, rClOut, rClCw, rClCr, rCxIn, rCxOut, rCxCr, rSess, rAt, rHourlyStr;
+            if (isRawV2) {
+              rClIn  = safeInt(rawRows[r][2]);
+              rClOut = safeInt(rawRows[r][3]);
+              rClCw  = safeInt(rawRows[r][4]);
+              rClCr  = safeInt(rawRows[r][5]);
+              rCxIn  = safeInt(rawRows[r][6]);
+              rCxOut = safeInt(rawRows[r][7]);
+              rCxCr  = safeInt(rawRows[r][8]);
+              rSess  = safeInt(rawRows[r][10]);
+              rAt    = rawRows[r][11];
+              rHourlyStr = rawRows[r][12] || '';
+            } else if (rawHasV1) {
+              rClIn  = safeInt(rawRows[r][2]);
+              rClOut = safeInt(rawRows[r][3]);
+              rClCw  = safeInt(rawRows[r][4]);
+              rClCr  = safeInt(rawRows[r][5]);
+              rCxIn = 0; rCxOut = 0; rCxCr = 0;
               rSess = safeInt(rawRows[r][7]);
               rAt = rawRows[r][8];
               rHourlyStr = rawRows[r][9] || '';
             } else {
-              rCC = 0; rCR = 0;
+              rClIn  = safeInt(rawRows[r][2]);
+              rClOut = safeInt(rawRows[r][3]);
+              rClCw = 0; rClCr = 0; rCxIn = 0; rCxOut = 0; rCxCr = 0;
               rSess = safeInt(rawRows[r][5]);
               rAt = rawRows[r][6];
               rHourlyStr = rawRows[r][7] || '';
             }
-            // 항상 컴포넌트에서 재계산 (Date→epoch 오염 방지)
-            rScore = Math.round((rInp * 1) + (rOut * 5) + (rCC * 1.25) + (rCR * 0.1));
+            var rScore = calcScoreV2_({
+              claude_input_tokens: rClIn, claude_output_tokens: rClOut,
+              claude_cache_creation_tokens: rClCw, claude_cache_read_tokens: rClCr,
+              codex_input_tokens: rCxIn, codex_output_tokens: rCxOut,
+              codex_cache_read_tokens: rCxCr
+            });
             var hourly = null;
-            if (rHourlyStr) { try { hourly = JSON.parse(rHourlyStr); } catch(e) {} }
+            if (rHourlyStr) {
+              try {
+                hourly = JSON.parse(rHourlyStr);
+                // hourly 구 형식 → v2 형식 on-the-fly 변환
+                if (Array.isArray(hourly)) {
+                  hourly = hourly.map(function(b) {
+                    if (b && b.cl) return b;
+                    return {
+                      h: b.h,
+                      cl: { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 },
+                      cx: { in: 0, out: 0, cr: 0 }
+                    };
+                  });
+                }
+              } catch(e) {}
+            }
             rawData.push({
               date: toDateStr(rawRows[r][1]),
-              input_tokens: rInp,
-              output_tokens: rOut,
-              cache_creation_tokens: rCC,
-              cache_read_tokens: rCR,
+              claude_input_tokens: rClIn,
+              claude_output_tokens: rClOut,
+              claude_cache_creation_tokens: rClCw,
+              claude_cache_read_tokens: rClCr,
+              codex_input_tokens: rCxIn,
+              codex_output_tokens: rCxOut,
+              codex_cache_read_tokens: rCxCr,
+              // 하위 호환
+              input_tokens: rClIn + rCxIn,
+              output_tokens: rClOut + rCxOut,
+              cache_creation_tokens: rClCw,
+              cache_read_tokens: rClCr + rCxCr,
               score: rScore,
               sessions: rSess,
               reportedAt: toDateTimeStr(rAt),
@@ -444,38 +645,60 @@ function handleDashboard(params) {
   // ── 멤버별 최근 활동 (불꽃 표시용) + 주간 1위 hourly (비교 차트용) ──
   // 모든 멤버의 가장 최근 raw 보고에서 hourly의 마지막 bucket 가중 스코어를 계산
   var memberLastActivity = {};
-  var memberAllHourly = {}; // nickname -> 가장 최근 raw row의 hourly 배열
+  var memberAllHourly = {}; // nickname -> 가장 최근 raw row의 hourly 배열 (v2 형식)
   var rawSheet2 = ss.getSheetByName('사용량_raw');
   if (rawSheet2 && rawSheet2.getLastRow() > 1) {
     var rawRows2 = rawSheet2.getDataRange().getValues();
-    var rawHasNewFmt2 = (rawRows2[0].length >= 10) || (String(rawRows2[0][4] || '').indexOf('cache_creation') >= 0);
+    var rawHdr2 = rawRows2[0];
+    var isRaw2V2 = String(rawHdr2[2] || '').indexOf('claude_') === 0;
+    var rawHasV1Fmt = rawHdr2.length >= 10;
     // 가장 최근 row를 닉네임별로 추적 (reportedAt 기준)
     var latestByMember = {};
     for (var rr = 1; rr < rawRows2.length; rr++) {
       var rNick = String(rawRows2[rr][0] || '').trim();
       if (!rNick) continue;
-      var rAt2 = rawHasNewFmt2 ? rawRows2[rr][8] : rawRows2[rr][6];
+      var rAt2, rHourlyStr2;
+      if (isRaw2V2) {
+        rAt2 = rawRows2[rr][11];
+        rHourlyStr2 = rawRows2[rr][12] || '';
+      } else if (rawHasV1Fmt) {
+        rAt2 = rawRows2[rr][8];
+        rHourlyStr2 = rawRows2[rr][9] || '';
+      } else {
+        rAt2 = rawRows2[rr][6];
+        rHourlyStr2 = rawRows2[rr][7] || '';
+      }
       var rAtStr = toDateTimeStr(rAt2);
       if (!latestByMember[rNick] || rAtStr > latestByMember[rNick].at) {
-        var rHourlyStr2 = rawHasNewFmt2 ? (rawRows2[rr][9] || '') : (rawRows2[rr][7] || '');
         var rHourly2 = null;
-        if (rHourlyStr2) { try { rHourly2 = JSON.parse(rHourlyStr2); } catch(e) {} }
+        if (rHourlyStr2) {
+          try {
+            rHourly2 = JSON.parse(rHourlyStr2);
+            if (Array.isArray(rHourly2)) {
+              rHourly2 = rHourly2.map(function(b) {
+                if (b && b.cl) return b;
+                return {
+                  h: b.h,
+                  cl: { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 },
+                  cx: { in: 0, out: 0, cr: 0 }
+                };
+              });
+            }
+          } catch(e) {}
+        }
         latestByMember[rNick] = { at: rAtStr, hourly: rHourly2 };
       }
     }
     Object.keys(latestByMember).forEach(function(nick) {
       var lat = latestByMember[nick];
       memberAllHourly[nick] = lat.hourly;
-      // 가장 최근 hourly bucket 가중 스코어
       if (lat.hourly && lat.hourly.length > 0) {
-        // 가장 큰 h 값을 가진 bucket을 "최근 활동"으로 간주
         var maxH = -1, maxBucket = null;
         for (var hh = 0; hh < lat.hourly.length; hh++) {
           if (lat.hourly[hh].h > maxH) { maxH = lat.hourly[hh].h; maxBucket = lat.hourly[hh]; }
         }
         if (maxBucket) {
-          var bScore = ((maxBucket.in || 0) * 1) + ((maxBucket.out || 0) * 5) + ((maxBucket.cc || 0) * 1.25) + ((maxBucket.cr || 0) * 0.1);
-          memberLastActivity[nick] = { hour: maxH, score: Math.round(bScore), reportedAt: lat.at };
+          memberLastActivity[nick] = { hour: maxH, score: calcBucketScoreV2_(maxBucket), reportedAt: lat.at };
         }
       }
     });
@@ -520,7 +743,7 @@ function handleDashboard(params) {
 }
 
 // ── 사용량 보고 (PC에서 Hook으로 전송) ──
-// 가중치 스코어: (input×1) + (output×5) + (cache_creation×1.25) + (cache_read×0.1)
+// v2: Claude + Codex 분리 필드 지원, 구 payload도 호환
 function handleReportUsage(params) {
   // 구형 시트 자동 마이그레이션 (1회성)
   migrateSheetIfNeeded_();
@@ -528,21 +751,31 @@ function handleReportUsage(params) {
   var nickname = (params.nickname || '').trim();
   var password = (params.password || '').trim();
   var date = (params.date || '').trim();
-  var inputTokens = parseInt(params.input_tokens) || 0;
-  var outputTokens = parseInt(params.output_tokens) || 0;
-  var cacheCreationTokens = parseInt(params.cache_creation_tokens) || 0;
-  var cacheReadTokens = parseInt(params.cache_read_tokens) || 0;
-  var score = parseInt(params.score) || 0;
+
+  // Claude 필드 (신/구 필드명 모두 허용)
+  var claudeIn  = parseInt(params.claude_input_tokens != null ? params.claude_input_tokens : params.input_tokens) || 0;
+  var claudeOut = parseInt(params.claude_output_tokens != null ? params.claude_output_tokens : params.output_tokens) || 0;
+  var claudeCw  = parseInt(params.claude_cache_creation_tokens != null ? params.claude_cache_creation_tokens : params.cache_creation_tokens) || 0;
+  var claudeCr  = parseInt(params.claude_cache_read_tokens != null ? params.claude_cache_read_tokens : params.cache_read_tokens) || 0;
+  // Codex 필드 (구 payload에는 없음 → 0)
+  var codexIn  = parseInt(params.codex_input_tokens) || 0;
+  var codexOut = parseInt(params.codex_output_tokens) || 0;
+  var codexCr  = parseInt(params.codex_cache_read_tokens) || 0;
+
   var sessions = parseInt(params.sessions) || 0;
 
-  // 하위 호환: 이전 스크립트가 cache_tokens 하나로 보내는 경우
-  if (!cacheCreationTokens && !cacheReadTokens && params.cache_tokens) {
-    cacheCreationTokens = parseInt(params.cache_tokens) || 0;
+  // 아주 구형 호환: cache_tokens 하나로 보내는 경우
+  if (!claudeCw && !claudeCr && params.cache_tokens) {
+    claudeCw = parseInt(params.cache_tokens) || 0;
   }
-  // score가 없으면 서버에서 계산
-  if (!score) {
-    score = Math.round((inputTokens * 1) + (outputTokens * 5) + (cacheCreationTokens * 1.25) + (cacheReadTokens * 0.1));
-  }
+
+  // score는 항상 서버에서 v2 공식으로 계산 (payload의 score는 무시)
+  var score = calcScoreV2_({
+    claude_input_tokens: claudeIn, claude_output_tokens: claudeOut,
+    claude_cache_creation_tokens: claudeCw, claude_cache_read_tokens: claudeCr,
+    codex_input_tokens: codexIn, codex_output_tokens: codexOut,
+    codex_cache_read_tokens: codexCr
+  });
 
   if (!nickname || !password || !date) return { success: false, error: '필수 파라미터가 누락되었습니다.' };
 
@@ -570,16 +803,40 @@ function handleReportUsage(params) {
   var rawSheet = ss.getSheetByName('사용량_raw');
   if (!rawSheet) {
     rawSheet = ss.insertSheet('사용량_raw');
-    rawSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt', 'hourly']);
+    rawSheet.appendRow(RAW_V2_HEADERS_);
   }
-  var hourlyJson = params.hourly ? JSON.stringify(params.hourly) : '';
-  rawSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, score, sessions, now, hourlyJson]);
+  // hourly 형식 정규화: 구 payload ({h,in,out,cc,cr}) → 신 ({h, cl:{...}, cx:{...}})
+  var hourlyJson = '';
+  if (params.hourly) {
+    try {
+      var hArr = (typeof params.hourly === 'string') ? JSON.parse(params.hourly) : params.hourly;
+      if (Array.isArray(hArr)) {
+        var normalized = hArr.map(function(b) {
+          if (b && b.cl) return b;  // 이미 v2 형식
+          return {
+            h: b.h,
+            cl: { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 },
+            cx: { in: 0, out: 0, cr: 0 }
+          };
+        });
+        hourlyJson = JSON.stringify(normalized);
+      }
+    } catch (e) {
+      hourlyJson = typeof params.hourly === 'string' ? params.hourly : JSON.stringify(params.hourly);
+    }
+  }
+  rawSheet.appendRow([
+    nickname, "'" + date,
+    claudeIn, claudeOut, claudeCw, claudeCr,
+    codexIn, codexOut, codexCr,
+    score, sessions, now, hourlyJson
+  ]);
 
   // ② 사용량: 일별 최종값만 upsert (프론트 표시용)
   var usageSheet = ss.getSheetByName('사용량');
   if (!usageSheet) {
     usageSheet = ss.insertSheet('사용량');
-    usageSheet.appendRow(['nickname', 'date', 'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'score', 'sessions', 'reportedAt']);
+    usageSheet.appendRow(USAGE_V2_HEADERS_);
   }
 
   var usageData = usageSheet.getDataRange().getValues();
@@ -591,9 +848,19 @@ function handleReportUsage(params) {
   }
 
   if (existingRow > 0) {
-    usageSheet.getRange(existingRow, 3, 1, 7).setValues([[inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, score, sessions, now]]);
+    // C~L 10개 컬럼 업데이트
+    usageSheet.getRange(existingRow, 3, 1, 10).setValues([[
+      claudeIn, claudeOut, claudeCw, claudeCr,
+      codexIn, codexOut, codexCr,
+      score, sessions, now
+    ]]);
   } else {
-    usageSheet.appendRow([nickname, "'" + date, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, score, sessions, now]);
+    usageSheet.appendRow([
+      nickname, "'" + date,
+      claudeIn, claudeOut, claudeCw, claudeCr,
+      codexIn, codexOut, codexCr,
+      score, sessions, now
+    ]);
   }
 
   // 자동 인증: 리그별 포인트 계산
@@ -766,43 +1033,64 @@ function handlePersonalStats(params) {
   }
   if (!authenticated) return { success: false, error: '인증 실패.' };
 
-  // 사용량_raw (시간별 스냅샷)
-  // 새 컬럼: nickname, date, input, output, cache_creation, cache_read, score, sessions, reportedAt, hourly
-  // 구 컬럼: nickname, date, input, output, cache_tokens, sessions, reportedAt, hourly
+  // 사용량_raw (v2: 13열 / v1: 10열 / 구형: 8열)
   var rawData = [];
   var rawSheet = ss.getSheetByName('사용량_raw');
   if (rawSheet && rawSheet.getLastRow() > 1) {
     var rows = rawSheet.getDataRange().getValues();
-    var rawHeaders = rows[0];
-    var hasScore = rawHeaders.length >= 10; // 새 형식 (score 컬럼 있음)
+    var rawHdr = rows[0];
+    var isRawPsV2 = String(rawHdr[2] || '').indexOf('claude_') === 0;
+    var hasRawV1 = rawHdr.length >= 10;
     for (var r = 1; r < rows.length; r++) {
       if (String(rows[r][0]).trim() === nickname) {
-        var prInp = safeInt(rows[r][2]);
-        var prOut = safeInt(rows[r][3]);
-        var prCC, prCR, prScore, prSess, prAt, prHourlyStr;
-        if (hasScore) {
-          prCC = safeInt(rows[r][4]);
-          prCR = safeInt(rows[r][5]);
-          prScore = safeInt(rows[r][6]);
-          prSess = Number(rows[r][7]) || 0;
-          prAt = rows[r][8];
+        var prClIn, prClOut, prClCw, prClCr, prCxIn, prCxOut, prCxCr, prSess, prAt, prHourlyStr;
+        if (isRawPsV2) {
+          prClIn = safeInt(rows[r][2]);  prClOut = safeInt(rows[r][3]);
+          prClCw = safeInt(rows[r][4]);  prClCr = safeInt(rows[r][5]);
+          prCxIn = safeInt(rows[r][6]);  prCxOut = safeInt(rows[r][7]);
+          prCxCr = safeInt(rows[r][8]);
+          prSess = safeInt(rows[r][10]); prAt = rows[r][11];
+          prHourlyStr = rows[r][12] || '';
+        } else if (hasRawV1) {
+          prClIn = safeInt(rows[r][2]);  prClOut = safeInt(rows[r][3]);
+          prClCw = safeInt(rows[r][4]);  prClCr = safeInt(rows[r][5]);
+          prCxIn = 0; prCxOut = 0; prCxCr = 0;
+          prSess = safeInt(rows[r][7]); prAt = rows[r][8];
           prHourlyStr = rows[r][9] || '';
         } else {
-          prCC = 0; prCR = 0; prScore = 0;
-          prSess = Number(rows[r][5]) || 0;
-          prAt = rows[r][6];
+          prClIn = safeInt(rows[r][2]);  prClOut = safeInt(rows[r][3]);
+          prClCw = 0; prClCr = 0; prCxIn = 0; prCxOut = 0; prCxCr = 0;
+          prSess = safeInt(rows[r][5]); prAt = rows[r][6];
           prHourlyStr = rows[r][7] || '';
         }
-        // score 항상 공식으로 재계산
-        prScore = Math.round((prInp * 1) + (prOut * 5) + (prCC * 1.25) + (prCR * 0.1));
+        var prScore = calcScoreV2_({
+          claude_input_tokens: prClIn, claude_output_tokens: prClOut,
+          claude_cache_creation_tokens: prClCw, claude_cache_read_tokens: prClCr,
+          codex_input_tokens: prCxIn, codex_output_tokens: prCxOut,
+          codex_cache_read_tokens: prCxCr
+        });
         var hourly = null;
-        if (prHourlyStr) { try { hourly = JSON.parse(prHourlyStr); } catch(e) {} }
+        if (prHourlyStr) {
+          try {
+            hourly = JSON.parse(prHourlyStr);
+            if (Array.isArray(hourly)) {
+              hourly = hourly.map(function(b) {
+                if (b && b.cl) return b;
+                return { h: b.h, cl: { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 }, cx: { in: 0, out: 0, cr: 0 } };
+              });
+            }
+          } catch(e) {}
+        }
         rawData.push({
           date: toDateStr(rows[r][1]),
-          input_tokens: prInp,
-          output_tokens: prOut,
-          cache_creation_tokens: prCC,
-          cache_read_tokens: prCR,
+          claude_input_tokens: prClIn, claude_output_tokens: prClOut,
+          claude_cache_creation_tokens: prClCw, claude_cache_read_tokens: prClCr,
+          codex_input_tokens: prCxIn, codex_output_tokens: prCxOut,
+          codex_cache_read_tokens: prCxCr,
+          input_tokens: prClIn + prCxIn,
+          output_tokens: prClOut + prCxOut,
+          cache_creation_tokens: prClCw,
+          cache_read_tokens: prClCr + prCxCr,
           score: prScore,
           sessions: prSess,
           reportedAt: toDateTimeStr(prAt),
@@ -812,32 +1100,52 @@ function handlePersonalStats(params) {
     }
   }
 
-  // 사용량 (일별 최종)
-  // 새 컬럼: nickname, date, input, output, cache_creation, cache_read, score, sessions, reportedAt
-  // 구 컬럼: nickname, date, input, output, cache_tokens, sessions, reportedAt
+  // 사용량 (v2: 12열 / v1: 9열 / 구형: 7열)
   var dailyData = [];
   var usageSheet = ss.getSheetByName('사용량');
   if (usageSheet && usageSheet.getLastRow() > 1) {
     var uRows = usageSheet.getDataRange().getValues();
-    var usageHeaders = uRows[0];
-    var hasUsageScore = usageHeaders.length >= 9;
+    var usageHdr = uRows[0];
+    var isUsagePsV2 = String(usageHdr[2] || '').indexOf('claude_') === 0;
+    var hasUsageV1 = usageHdr.length >= 9;
     for (var u = 1; u < uRows.length; u++) {
       if (String(uRows[u][0]).trim() === nickname) {
-        var pdInp = safeInt(uRows[u][2]);
-        var pdOut = safeInt(uRows[u][3]);
-        var pdCC = hasUsageScore ? safeInt(uRows[u][4]) : 0;
-        var pdCR = hasUsageScore ? safeInt(uRows[u][5]) : 0;
-        // 항상 컴포넌트에서 재계산 (Date→epoch 오염 방지)
-        var pdScore = Math.round((pdInp * 1) + (pdOut * 5) + (pdCC * 1.25) + (pdCR * 0.1));
+        var pdClIn, pdClOut, pdClCw, pdClCr, pdCxIn, pdCxOut, pdCxCr, pdSess, pdAt;
+        if (isUsagePsV2) {
+          pdClIn = safeInt(uRows[u][2]);  pdClOut = safeInt(uRows[u][3]);
+          pdClCw = safeInt(uRows[u][4]);  pdClCr = safeInt(uRows[u][5]);
+          pdCxIn = safeInt(uRows[u][6]);  pdCxOut = safeInt(uRows[u][7]);
+          pdCxCr = safeInt(uRows[u][8]);
+          pdSess = safeInt(uRows[u][10]); pdAt = uRows[u][11];
+        } else if (hasUsageV1) {
+          pdClIn = safeInt(uRows[u][2]);  pdClOut = safeInt(uRows[u][3]);
+          pdClCw = safeInt(uRows[u][4]);  pdClCr = safeInt(uRows[u][5]);
+          pdCxIn = 0; pdCxOut = 0; pdCxCr = 0;
+          pdSess = safeInt(uRows[u][7]); pdAt = uRows[u][8];
+        } else {
+          pdClIn = safeInt(uRows[u][2]);  pdClOut = safeInt(uRows[u][3]);
+          pdClCw = 0; pdClCr = 0; pdCxIn = 0; pdCxOut = 0; pdCxCr = 0;
+          pdSess = safeInt(uRows[u][5]); pdAt = uRows[u][6];
+        }
+        var pdScore = calcScoreV2_({
+          claude_input_tokens: pdClIn, claude_output_tokens: pdClOut,
+          claude_cache_creation_tokens: pdClCw, claude_cache_read_tokens: pdClCr,
+          codex_input_tokens: pdCxIn, codex_output_tokens: pdCxOut,
+          codex_cache_read_tokens: pdCxCr
+        });
         dailyData.push({
           date: toDateStr(uRows[u][1]),
-          input_tokens: pdInp,
-          output_tokens: pdOut,
-          cache_creation_tokens: pdCC,
-          cache_read_tokens: pdCR,
+          claude_input_tokens: pdClIn, claude_output_tokens: pdClOut,
+          claude_cache_creation_tokens: pdClCw, claude_cache_read_tokens: pdClCr,
+          codex_input_tokens: pdCxIn, codex_output_tokens: pdCxOut,
+          codex_cache_read_tokens: pdCxCr,
+          input_tokens: pdClIn + pdCxIn,
+          output_tokens: pdClOut + pdCxOut,
+          cache_creation_tokens: pdClCw,
+          cache_read_tokens: pdClCr + pdCxCr,
           score: pdScore,
-          sessions: safeInt(hasUsageScore ? uRows[u][7] : uRows[u][5]),
-          reportedAt: toDateTimeStr(hasUsageScore ? uRows[u][8] : uRows[u][6])
+          sessions: pdSess,
+          reportedAt: toDateTimeStr(pdAt)
         });
       }
     }
@@ -911,20 +1219,37 @@ function runDailyLeagueBatch_() {
     dates.push(Utilities.formatDate(t, 'Asia/Seoul', 'yyyy-MM-dd'));
   }
 
-  // 각 멤버의 최근 3일 스코어 수집
+  // 각 멤버의 최근 3일 스코어 수집 (v2 형식)
   var usage = usageSheet.getDataRange().getValues();
-  var usageHasScore = usage[0].length >= 9;
+  var batchHdr = usage[0];
+  var isBatchV2 = String(batchHdr[2] || '').indexOf('claude_') === 0;
+  var batchHasV1 = batchHdr.length >= 9;
   var scoresByMember = {};  // nick → { date: score }
   for (var i = 1; i < usage.length; i++) {
     var nk = String(usage[i][0]).trim();
     if (!nk) continue;
     var dStr = toDateStr(usage[i][1]);
     if (dates.indexOf(dStr) < 0) continue;
-    var uInp = safeInt(usage[i][2]);
-    var uOut = safeInt(usage[i][3]);
-    var uCC = usageHasScore ? safeInt(usage[i][4]) : 0;
-    var uCR = usageHasScore ? safeInt(usage[i][5]) : 0;
-    var sc = Math.round((uInp * 1) + (uOut * 5) + (uCC * 1.25) + (uCR * 0.1));
+    var bClIn, bClOut, bClCw, bClCr, bCxIn, bCxOut, bCxCr;
+    if (isBatchV2) {
+      bClIn = safeInt(usage[i][2]); bClOut = safeInt(usage[i][3]);
+      bClCw = safeInt(usage[i][4]); bClCr = safeInt(usage[i][5]);
+      bCxIn = safeInt(usage[i][6]); bCxOut = safeInt(usage[i][7]);
+      bCxCr = safeInt(usage[i][8]);
+    } else if (batchHasV1) {
+      bClIn = safeInt(usage[i][2]); bClOut = safeInt(usage[i][3]);
+      bClCw = safeInt(usage[i][4]); bClCr = safeInt(usage[i][5]);
+      bCxIn = 0; bCxOut = 0; bCxCr = 0;
+    } else {
+      bClIn = safeInt(usage[i][2]); bClOut = safeInt(usage[i][3]);
+      bClCw = 0; bClCr = 0; bCxIn = 0; bCxOut = 0; bCxCr = 0;
+    }
+    var sc = calcScoreV2_({
+      claude_input_tokens: bClIn, claude_output_tokens: bClOut,
+      claude_cache_creation_tokens: bClCw, claude_cache_read_tokens: bClCr,
+      codex_input_tokens: bCxIn, codex_output_tokens: bCxOut,
+      codex_cache_read_tokens: bCxCr
+    });
     if (!scoresByMember[nk]) scoresByMember[nk] = {};
     scoresByMember[nk][dStr] = sc;
   }

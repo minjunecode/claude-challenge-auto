@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260416d">
+  <link rel="stylesheet" href="style.css?v=20260416e">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -361,7 +361,17 @@
           <div class="stats-section">
             <div class="stats-section-header">
               <h3>시간대별 사용량</h3>
-              <input type="date" id="stats-date-picker" class="stats-date-input">
+              <div class="stats-hourly-controls">
+                <select id="stats-hourly-view" class="stats-view-select">
+                  <option value="all">전체</option>
+                  <option value="claude">Claude</option>
+                  <option value="codex">Codex</option>
+                  <option value="input">Input</option>
+                  <option value="output">Output</option>
+                  <option value="cache">Cache</option>
+                </select>
+                <input type="date" id="stats-date-picker" class="stats-date-input">
+              </div>
             </div>
             <div class="stats-chart-area" id="stats-hourly-chart">
               <div class="stats-placeholder">데이터 로딩 중...</div>
@@ -410,6 +420,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260416d"></script>
+  <script src="app.js?v=20260416e"></script>
 </body>
 </html>
