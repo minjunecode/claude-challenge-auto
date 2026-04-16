@@ -995,3 +995,18 @@ function manualRunDailyLeagueBatch() {
   runDailyLeagueBatch_();
   return '리그 배치 수동 실행 완료';
 }
+
+// ──────────────────────────────────────────────
+// v1.0 시트 백업 (Codex 통합 전에 1회 실행)
+// ──────────────────────────────────────────────
+// 같은 Google Drive 폴더에 전체 시트 사본 생성.
+// 원본은 그대로 두고, 'Claude Challenge v1.0 백업 (YYYY-MM-DD)' 이름의 사본이 생성됨.
+function backupSpreadsheetV1_() {
+  var src = SpreadsheetApp.getActiveSpreadsheet();
+  var dateStr = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
+  var backupName = 'Claude Challenge v1.0 백업 (' + dateStr + ')';
+  var copy = src.copy(backupName);
+  var msg = '✅ 백업 완료\n  이름: ' + backupName + '\n  URL:  ' + copy.getUrl();
+  Logger.log(msg);
+  return msg;
+}
