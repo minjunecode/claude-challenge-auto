@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260416a">
+  <link rel="stylesheet" href="style.css?v=20260416b">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -45,7 +45,7 @@
       <nav class="tabs">
         <button class="tab active" data-tab="dashboard">대시보드</button>
         <button class="tab" data-tab="stats">내 분석</button>
-        <button class="tab" data-tab="cert">인증</button>
+        <button class="tab" data-tab="cert">인증/패치</button>
         <button class="tab admin-only" data-tab="admin">관리자</button>
       </nav>
 
@@ -170,6 +170,59 @@
             </div>
           </div>
 
+          <!-- 패치 노트 -->
+          <div class="cert-section">
+            <div class="cert-section-header">
+              <h2 class="cert-section-title">패치 노트</h2>
+              <p class="cert-section-desc">주요 기능 업데이트 내역입니다.</p>
+            </div>
+
+            <div class="patch-list">
+              <details class="patch-item">
+                <summary class="patch-summary">
+                  <span class="patch-version">v1.0</span>
+                  <span class="patch-title">리그 시스템 도입</span>
+                  <span class="patch-date">2026-04-17</span>
+                  <span class="patch-arrow">&#9656;</span>
+                </summary>
+                <div class="patch-body">
+                  <h4>🏆 리그 시스템 추가</h4>
+                  <ul>
+                    <li><strong>1M 목표 리그</strong> / <strong>10M 목표 리그</strong> 두 단계로 분리</li>
+                    <li>대시보드 상단에서 리그별로 주간뷰 · TOP 3 · 토큰 순위 필터링 가능</li>
+                    <li>1:1 비교는 기존처럼 전체 멤버 대상</li>
+                  </ul>
+
+                  <h4>📊 포인트 기준 변경 (리그별)</h4>
+                  <ul>
+                    <li><strong>1M 리그</strong>: 1M / 10M / <strong>25M</strong> (1pt / 2pt / 3pt)</li>
+                    <li><strong>10M 리그</strong>: 10M / 50M / 100M (1pt / 2pt / 3pt)</li>
+                    <li>기존 공통 50M=3pt → 1M 리그는 <strong>25M으로 완화</strong>, 10M 리그는 <strong>100M으로 상향</strong></li>
+                  </ul>
+
+                  <h4>🔄 자동 승격/강등</h4>
+                  <ul>
+                    <li>매일 자정(KST) 판정</li>
+                    <li>최근 3일 <strong>모두 10M 이상</strong> → 10M 리그로 승격</li>
+                    <li>10M 리그에서 최근 3일 <strong>모두 10M 미만</strong> → 1M 리그로 강등</li>
+                  </ul>
+
+                  <h4>🎨 UI 변경</h4>
+                  <ul>
+                    <li>닉네임/포인트/레벨 카드를 <strong>내 분석</strong> 탭으로 이동</li>
+                    <li>닉네임 옆 리그 뱃지 표시 (1M = 보라 / 10M = 골드)</li>
+                    <li>게이지 바, 일간 차트 임계선 모두 내 리그 기준으로 표시</li>
+                  </ul>
+
+                  <h4>⚙ 적용 시점</h4>
+                  <ul>
+                    <li>4/16까지: 기존 기준(1M/10M/50M) 유지</li>
+                    <li><strong>4/17 00:00부터: 각자 리그 기준 적용</strong></li>
+                  </ul>
+                </div>
+              </details>
+            </div>
+          </div>
 
         </div>
       </div>
@@ -357,6 +410,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260416a"></script>
+  <script src="app.js?v=20260416b"></script>
 </body>
 </html>
