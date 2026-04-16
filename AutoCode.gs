@@ -270,6 +270,103 @@ function migrateUsageV1ToV2_(sheet, isRaw) {
   sheet.getRange(1, 1, newRows.length, newHeaders.length).setValues(newRows);
 }
 
+// ============================================
+// 공개 마이그레이션 래퍼 (Apps Script 에디터에서 실행용)
+// ============================================
+
+/**
+ * [드라이런] 현재 시트 상태를 점검만 하고 변경하지 않음.
+ * Apps Script 에디터 → 함수 드롭다운 → dryRunMigration → ▶ 실행
+ * 실행 로그에 각 시트의 현재 버전과 행 수가 찍힘.
+ */
+function dryRunMigration() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var targets = ['사용량', '사용량_raw'];
+  var lines = ['=== 드라이런: 마이그레이션 대상 점검 ==='];
+
+  for (var i = 0; i < targets.length; i++) {
+    var name = targets[i];
+    var sh = ss.getSheetByName(name);
+    if (!sh) { lines.push('[' + name + '] 시트 없음'); continue; }
+    var lastCol = sh.getLastColumn();
+    var lastRow = sh.getLastRow();
+    var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].join(',');
+    var isV2 = headers.indexOf('claude_input_tokens') >= 0;
+    var isV1 = !isV2 && headers.indexOf('cache_creation_tokens') >= 0;
+    var version = isV2 ? 'v2 (마이그 불필요)' : (isV1 ? 'v1 (v2로 변환 예정)' : '구형 또는 빈 시트 (초기화 예정)');
+    lines.push('[' + name + '] 버전=' + version + ' / 행=' + lastRow + ' / 열=' + lastCol);
+    lines.push('  헤더: ' + headers);
+  }
+
+  // 멤버 시트 리그 컬럼 점검
+  var mem = ss.getSheetByName('멤버');
+  if (mem) {
+    var mLastCol = mem.getLastColumn();
+    var mLastRow = mem.getLastRow();
+    var eHeader = mLastCol >= 5 ? String(mem.getRange(1, 5).getValue() || '') : '(없음)';
+    lines.push('[멤버] 행=' + mLastRow + ' / E열 헤더="' + eHeader + '" (league 여야 함)');
+  }
+
+  // 인증기록 시트 league 컬럼 점검
+  var rec = ss.getSheetByName('인증기록');
+  if (rec) {
+    var rLastCol = rec.getLastColumn();
+    var rLastRow = rec.getLastRow();
+    var jHeader = rLastCol >= 10 ? String(rec.getRange(1, 10).getValue() || '') : '(없음)';
+    lines.push('[인증기록] 행=' + rLastRow + ' / J열 헤더="' + jHeader + '" (league 여야 함)');
+  }
+
+  var msg = lines.join('\n');
+  Logger.log(msg);
+  return msg;
+}
+
+/**
+ * [백업+마이그레이션] 사용량/사용량_raw 시트를 복사해 백업한 뒤 v2로 변환.
+ * 백업 이름: "사용량_backup_YYYYMMDD_HHMMSS" 등.
+ * Apps Script 에디터 → 함수 드롭다운 → migrateWithBackup → ▶ 실행
+ */
+function migrateWithBackup() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ts = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyyMMdd_HHmmss');
+  var backedUp = [];
+  var targets = ['사용량', '사용량_raw'];
+
+  for (var i = 0; i < targets.length; i++) {
+    var name = targets[i];
+    var src = ss.getSheetByName(name);
+    if (!src) continue;
+    // 이미 v2인 시트는 백업 스킵 (의미 없음)
+    var headers = src.getRange(1, 1, 1, src.getLastColumn()).getValues()[0].join(',');
+    if (headers.indexOf('claude_input_tokens') >= 0) {
+      Logger.log('[' + name + '] 이미 v2 — 백업 스킵');
+      continue;
+    }
+    var copy = src.copyTo(ss);
+    var backupName = name + '_backup_' + ts;
+    copy.setName(backupName);
+    backedUp.push(backupName);
+    Logger.log('[' + name + '] 백업 완료 → ' + backupName);
+  }
+
+  // 실제 마이그레이션
+  migrateSheetIfNeeded_();
+
+  var doneMsg = '=== 마이그레이션 완료 ===\n백업 시트: ' + (backedUp.length > 0 ? backedUp.join(', ') : '(없음, 이미 v2)');
+  Logger.log(doneMsg);
+  return doneMsg;
+}
+
+/**
+ * [백업 없이 마이그레이션] 위험. 먼저 dryRunMigration + migrateWithBackup 권장.
+ */
+function migrateNow() {
+  migrateSheetIfNeeded_();
+  var msg = '마이그레이션 완료 (백업 없이 실행됨)';
+  Logger.log(msg);
+  return msg;
+}
+
 /** 셀 값을 안전한 정수로 변환 (Date 객체 → 0, 문자열 → 0) */
 function safeInt(v) {
   if (!v) return 0;
