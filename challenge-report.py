@@ -73,8 +73,10 @@ def _parse_kst_hour(ts, today):
         return None
 
 
-def count_claude_tokens(today, hourly, sessions):
-    """~/.claude/projects/**/*.jsonl에서 오늘(KST) Claude 토큰 집계."""
+def count_claude_tokens(today, hourly, sessions, evidence):
+    """~/.claude/projects/**/*.jsonl에서 오늘(KST) Claude 토큰 집계.
+    evidence: 세션별 증거 dict (uuid → {msgs, first_ts, last_ts, out, in})
+    """
     home = os.path.expanduser("~")
     jsonl_files = glob.glob(os.path.join(home, ".claude", "projects", "**", "*.jsonl"), recursive=True)
 
@@ -115,28 +117,31 @@ def count_claude_tokens(today, hourly, sessions):
                     hourly[kst_hour]["cl_cc"] += cc
                     hourly[kst_hour]["cl_cr"] += cr
 
-                    sid = obj.get("sessionId", "")
+                    sid = obj.get("sessionId", "") or os.path.basename(fpath)
                     if sid:
                         sessions.add(sid)
+                        # 세션별 증거 수집
+                        key = sid
+                        if key not in evidence:
+                            evidence[key] = {"svc": "claude", "msgs": 0,
+                                             "first_ts": ts, "last_ts": ts,
+                                             "out": 0, "in": 0}
+                        ev = evidence[key]
+                        ev["msgs"] += 1
+                        ev["out"] += out
+                        ev["in"] += inp
+                        ev["last_ts"] = ts
+                        if ts < ev["first_ts"]:
+                            ev["first_ts"] = ts
         except Exception:
             continue
 
     return total
 
 
-def count_codex_tokens(today, hourly, sessions):
+def count_codex_tokens(today, hourly, sessions, evidence):
     """~/.codex/sessions/**/*.jsonl에서 오늘(KST) Codex 토큰 집계.
-
-    Codex 세션 라인 포맷: {type, timestamp, payload}
-    token_count 이벤트:
-        payload.type == "token_count"
-        payload.info.last_token_usage = {
-            input_tokens, cached_input_tokens, output_tokens,
-            reasoning_output_tokens, total_tokens
-        }
-    last_token_usage는 해당 턴의 delta이므로 그대로 합산하면 됨.
-
-    디렉토리가 없으면 조용히 0 반환 (Codex 사용 안 하는 유저).
+    evidence: 세션별 증거 dict (uuid → {msgs, first_ts, last_ts, out, in})
     """
     home = os.path.expanduser("~")
     codex_dir = os.path.join(home, ".codex", "sessions")
@@ -157,7 +162,6 @@ def count_codex_tokens(today, hourly, sessions):
                         obj = json.loads(line)
                     except Exception:
                         continue
-                    # 세션 ID 추적 (session_meta 이벤트 or 파일명 fallback)
                     if session_id is None:
                         payload = obj.get("payload", {})
                         if isinstance(payload, dict):
@@ -165,7 +169,6 @@ def count_codex_tokens(today, hourly, sessions):
                             if sid:
                                 session_id = sid
 
-                    # token_count 이벤트만 집계
                     payload = obj.get("payload", {})
                     if not isinstance(payload, dict):
                         continue
@@ -182,11 +185,9 @@ def count_codex_tokens(today, hourly, sessions):
                     if not last:
                         continue
 
-                    # Codex의 input_tokens는 fresh(캐시 아닌) 입력, cached_input_tokens는 별도
                     inp = last.get("input_tokens", 0) or 0
                     cr  = last.get("cached_input_tokens", 0) or 0
                     out = last.get("output_tokens", 0) or 0
-                    # reasoning_output_tokens는 이미 output_tokens에 포함됨 (별도 합산 안 함)
 
                     if inp == 0 and out == 0 and cr == 0:
                         continue
@@ -199,10 +200,23 @@ def count_codex_tokens(today, hourly, sessions):
                     hourly[kst_hour]["cx_in"] += inp
                     hourly[kst_hour]["cx_out"] += out
                     hourly[kst_hour]["cx_cr"] += cr
+
+                    # 세션별 증거 수집
+                    eid = "codex:" + (str(session_id) if session_id else os.path.basename(fpath))
+                    if eid not in evidence:
+                        evidence[eid] = {"svc": "codex", "msgs": 0,
+                                         "first_ts": ts, "last_ts": ts,
+                                         "out": 0, "in": 0}
+                    ev = evidence[eid]
+                    ev["msgs"] += 1
+                    ev["out"] += out
+                    ev["in"] += inp
+                    ev["last_ts"] = ts
+                    if ts < ev["first_ts"]:
+                        ev["first_ts"] = ts
         except Exception:
             continue
 
-        # 세션 ID fallback: 파일명 사용
         if had_usage:
             if session_id is None:
                 session_id = os.path.basename(fpath)
@@ -217,9 +231,10 @@ def collect_usage(target_date=None):
         target_date = datetime.now(KST).strftime("%Y-%m-%d")
     hourly = _empty_hourly()
     sessions = set()
+    evidence = {}  # uuid → {svc, msgs, first_ts, last_ts, out, in}
 
-    claude = count_claude_tokens(target_date, hourly, sessions)
-    codex  = count_codex_tokens(target_date, hourly, sessions)
+    claude = count_claude_tokens(target_date, hourly, sessions, evidence)
+    codex  = count_codex_tokens(target_date, hourly, sessions, evidence)
 
     # 시간대별 리스트 (v2 형식: {h, cl: {...}, cx: {...}})
     hourly_list = []
@@ -243,6 +258,10 @@ def collect_usage(target_date=None):
         "codex_cache_read_tokens": codex["cr"],
         "sessions": len(sessions),
         "hourly": hourly_list,
+        # 세션별 증거 (서버 측 물리적 제약 검증용)
+        "sessions_detail": [
+            {"uuid": uid, **ev} for uid, ev in evidence.items()
+        ],
     }
 
 

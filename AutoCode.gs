@@ -864,6 +864,63 @@ function handleDashboard(params) {
   };
 }
 
+// ── 세션 증거 검증 ──
+// 물리��� 제약 상수 (충분히 관대하게, 정상 heavy user가 절대 걸리지 않는 수준)
+var EV_MAX_OUT_PER_MSG = 300000;   // 메시지당 최대 output 300K (Claude 최대 ~128K + 버퍼)
+var EV_MAX_OUT_PER_MIN = 50000;    // 분당 최대 output 50K (API rate ~80K 대비 여유)
+var EV_MIN_DURATION_MIN = 2;       // 분당 검사 최소 세션 길이 (짧은 세션은 시간 정밀도 낮아 스킵)
+
+/**
+ * sessions_detail 검증. 이상 없으면 null, 문제 있으면 에러 메시지 반환.
+ * sessions_detail이 없거나 빈 배열이면 skip (구 리포터 호환).
+ */
+function validateSessionEvidence_(detail, totalOut, totalIn) {
+  if (!detail || !Array.isArray(detail) || detail.length === 0) return null;  // 구 리포터: skip
+
+  var sumOut = 0;
+  var sumIn = 0;
+
+  for (var i = 0; i < detail.length; i++) {
+    var s = detail[i];
+    var msgs = parseInt(s.msgs) || 0;
+    var out = parseInt(s.out) || 0;
+    var inp = parseInt(s.in) || 0;
+
+    sumOut += out;
+    sumIn += inp;
+
+    if (msgs <= 0) continue;  // 메시지 0인 세션은 스킵
+
+    // 검증 1: 메시지당 output 상한
+    var avgOut = out / msgs;
+    if (avgOut > EV_MAX_OUT_PER_MSG) {
+      return 'session ' + (s.uuid || '?').substring(0, 8) +
+             ': avg_out/msg=' + Math.round(avgOut) + ' > ' + EV_MAX_OUT_PER_MSG;
+    }
+
+    // 검증 2: 분당 output 상한 (세션 2분 이상일 때만, 짧은 세션은 시간 정밀도 부족으로 스킵)
+    if (s.first_ts && s.last_ts && s.first_ts !== s.last_ts) {
+      try {
+        var t0 = new Date(s.first_ts.replace('Z', '+00:00')).getTime();
+        var t1 = new Date(s.last_ts.replace('Z', '+00:00')).getTime();
+        var durMin = (t1 - t0) / 60000;
+        if (durMin >= EV_MIN_DURATION_MIN && out / durMin > EV_MAX_OUT_PER_MIN) {
+          return 'session ' + (s.uuid || '?').substring(0, 8) +
+                 ': out/min=' + Math.round(out / durMin) + ' > ' + EV_MAX_OUT_PER_MIN;
+        }
+      } catch(e) { /* 타임스탬프 파싱 실패는 무시 */ }
+    }
+  }
+
+  // 검�� 3: 증거 합계와 보고 합계 일치
+  // 오차 허용 1% (부동소수점/반올림 차이)
+  if (totalOut > 0 && Math.abs(sumOut - totalOut) > totalOut * 0.01) {
+    return 'output 합계 불일치: evidence=' + sumOut + ' report=' + totalOut;
+  }
+
+  return null;  // 검증 통과
+}
+
 // ── 사용량 보고 (PC에서 Hook으로 전송) ──
 // v2: Claude + Codex 분리 필드 지원, 구 payload도 호환
 function handleReportUsage(params) {
@@ -918,6 +975,20 @@ function handleReportUsage(params) {
     }
   }
   if (!authenticated) return { success: false, error: '인증 실패.' };
+
+  // ── 세션 증거 검증 (sessions_detail이 있으면 물리적 제약 확인) ──
+  var evidenceErr = validateSessionEvidence_(params.sessions_detail, claudeOut + codexOut, claudeIn + codexIn);
+  if (evidenceErr) {
+    // 검증 실패: 경고 기록 후 reject
+    var alertSheet = ss.getSheetByName('이상치경고');
+    if (!alertSheet) {
+      alertSheet = ss.insertSheet('이상치경���');
+      alertSheet.appendRow(['timestamp', 'nickname', 'date', 'score', 'avg7d', 'ratio']);
+    }
+    var evNow = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
+    alertSheet.appendRow([evNow, nickname, date, score, 0, 'evidence: ' + evidenceErr]);
+    return { success: false, error: '세션 증거 검증 실패: ' + evidenceErr };
+  }
 
   var now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
 
@@ -1023,6 +1094,7 @@ function handleReportUsage(params) {
   }
 
   // ── 이상치 감지: 최근 7일 평균 대비 5배 이상이면 경고 ──
+  // (증거 검증과 별개: 증거는 hard reject, 이상치는 soft alert)
   checkAnomaly_(ss, nickname, date, score);
 
   return { success: true, message: '사용량 보고 완료', date: date, score: score };
