@@ -211,14 +211,15 @@ def count_codex_tokens(today, hourly, sessions):
     return total
 
 
-def collect_usage():
-    """오늘(KST)의 Claude + Codex 사용량 집계."""
-    today = datetime.now(KST).strftime("%Y-%m-%d")
+def collect_usage(target_date=None):
+    """특정 날짜(KST)의 Claude + Codex 사용량 집계. target_date 생략 시 오늘."""
+    if target_date is None:
+        target_date = datetime.now(KST).strftime("%Y-%m-%d")
     hourly = _empty_hourly()
     sessions = set()
 
-    claude = count_claude_tokens(today, hourly, sessions)
-    codex  = count_codex_tokens(today, hourly, sessions)
+    claude = count_claude_tokens(target_date, hourly, sessions)
+    codex  = count_codex_tokens(target_date, hourly, sessions)
 
     # 시간대별 리스트 (v2 형식: {h, cl: {...}, cx: {...}})
     hourly_list = []
@@ -232,7 +233,7 @@ def collect_usage():
             })
 
     return {
-        "date": today,
+        "date": target_date,
         "claude_input_tokens": claude["in"],
         "claude_output_tokens": claude["out"],
         "claude_cache_creation_tokens": claude["cc"],
@@ -278,13 +279,8 @@ def report_usage(cfg, usage):
         return {"success": False, "error": str(e)}
 
 
-def main():
-    cfg = load_config()
-    if not cfg.get("nickname") or not cfg.get("password"):
-        cfg = setup_config()
-
-    usage = collect_usage()
-
+def _report_one(cfg, usage):
+    """1일분 사용량 출력 + 전송. 토큰 0이면 skip."""
     cl_total = (usage["claude_input_tokens"] + usage["claude_output_tokens"]
                 + usage["claude_cache_creation_tokens"] + usage["claude_cache_read_tokens"])
     cx_total = (usage["codex_input_tokens"] + usage["codex_output_tokens"]
@@ -308,6 +304,25 @@ def main():
     else:
         error = result.get("error", "unknown") if result else "no response"
         print(f" | FAIL: {error}")
+
+
+def main():
+    cfg = load_config()
+    if not cfg.get("nickname") or not cfg.get("password"):
+        cfg = setup_config()
+
+    now_kst = datetime.now(KST)
+    today = now_kst.strftime("%Y-%m-%d")
+
+    # 새벽 0~3시(KST)에는 전날 데이터도 함께 보고
+    # (23시대 사용량이 날짜 전환으로 누락되는 문제 방지)
+    if now_kst.hour < 4:
+        yesterday = (now_kst - timedelta(days=1)).strftime("%Y-%m-%d")
+        prev_usage = collect_usage(yesterday)
+        _report_one(cfg, prev_usage)
+
+    usage = collect_usage(today)
+    _report_one(cfg, usage)
 
 
 if __name__ == "__main__":
