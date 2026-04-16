@@ -185,13 +185,13 @@
 <div class="wrap">
 
   <h1>자동 리포팅 설정 가이드</h1>
-  <div class="sub">1시간마다 Claude Code 사용량이 자동 전송됩니다. 5분이면 끝.</div>
+  <div class="sub">1시간마다 Claude Code + Codex CLI 사용량이 자동 전송됩니다. 5분이면 끝.</div>
 
   <!-- 구조 -->
   <section>
     <h2>작동 방식</h2>
     <div class="flow">
-      <div class="flow-node">Claude Code 사용</div>
+      <div class="flow-node">Claude Code / Codex 사용</div>
       <div class="flow-arr">&rarr;</div>
       <div class="flow-node">로컬 JSONL 자동 기록</div>
       <div class="flow-arr">&rarr;</div>
@@ -199,20 +199,24 @@
       <div class="flow-arr">&rarr;</div>
       <div class="flow-node hl">챌린지 사이트</div>
     </div>
-    <div class="note">PC의 스케줄러가 로컬 파일에서 토큰 수(숫자)만 읽어 전송합니다. OAuth 토큰 불필요.</div>
+    <div class="note">PC의 스케줄러가 <code>~/.claude/projects/</code> + <code>~/.codex/sessions/</code> 로컬 파일에서 토큰 수(숫자)만 읽어 전송합니다. OAuth 토큰 불필요. Codex를 사용하지 않으면 Claude만 집계됩니다.</div>
   </section>
 
   <!-- 전송 데이터 -->
   <section>
     <h2>전송되는 데이터 (이게 전부)</h2>
     <div class="grid4">
-      <div class="item"><div class="icon">🔢</div><div class="label">토큰 수</div></div>
+      <div class="item"><div class="icon">🔢</div><div class="label">토큰 수<br><span style="font-size:11px;color:#71717a;">Claude+Codex 분리</span></div></div>
       <div class="item"><div class="icon">📅</div><div class="label">날짜</div></div>
       <div class="item"><div class="icon">🏷</div><div class="label">닉네임</div></div>
       <div class="item"><div class="icon">🔄</div><div class="label">세션 수</div></div>
     </div>
     <div class="data-ex">
-{ <span class="k">"nickname"</span>: <span class="v">"minjune"</span>, <span class="k">"date"</span>: <span class="v">"2026-04-08"</span>, <span class="k">"input_tokens"</span>: <span class="v">1007</span>, <span class="k">"output_tokens"</span>: <span class="v">181207</span>, <span class="k">"sessions"</span>: <span class="v">3</span> }
+{ <span class="k">"nickname"</span>: <span class="v">"minjune"</span>, <span class="k">"date"</span>: <span class="v">"2026-04-17"</span>,
+  <span class="k">"claude_input_tokens"</span>: <span class="v">1007</span>, <span class="k">"claude_output_tokens"</span>: <span class="v">181207</span>,
+  <span class="k">"claude_cache_creation_tokens"</span>: <span class="v">50000</span>, <span class="k">"claude_cache_read_tokens"</span>: <span class="v">2400000</span>,
+  <span class="k">"codex_input_tokens"</span>: <span class="v">320</span>, <span class="k">"codex_output_tokens"</span>: <span class="v">8500</span>, <span class="k">"codex_cache_read_tokens"</span>: <span class="v">12000</span>,
+  <span class="k">"sessions"</span>: <span class="v">3</span> }
     </div>
     <div class="note" style="margin-top:4px;">대화 내용, 코드, 비밀번호, API 토큰 — 전송되지 않습니다.</div>
   </section>

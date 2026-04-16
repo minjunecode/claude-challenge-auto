@@ -1364,10 +1364,10 @@ const HOURLY_COLORS = {
   cx_cr:  '#BFDBFE'  // Codex cache read — 페일 블루
 };
 const HOURLY_LABELS = {
-  cl_in: 'Claude input ×1',        cl_out: 'Claude output ×5',
-  cl_cw: 'Claude cache write ×1.25', cl_cr: 'Claude cache read ×0.1',
-  cx_in: 'Codex input ×0.83',       cx_out: 'Codex output ×5',
-  cx_cr: 'Codex cache read ×0.08'
+  cl_in: 'Input ×1',           cl_out: 'Output ×5',
+  cl_cw: 'Cache write ×1.25',  cl_cr: 'Cache read ×0.1',
+  cx_in: 'Input ×0.83',        cx_out: 'Output ×5',
+  cx_cr: 'Cache read ×0.08'
 };
 const HOURLY_WEIGHTS = {
   cl_in: W_CL_IN, cl_out: W_CL_OUT, cl_cw: W_CL_CW, cl_cr: W_CL_CR,
@@ -1478,11 +1478,21 @@ function renderHourlyChart(raw, date) {
   }
   html += '</div>';
 
-  // Legend
+  // Legend: Claude 행 / Codex 행 분리
+  const claudeKeys = stackKeys.filter(k => k.startsWith('cl_'));
+  const codexKeys  = stackKeys.filter(k => k.startsWith('cx_'));
+  const renderLegendRow = (label, keys) => {
+    if (keys.length === 0) return '';
+    let row = `<div class="hourly-legend-row"><span class="hourly-legend-group">${label}</span>`;
+    for (const key of keys) {
+      row += `<span><span class="legend-swatch" style="background:${HOURLY_COLORS[key]}"></span>${HOURLY_LABELS[key]}</span>`;
+    }
+    row += '</div>';
+    return row;
+  };
   html += '<div class="hourly-legend">';
-  for (const key of stackKeys) {
-    html += `<span><span class="legend-swatch" style="background:${HOURLY_COLORS[key]}"></span>${HOURLY_LABELS[key]}</span>`;
-  }
+  html += renderLegendRow('Claude', claudeKeys);
+  html += renderLegendRow('Codex',  codexKeys);
   html += '</div>';
 
   container.innerHTML = html;

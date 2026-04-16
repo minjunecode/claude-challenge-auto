@@ -2056,6 +2056,13 @@ header h1 {
 .score-table td {
   padding: 4px 8px; border-bottom: 1px solid var(--border);
 }
+.score-group-claude td:first-child,
+.score-group-codex td:first-child {
+  font-weight: 600;
+}
+.score-group-claude td[rowspan] { background: rgba(245, 166, 35, 0.08); color: #D97706; }
+.score-group-codex td[rowspan]  { background: rgba(96, 165, 250, 0.08); color: #2563EB; }
+.score-sub { font-size: 0.62rem; color: var(--muted); font-weight: 400; }
 .score-desc {
   font-size: 0.72rem; color: var(--muted); margin: 0 0 8px 0; line-height: 1.5;
 }
@@ -2152,12 +2159,20 @@ header h1 {
 .stats-view-select:hover { border-color: var(--primary); }
 .stats-view-select:focus { outline: none; border-color: var(--primary); }
 
-/* 시간대별 차트 범례 */
+/* 시간대별 차트 범례 (Claude/Codex 2행) */
 .hourly-legend {
-  display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap;
-  margin-top: 8px; font-size: 0.65rem; color: var(--text-muted);
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 10px; font-size: 0.65rem; color: var(--text-muted);
 }
-.hourly-legend span { display: inline-flex; align-items: center; }
+.hourly-legend-row {
+  display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap;
+  align-items: center;
+}
+.hourly-legend-row span { display: inline-flex; align-items: center; }
+.hourly-legend-group {
+  font-weight: 700; color: var(--text); min-width: 48px; text-align: right;
+  font-size: 0.66rem; letter-spacing: 0.02em;
+}
 .legend-swatch {
   display: inline-block; width: 10px; height: 10px; border-radius: 2px;
   vertical-align: middle; margin-right: 4px;
