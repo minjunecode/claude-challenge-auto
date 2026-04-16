@@ -1001,6 +1001,9 @@ function manualRunDailyLeagueBatch() {
 // ──────────────────────────────────────────────
 // 같은 Google Drive 폴더에 전체 시트 사본 생성.
 // 원본은 그대로 두고, 'Claude Challenge v1.0 백업 (YYYY-MM-DD)' 이름의 사본이 생성됨.
+//
+// ⚠️ Apps Script에서 직접 실행할 때는 아래 `runBackupV1` 함수를 선택하세요.
+//    (이름이 _로 끝나는 함수는 private이라 드롭다운에 안 보임)
 function backupSpreadsheetV1_() {
   var src = SpreadsheetApp.getActiveSpreadsheet();
   var dateStr = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
@@ -1009,4 +1012,9 @@ function backupSpreadsheetV1_() {
   var msg = '✅ 백업 완료\n  이름: ' + backupName + '\n  URL:  ' + copy.getUrl();
   Logger.log(msg);
   return msg;
+}
+
+// Apps Script 에디터에서 직접 실행용 (public wrapper)
+function runBackupV1() {
+  return backupSpreadsheetV1_();
 }
