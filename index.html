@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260416f">
+  <link rel="stylesheet" href="style.css?v=20260416g">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -307,7 +307,15 @@
                 <tr class="score-group-codex"><td>Cache Read</td><td>0.083</td><td>$0.25 / 1M</td></tr>
               </table>
               <p class="score-ref">* 단가 기준: <a href="https://www.anthropic.com/pricing" target="_blank" rel="noopener">anthropic.com/pricing</a> (Claude Sonnet) · <a href="https://openai.com/api/pricing" target="_blank" rel="noopener">openai.com/api/pricing</a> (GPT-5.4)</p>
-              <div class="score-points" id="score-points-text">1pt = 1M · 2pt = 10M · 3pt = 25M (1M 리그 · 일간 가중 스코어 기준)</div>
+              <div class="score-points-wrap">
+                <div class="score-points-title">포인트 획득 기준 (일간 가중 스코어 기준, 리그별)</div>
+                <table class="score-points-table">
+                  <tr><th>리그</th><th class="pt1">1pt</th><th class="pt2">2pt</th><th class="pt3">3pt</th></tr>
+                  <tr><td><span class="my-league-badge">1M</span></td><td>1M+</td><td>10M+</td><td>25M+</td></tr>
+                  <tr><td><span class="my-league-badge league-10M">10M</span></td><td>10M+</td><td>50M+</td><td>100M+</td></tr>
+                </table>
+                <div class="score-points-note" id="score-points-text">* 하루 최대 3pt. 내 리그: <strong>—</strong></div>
+              </div>
             </div>
           </div>
 
@@ -423,6 +431,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260416f"></script>
+  <script src="app.js?v=20260416g"></script>
 </body>
 </html>

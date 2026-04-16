@@ -977,10 +977,21 @@ function updateMyStatusCard(allMembers, submissions, currentWeek, currentYear) {
   if (tooltipFooter) {
     tooltipFooter.textContent = `${formatTokens(t[0])}+ → 1pt · ${formatTokens(t[1])}+ → 2pt · ${formatTokens(t[2])}+ → 3pt / 일 (${myLeague} 리그 기준)`;
   }
-  // 토큰 산정 방식 안내 푸터
+  // 토큰 산정 방식 안내 푸터 - 내 리그 표시 + 표에서 내 리그 행 하이라이트
   const sptText = document.getElementById('score-points-text');
   if (sptText) {
-    sptText.textContent = `1pt = ${formatTokens(t[0])} · 2pt = ${formatTokens(t[1])} · 3pt = ${formatTokens(t[2])} (${myLeague} 리그 · 일간 가중 스코어 기준)`;
+    sptText.innerHTML = `* 하루 최대 3pt. 내 리그: <strong>${myLeague}</strong>`;
+  }
+  const sptTable = document.querySelector('.score-points-table');
+  if (sptTable) {
+    sptTable.querySelectorAll('tr').forEach((tr, idx) => {
+      tr.classList.remove('score-my-league');
+      if (idx === 0) return; // header
+      const badge = tr.querySelector('.my-league-badge');
+      if (!badge) return;
+      const rowLeague = badge.textContent.trim();
+      if (rowLeague === myLeague) tr.classList.add('score-my-league');
+    });
   }
 }
 
