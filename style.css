@@ -1775,6 +1775,19 @@ header h1 {
   50% { transform: scale(1.18); opacity: 1; }
 }
 
+/* ── 이상치 경고 사이렌 ── */
+.anomaly-siren {
+  font-size: 0.8rem;
+  margin-left: 3px;
+  display: inline-block;
+  animation: siren-flash 0.8s ease-in-out infinite alternate;
+  cursor: help;
+}
+@keyframes siren-flash {
+  0%   { opacity: 1; filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.8)); }
+  100% { opacity: 0.5; filter: drop-shadow(0 0 1px rgba(239, 68, 68, 0.3)); }
+}
+
 /* ── 탑 티어 vs 나 비교 차트 ── */
 .compare-chart .bar-col-compare {
   flex: 1;

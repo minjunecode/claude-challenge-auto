@@ -622,6 +622,18 @@ function renderDailyTable(members, submissions) {
         }
       }
     }
+    // 🚨 이상치 경고 사이렌 (최근 24시간 내 해당 멤버에게 경고가 있으면 표시)
+    if (dashboardData && dashboardData.alerts && dashboardData.alerts.length > 0) {
+      const memberAlerts = dashboardData.alerts.filter(a => a.nickname === m.nickname);
+      if (memberAlerts.length > 0) {
+        const latest = memberAlerts[memberAlerts.length - 1];
+        const siren = document.createElement('span');
+        siren.className = 'anomaly-siren';
+        siren.textContent = '🚨';
+        siren.title = `이상치 감지: 스코어 ${formatTokens(latest.score)} (7일 평균 ${formatTokens(latest.avg7d)} 대비 ${latest.ratio}배)`;
+        nameTd.appendChild(siren);
+      }
+    }
     tr.appendChild(nameTd);
 
     // 멤버의 현재 리그 (LEAGUE_ERA_START 이후 임계값 결정용)
@@ -1028,7 +1040,7 @@ function renderPodium(view) {
     }
     card.innerHTML = `
       <div class="podium-medal">${medals[i]}</div>
-      <div class="podium-name">${escapeHtml(r.nickname)}</div>
+      <div class="podium-name">${escapeHtml(r.nickname)}${getAnomalySirenHtml(r.nickname)}</div>
       <div class="podium-level">${level.name}</div>
       ${mainStat}
       ${view === 'points' && r.streak > 0 ? `<span class="podium-streak${r.streak >= 3 ? ' hot' : ''}">${r.streak}w streak</span>` : ''}
@@ -1051,7 +1063,7 @@ function renderPodium(view) {
       item.innerHTML = `
         <span class="rest-rank-num">${i + 4}</span>
         <div class="rest-rank-info">
-          <div class="rest-rank-name">${escapeHtml(r.nickname)}</div>
+          <div class="rest-rank-name">${escapeHtml(r.nickname)}${getAnomalySirenHtml(r.nickname)}</div>
           <div class="rest-rank-level">${level.name}${view === 'points' && r.streak > 0 ? ` · ${r.streak}w streak` : ''}</div>
         </div>
         <span class="rest-rank-pts">${statText}</span>
@@ -1129,6 +1141,14 @@ function getTodayStr() {
 }
 
 function escapeHtml(str) { const div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
+
+/** 닉네임에 이상치 경고가 있으면 🚨 HTML 반환, 없으면 빈 문자열 */
+function getAnomalySirenHtml(nickname) {
+  if (!dashboardData || !dashboardData.alerts || dashboardData.alerts.length === 0) return '';
+  const alert = dashboardData.alerts.find(a => a.nickname === nickname);
+  if (!alert) return '';
+  return ` <span class="anomaly-siren" title="이상치 감지: ${formatTokens(alert.score)} (7일 평균 대비 ${alert.ratio}배)">🚨</span>`;
+}
 
 // ── 데모 데이터 ──
 function getDemoData() {

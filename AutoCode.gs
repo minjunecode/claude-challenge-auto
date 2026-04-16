@@ -826,6 +826,30 @@ function handleDashboard(params) {
     topUser = { nickname: topNick, weekScore: topScore, hourly: memberAllHourly[topNick] || null };
   }
 
+  // ── 최근 24시간 이상치 경고 ──
+  var alerts = [];
+  var alertSheet = ss.getSheetByName('이상치경고');
+  if (alertSheet && alertSheet.getLastRow() > 1) {
+    var alertRows = alertSheet.getDataRange().getValues();
+    var nowMs = new Date().getTime();
+    var oneDayMs = 24 * 60 * 60 * 1000;
+    for (var ai = 1; ai < alertRows.length; ai++) {
+      var alertTs = alertRows[ai][0];
+      var alertTime;
+      try { alertTime = new Date(alertTs).getTime(); } catch(e) { continue; }
+      if (nowMs - alertTime <= oneDayMs) {
+        alerts.push({
+          timestamp: String(alertTs),
+          nickname: String(alertRows[ai][1]),
+          date: String(alertRows[ai][2]),
+          score: safeInt(alertRows[ai][3]),
+          avg7d: safeInt(alertRows[ai][4]),
+          ratio: Number(alertRows[ai][5]) || 0
+        });
+      }
+    }
+  }
+
   return {
     success: true,
     members: members,
@@ -835,7 +859,8 @@ function handleDashboard(params) {
     memberLastActivity: memberLastActivity,
     topUser: topUser,
     memberHourly: memberAllHourly,
-    memberColors: memberColors
+    memberColors: memberColors,
+    alerts: alerts
   };
 }
 
@@ -997,7 +1022,61 @@ function handleReportUsage(params) {
     }
   }
 
+  // ── 이상치 감지: 최근 7일 평균 대비 5배 이상이면 경고 ──
+  checkAnomaly_(ss, nickname, date, score);
+
   return { success: true, message: '사용량 보고 완료', date: date, score: score };
+}
+
+/**
+ * 이상치 감지: 최근 7일 평균 스코어 대비 비율이 임계값 초과 시 경고 기록.
+ * 데이터가 3일 미만이면 판단 보류 (신규 유저 보호).
+ */
+var ANOMALY_RATIO_THRESHOLD = 5;  // 평균 대비 5배 이상이면 경고
+var ANOMALY_MIN_DAYS = 3;         // 최소 3일 이상 데이터 있어야 판단
+
+function checkAnomaly_(ss, nickname, date, score) {
+  if (score <= 0) return;
+
+  var usageSheet = ss.getSheetByName('사용량');
+  if (!usageSheet || usageSheet.getLastRow() < 2) return;
+
+  var rows = usageSheet.getDataRange().getValues();
+  var isV2 = String(rows[0][2] || '').indexOf('claude_') === 0;
+  var scoreCol = isV2 ? 9 : 6;  // v2: J열(10)=0인덱스9, v1: G열(7)=0인덱스6
+
+  // 해당 유저의 최근 7일 스코어 수집 (오늘 제외)
+  var recentScores = [];
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() !== nickname) continue;
+    var rowDate = toDateStr(rows[i][1]);
+    if (rowDate === date) continue;  // 오늘 데이터 제외
+    var rowScore = safeInt(rows[i][scoreCol]);
+    if (rowScore > 0) recentScores.push({ date: rowDate, score: rowScore });
+  }
+
+  // 최근 7일만 필터 (날짜 정렬 후 최대 7개)
+  recentScores.sort(function(a, b) { return b.date.localeCompare(a.date); });
+  recentScores = recentScores.slice(0, 7);
+
+  if (recentScores.length < ANOMALY_MIN_DAYS) return;  // 데이터 부족: 판단 보류
+
+  var sum = 0;
+  for (var j = 0; j < recentScores.length; j++) sum += recentScores[j].score;
+  var avg = sum / recentScores.length;
+  if (avg <= 0) return;
+
+  var ratio = score / avg;
+  if (ratio < ANOMALY_RATIO_THRESHOLD) return;  // 정상 범위
+
+  // ── 경고 기록 ──
+  var alertSheet = ss.getSheetByName('이상치경고');
+  if (!alertSheet) {
+    alertSheet = ss.insertSheet('이상치경고');
+    alertSheet.appendRow(['timestamp', 'nickname', 'date', 'score', 'avg7d', 'ratio']);
+  }
+  var now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
+  alertSheet.appendRow([now, nickname, date, score, Math.round(avg), Math.round(ratio * 100) / 100]);
 }
 
 // ── 수동 스크린샷 업로드 ──

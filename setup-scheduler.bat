@@ -47,7 +47,7 @@ echo.
 echo   등록 중...
 
 :: PowerShell로 스케줄러 등록
-powershell -Command "& { $a = New-ScheduledTaskAction -Execute '%PY%' -Argument '%SCRIPT%'; $t = New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Hours 1); $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10); Register-ScheduledTask -TaskName 'ClaudeChallenge' -Action $a -Trigger $t -Settings $s -Force | Out-Null }" 2>nul
+powershell -Command "& { $a = New-ScheduledTaskAction -Execute '%PY%' -Argument '%SCRIPT%'; $t = New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration ([TimeSpan]::MaxValue); $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10); Register-ScheduledTask -TaskName 'ClaudeChallenge' -Action $a -Trigger $t -Settings $s -Force | Out-Null }" 2>nul
 
 if %errorlevel% neq 0 (
     echo.
