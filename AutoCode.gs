@@ -17,7 +17,7 @@ var W_CX_IN = 0.8333;     // Codex input  ($2.50 / $3)
 var W_CX_OUT = 5.0;       // Codex output ($15 / $3)
 var W_CX_CR = 0.0833;     // Codex cache read ($0.25 / $3)
 
-/** v2 통합 가중 스코어. 객체가 claude_*/codex_* 필드를 가지면 사용, 없으면 구 필드로 fallback */
+/** v2 통합 가중 스코어. 객체가 claude_ / codex_ 필드를 가지면 사용, 없으면 구 필드로 fallback */
 function calcScoreV2_(t) {
   var clIn  = safeInt(t.claude_input_tokens != null ? t.claude_input_tokens : t.input_tokens);
   var clOut = safeInt(t.claude_output_tokens != null ? t.claude_output_tokens : t.output_tokens);
