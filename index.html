@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260417e">
+  <link rel="stylesheet" href="style.css?v=20260417f">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -25,9 +25,8 @@
           <h3>계정 만들기</h3>
           <p class="hint">챌린지에 참여할 계정을 만드세요.</p>
           <input type="text" id="init-nickname" placeholder="이니셜 or 닉네임" autocomplete="off">
-          <input type="password" id="init-password" placeholder="비밀번호" autocomplete="off">
-          <p class="hint" style="font-size:0.7rem;color:var(--text-muted);margin:2px 0 6px;">영문+숫자를 모두 포함해 주세요.</p>
-          <button id="btn-init" class="btn btn-primary">가입하기</button>
+          <input type="password" id="init-password" placeholder="비밀번호 (영문+숫자 포함)" autocomplete="off">
+          <button id="btn-init" class="btn btn-primary" style="margin-top:4px;">가입하기</button>
           <div id="init-msg" class="error-msg"></div>
         </div>
       </div>
@@ -432,6 +431,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260417e"></script>
+  <script src="app.js?v=20260417f"></script>
 </body>
 </html>
