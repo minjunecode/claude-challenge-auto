@@ -155,6 +155,7 @@ function filterMembersByLeague(members) {
 // ── API ──
 async function apiCall(action, params = {}) {
   if (API_URL === 'YOUR_APPS_SCRIPT_URL_HERE') { if (!dashboardData) dashboardData = getDemoData(); return null; }
+  if (params.password != null) params.password = String(params.password);
   const body = { action, ...params };
   try {
     const response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body), redirect: 'follow' });
@@ -622,18 +623,6 @@ function renderDailyTable(members, submissions) {
         }
       }
     }
-    // 🚨 이상치 경고 사이렌 (최근 24시간 내 해당 멤버에게 경고가 있으면 표시)
-    if (dashboardData && dashboardData.alerts && dashboardData.alerts.length > 0) {
-      const memberAlerts = dashboardData.alerts.filter(a => a.nickname === m.nickname);
-      if (memberAlerts.length > 0) {
-        const latest = memberAlerts[memberAlerts.length - 1];
-        const siren = document.createElement('span');
-        siren.className = 'anomaly-siren';
-        siren.textContent = '🚨';
-        siren.title = `이상치 감지: 스코어 ${formatTokens(latest.score)} (7일 평균 ${formatTokens(latest.avg7d)} 대비 ${latest.ratio}배)`;
-        nameTd.appendChild(siren);
-      }
-    }
     tr.appendChild(nameTd);
 
     // 멤버의 현재 리그 (LEAGUE_ERA_START 이후 임계값 결정용)
@@ -1040,7 +1029,7 @@ function renderPodium(view) {
     }
     card.innerHTML = `
       <div class="podium-medal">${medals[i]}</div>
-      <div class="podium-name">${escapeHtml(r.nickname)}${getAnomalySirenHtml(r.nickname)}</div>
+      <div class="podium-name">${escapeHtml(r.nickname)}</div>
       <div class="podium-level">${level.name}</div>
       ${mainStat}
       ${view === 'points' && r.streak > 0 ? `<span class="podium-streak${r.streak >= 3 ? ' hot' : ''}">${r.streak}w streak</span>` : ''}
@@ -1063,7 +1052,7 @@ function renderPodium(view) {
       item.innerHTML = `
         <span class="rest-rank-num">${i + 4}</span>
         <div class="rest-rank-info">
-          <div class="rest-rank-name">${escapeHtml(r.nickname)}${getAnomalySirenHtml(r.nickname)}</div>
+          <div class="rest-rank-name">${escapeHtml(r.nickname)}</div>
           <div class="rest-rank-level">${level.name}${view === 'points' && r.streak > 0 ? ` · ${r.streak}w streak` : ''}</div>
         </div>
         <span class="rest-rank-pts">${statText}</span>
@@ -1142,13 +1131,6 @@ function getTodayStr() {
 
 function escapeHtml(str) { const div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
 
-/** 닉네임에 이상치 경고가 있으면 🚨 HTML 반환, 없으면 빈 문자열 */
-function getAnomalySirenHtml(nickname) {
-  if (!dashboardData || !dashboardData.alerts || dashboardData.alerts.length === 0) return '';
-  const alert = dashboardData.alerts.find(a => a.nickname === nickname);
-  if (!alert) return '';
-  return ` <span class="anomaly-siren" title="이상치 감지: ${formatTokens(alert.score)} (7일 평균 대비 ${alert.ratio}배)">🚨</span>`;
-}
 
 // ── 데모 데이터 ──
 function getDemoData() {
@@ -1620,9 +1602,12 @@ function renderActivityPattern(raw) {
     const dt = new Date(dateStr + 'T00:00:00+09:00');
     const jsDay = dt.getDay(); // 0=Sun
     const dow = jsDay === 0 ? 6 : jsDay - 1; // 0=Mon
-    r.hourly.forEach(item => {
+    r.hourly.forEach(raw => {
+      const item = normalizeBucket(raw);
       if (item.h >= 0 && item.h < 24) {
-        grid[dow][item.h] += ((item.in || 0) * 1) + ((item.out || 0) * 5);
+        const cl = item.cl || {}, cx = item.cx || {};
+        grid[dow][item.h] += ((cl.in||0)*W_CL_IN)+((cl.out||0)*W_CL_OUT)+((cl.cc||0)*W_CL_CW)+((cl.cr||0)*W_CL_CR)
+                           + ((cx.in||0)*W_CX_IN)+((cx.out||0)*W_CX_OUT)+((cx.cr||0)*W_CX_CR);
       }
     });
   });
@@ -1851,9 +1836,14 @@ function renderPeerCompare(peerNick, raw) {
   function toBuckets(hourly) {
     const arr = new Array(24).fill(0);
     if (!hourly) return arr;
-    hourly.forEach(item => {
+    hourly.forEach(raw => {
+      const item = normalizeBucket(raw);
       const h = item.h;
-      if (h >= 0 && h < 24) arr[h] += ((item.in||0)*1)+((item.out||0)*5)+((item.cc||0)*1.25)+((item.cr||0)*0.1);
+      if (h >= 0 && h < 24) {
+        const cl = item.cl || {}, cx = item.cx || {};
+        arr[h] += ((cl.in||0)*W_CL_IN)+((cl.out||0)*W_CL_OUT)+((cl.cc||0)*W_CL_CW)+((cl.cr||0)*W_CL_CR)
+                + ((cx.in||0)*W_CX_IN)+((cx.out||0)*W_CX_OUT)+((cx.cr||0)*W_CX_CR);
+      }
     });
     return arr;
   }

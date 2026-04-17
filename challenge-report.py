@@ -73,10 +73,8 @@ def _parse_kst_hour(ts, today):
         return None
 
 
-def count_claude_tokens(today, hourly, sessions, evidence):
-    """~/.claude/projects/**/*.jsonl에서 오늘(KST) Claude 토큰 집계.
-    evidence: 세션별 증거 dict (uuid → {msgs, first_ts, last_ts, out, in})
-    """
+def count_claude_tokens(today, hourly, sessions):
+    """~/.claude/projects/**/*.jsonl에서 오늘(KST) Claude 토큰 집계."""
     home = os.path.expanduser("~")
     jsonl_files = glob.glob(os.path.join(home, ".claude", "projects", "**", "*.jsonl"), recursive=True)
 
@@ -120,29 +118,14 @@ def count_claude_tokens(today, hourly, sessions, evidence):
                     sid = obj.get("sessionId", "") or os.path.basename(fpath)
                     if sid:
                         sessions.add(sid)
-                        # 세션별 증거 수집
-                        key = sid
-                        if key not in evidence:
-                            evidence[key] = {"svc": "claude", "msgs": 0,
-                                             "first_ts": ts, "last_ts": ts,
-                                             "out": 0, "in": 0}
-                        ev = evidence[key]
-                        ev["msgs"] += 1
-                        ev["out"] += out
-                        ev["in"] += inp
-                        ev["last_ts"] = ts
-                        if ts < ev["first_ts"]:
-                            ev["first_ts"] = ts
         except Exception:
             continue
 
     return total
 
 
-def count_codex_tokens(today, hourly, sessions, evidence):
-    """~/.codex/sessions/**/*.jsonl에서 오늘(KST) Codex 토큰 집계.
-    evidence: 세션별 증거 dict (uuid → {msgs, first_ts, last_ts, out, in})
-    """
+def count_codex_tokens(today, hourly, sessions):
+    """~/.codex/sessions/**/*.jsonl에서 오늘(KST) Codex 토큰 집계."""
     home = os.path.expanduser("~")
     codex_dir = os.path.join(home, ".codex", "sessions")
     total = {"in": 0, "out": 0, "cr": 0}
@@ -201,19 +184,6 @@ def count_codex_tokens(today, hourly, sessions, evidence):
                     hourly[kst_hour]["cx_out"] += out
                     hourly[kst_hour]["cx_cr"] += cr
 
-                    # 세션별 증거 수집
-                    eid = "codex:" + (str(session_id) if session_id else os.path.basename(fpath))
-                    if eid not in evidence:
-                        evidence[eid] = {"svc": "codex", "msgs": 0,
-                                         "first_ts": ts, "last_ts": ts,
-                                         "out": 0, "in": 0}
-                    ev = evidence[eid]
-                    ev["msgs"] += 1
-                    ev["out"] += out
-                    ev["in"] += inp
-                    ev["last_ts"] = ts
-                    if ts < ev["first_ts"]:
-                        ev["first_ts"] = ts
         except Exception:
             continue
 
@@ -231,10 +201,9 @@ def collect_usage(target_date=None):
         target_date = datetime.now(KST).strftime("%Y-%m-%d")
     hourly = _empty_hourly()
     sessions = set()
-    evidence = {}  # uuid → {svc, msgs, first_ts, last_ts, out, in}
 
-    claude = count_claude_tokens(target_date, hourly, sessions, evidence)
-    codex  = count_codex_tokens(target_date, hourly, sessions, evidence)
+    claude = count_claude_tokens(target_date, hourly, sessions)
+    codex  = count_codex_tokens(target_date, hourly, sessions)
 
     # 시간대별 리스트 (v2 형식: {h, cl: {...}, cx: {...}})
     hourly_list = []
@@ -258,10 +227,6 @@ def collect_usage(target_date=None):
         "codex_cache_read_tokens": codex["cr"],
         "sessions": len(sessions),
         "hourly": hourly_list,
-        # 세션별 증거 (서버 측 물리적 제약 검증용)
-        "sessions_detail": [
-            {"uuid": uid, **ev} for uid, ev in evidence.items()
-        ],
     }
 
 
@@ -270,7 +235,7 @@ def report_usage(cfg, usage):
     payload = {
         "action": "reportUsage",
         "nickname": cfg["nickname"],
-        "password": cfg["password"],
+        "password": str(cfg["password"]),
         **usage,
     }
 
