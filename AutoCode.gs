@@ -1294,13 +1294,14 @@ function checkHasAutoReport(nickname) {
 }
 
 // ============================================
-// ── 리그 자정 배치 ──
+// ── 리그 일간 배치 ──
 // ============================================
-// 매일 00:00 KST 실행. 어제 기준 과거 3일 일일 스코어를 보고,
+// 매일 01:00 KST 실행. 어제 기준 과거 3일 일일 스코어를 보고,
 // - 1M 리그 유저: 3일 모두 >= 10M → 10M 리그로 승격
 // - 10M 리그 유저: 3일 모두 < 10M → 1M 리그로 강등
 // - 3일 중 하나라도 보고 없음 → 판정 보류 (리그 유지)
-// 주의: 오늘은 제외 (배치가 00:00 실행이라 오늘 데이터가 없어 항상 스킵됨)
+// 주의: 오늘은 제외. 00시가 아닌 01시로 둔 이유는 전날 23시대
+// py 리포터 보고가 시트에 반영될 시간을 확보하기 위함.
 
 function runDailyLeagueBatch_() {
   migrateSheetIfNeeded_();
@@ -1404,14 +1405,15 @@ function installDailyLeagueBatchTrigger() {
       ScriptApp.deleteTrigger(existing[i]);
     }
   }
-  // 매일 0시 ~ 1시 사이 실행 (Apps Script의 일간 트리거 정밀도)
+  // 매일 1시 ~ 2시 사이 실행 (Apps Script 일간 트리거는 분 단위 정확도 없음)
+  // 00시가 아닌 1시로 둔 이유: 전날 23시대 py 리포터 보고가 시트에 반영될 시간 확보
   ScriptApp.newTrigger('runDailyLeagueBatch_')
     .timeBased()
     .everyDays(1)
-    .atHour(0)
+    .atHour(1)
     .inTimezone('Asia/Seoul')
     .create();
-  return '리그 자정 배치 트리거 설치 완료';
+  return '리그 배치 트리거 설치 완료 (매일 01:00~02:00 KST 실행)';
 }
 
 // 수동 테스트용 (Apps Script 에디터에서 직접 실행 가능)
