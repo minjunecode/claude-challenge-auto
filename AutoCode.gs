@@ -1296,10 +1296,11 @@ function checkHasAutoReport(nickname) {
 // ============================================
 // ── 리그 자정 배치 ──
 // ============================================
-// 매일 00:00 KST 실행. 최근 3일 (오늘 포함) 일일 스코어를 보고,
+// 매일 00:00 KST 실행. 어제 기준 과거 3일 일일 스코어를 보고,
 // - 1M 리그 유저: 3일 모두 >= 10M → 10M 리그로 승격
 // - 10M 리그 유저: 3일 모두 < 10M → 1M 리그로 강등
 // - 3일 중 하나라도 보고 없음 → 판정 보류 (리그 유지)
+// 주의: 오늘은 제외 (배치가 00:00 실행이라 오늘 데이터가 없어 항상 스킵됨)
 
 function runDailyLeagueBatch_() {
   migrateSheetIfNeeded_();
@@ -1309,10 +1310,10 @@ function runDailyLeagueBatch_() {
   var logSheet = ss.getSheetByName('리그이동기록');
   if (!memberSheet || !usageSheet || !logSheet) return;
 
-  // 최근 3일 날짜 계산 (오늘 포함, KST)
+  // 과거 3일 날짜 계산 (어제·그제·그그제, KST) — 오늘은 제외
   var today = new Date();
   var dates = [];
-  for (var d = 0; d < 3; d++) {
+  for (var d = 1; d <= 3; d++) {
     var t = new Date(today.getTime() - d * 24 * 60 * 60 * 1000);
     dates.push(Utilities.formatDate(t, 'Asia/Seoul', 'yyyy-MM-dd'));
   }
