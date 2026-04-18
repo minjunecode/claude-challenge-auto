@@ -556,14 +556,15 @@ function renderDailyTable(members, submissions) {
   const dailyMap = {};
   members.forEach(m => { dailyMap[m.nickname] = {}; });
 
-  // submissions에서 날짜별 인증 여부
+  // submissions에서 날짜별 인증 여부 (league는 보고 시점 리그)
   submissions.forEach(s => {
     if (s.type === 'session') {
       const dateStr = normalizeDate(s.submittedAt);
       if (dateStr && dailyMap[s.nickname]) {
-        if (!dailyMap[s.nickname][dateStr]) dailyMap[s.nickname][dateStr] = { done: true, tokens: 0, allTokens: 0, source: s.source };
+        if (!dailyMap[s.nickname][dateStr]) dailyMap[s.nickname][dateStr] = { done: true, tokens: 0, allTokens: 0, source: s.source, league: '' };
         dailyMap[s.nickname][dateStr].done = true;
         if (s.source === 'auto' && s.tokens) dailyMap[s.nickname][dateStr].tokens = s.tokens;
+        if (s.league) dailyMap[s.nickname][dateStr].league = s.league;
       }
     }
   });
@@ -575,7 +576,7 @@ function renderDailyTable(members, submissions) {
         const uDate = normalizeDate(u.date);
         const ioTokens = getScore(u);
         const allTokens = ioTokens + (u.cache_tokens || 0);
-        if (!dailyMap[u.nickname][uDate]) dailyMap[u.nickname][uDate] = { done: false, tokens: 0, allTokens: 0, source: '' };
+        if (!dailyMap[u.nickname][uDate]) dailyMap[u.nickname][uDate] = { done: false, tokens: 0, allTokens: 0, source: '', league: '' };
         dailyMap[u.nickname][uDate].tokens = ioTokens;
         dailyMap[u.nickname][uDate].allTokens = allTokens;
       }
@@ -625,14 +626,18 @@ function renderDailyTable(members, submissions) {
     }
     tr.appendChild(nameTd);
 
-    // 멤버의 현재 리그 (LEAGUE_ERA_START 이후 임계값 결정용)
-    const memLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
+    // 멤버의 현재 리그 (fallback 용, 실제로는 각 셀의 보고 시점 리그 우선)
+    const currLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
     days.forEach(d => {
       const td = document.createElement('td');
       const info = dailyMap[m.nickname][d.date];
       const tokens = info ? info.tokens : 0;
+      // 보고 시점 리그 우선 (없으면 현재 리그로 fallback)
+      const recordedLeague = (info && info.league === LEAGUE_10M) ? LEAGUE_10M :
+                             (info && info.league === LEAGUE_1M) ? LEAGUE_1M :
+                             currLeague;
       // 날짜+리그에 맞는 임계값 (legacy 기간엔 1M/10M/50M)
-      const t = getThresholdsFor(d.date, memLeague);
+      const t = getThresholdsFor(d.date, recordedLeague);
       if (d.date > today) {
         td.classList.add('daily-td-future');
       } else if (d.date === today) {
@@ -666,7 +671,7 @@ function renderDailyTable(members, submissions) {
         }
       }
       if (tokens > 0) {
-        td.title = `가중 스코어: ${tokens.toLocaleString()} (${memLeague} 리그 기준)`;
+        td.title = `가중 스코어: ${tokens.toLocaleString()} (${recordedLeague} 리그 기준)`;
       }
       tr.appendChild(td);
     });
