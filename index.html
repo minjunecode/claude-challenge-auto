@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260419a">
+  <link rel="stylesheet" href="style.css?v=20260419b">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -45,6 +45,7 @@
       <nav class="tabs">
         <button class="tab active" data-tab="dashboard">대시보드</button>
         <button class="tab" data-tab="stats">내 분석</button>
+        <button class="tab" data-tab="fine">벌금</button>
         <button class="tab" data-tab="cert">인증/패치</button>
         <button class="tab admin-only" data-tab="admin">관리자</button>
       </nav>
@@ -178,6 +179,45 @@
             </div>
 
             <div class="patch-list">
+              <details class="patch-item" open>
+                <summary class="patch-summary">
+                  <span class="patch-version">v2.0</span>
+                  <span class="patch-title">벌금 시스템 도입 <em class="patch-tag">[python 재설정 필요]</em></span>
+                  <span class="patch-date">2026-04-20</span>
+                  <span class="patch-arrow">&#9656;</span>
+                </summary>
+                <div class="patch-body">
+                  <h4>💰 벌금 제도 추가</h4>
+                  <ul>
+                    <li>주간 보증금 <strong>50,000원</strong> / 하루 미달 시 <strong>-10,000원</strong></li>
+                    <li>주 2회까지 면제, 3번째 미달부터 차감</li>
+                    <li>Claude Max 주간 한도 소진 시 전체 면제</li>
+                    <li>탈퇴 시 <strong>4주간 재참여 불가</strong> (쿨다운)</li>
+                  </ul>
+
+                  <h4>🖥 '벌금' 탭 신설</h4>
+                  <ul>
+                    <li>주간 정산 현황을 실시간으로 조회</li>
+                    <li><strong>참여 여부</strong> 컬럼 추가 (참여 중 / 참여 안 함)</li>
+                    <li>참여 안 함인 멤버는 벌금 집계 제외 + 잔여 보증금 유지</li>
+                  </ul>
+
+                  <h4>🔧 기술 개선 + python update</h4>
+                  <ul>
+                    <li>리포터가 매 요청마다 <strong>최근 48시간</strong> 데이터를 중복 전송 (하루 완전성 보장)</li>
+                    <li>서버에 "값이 작아질 때 덮어쓰지 않는" <strong>데이터 손실 방지 장치</strong> 추가</li>
+                    <li>주간뷰 O 표시를 현재 리그가 아닌 <strong>'보고 시점 리그'</strong> 기준으로 계산
+                      <br>→ 승급 후에도 과거 기록 포인트가 시트 값과 일치</li>
+                  </ul>
+
+                  <h4>⚙ 적용 시점</h4>
+                  <ul>
+                    <li>4/20까지: 기존 포인트/리그 시스템만 작동</li>
+                    <li><strong>4/21 00:00부터: 벌금 시스템 1주차 시작</strong></li>
+                    <li>Python 리포터는 <strong>재다운로드 필요</strong> (48시간 리포팅 기능)</li>
+                  </ul>
+                </div>
+              </details>
               <details class="patch-item">
                 <summary class="patch-summary">
                   <span class="patch-version">v1.0</span>
@@ -401,6 +441,68 @@
         </div>
       </div>
 
+      <!-- 벌금 탭 -->
+      <div id="tab-fine" class="tab-content">
+        <div class="fine-hero">
+          <div class="fine-hero-left">
+            <div class="fine-hero-eyebrow">이번 주 정산</div>
+            <div class="fine-hero-title" id="fine-week-label">4월 3주차</div>
+            <div class="fine-hero-sub">일요일 23:59 마감 · 미달 일수 기준 차감</div>
+          </div>
+          <div class="fine-hero-right">
+            <div class="fine-stat-pill">
+              <span class="fine-stat-label">주간 보증금</span>
+              <span class="fine-stat-val">50,000<span class="fine-stat-unit">원</span></span>
+            </div>
+            <div class="fine-stat-pill fine-stat-accent">
+              <span class="fine-stat-label">내 예상 벌금</span>
+              <span class="fine-stat-val" id="fine-my-amount">0<span class="fine-stat-unit">원</span></span>
+            </div>
+            <div class="fine-stat-pill">
+              <span class="fine-stat-label">잔여 보증금</span>
+              <span class="fine-stat-val" id="fine-my-remaining">50,000<span class="fine-stat-unit">원</span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="fine-card">
+          <div class="fine-card-head">
+            <h3>💰 멤버별 정산 현황</h3>
+            <div class="fine-nav">
+              <button class="fine-nav-btn" id="btn-fine-prev">←</button>
+              <button class="fine-nav-btn" id="btn-fine-next">→</button>
+            </div>
+          </div>
+          <div class="fine-table-wrapper">
+            <table id="fine-table" class="fine-table">
+              <thead>
+                <tr id="fine-header-row"></tr>
+              </thead>
+              <tbody id="fine-body-row"></tbody>
+            </table>
+          </div>
+          <div class="fine-legend">
+            <span class="fine-chip fine-chip-ok">O</span> 목표 달성
+            <span class="fine-chip fine-chip-exempt">면제</span> 주 2회 면제
+            <span class="fine-chip fine-chip-fine">X</span> 벌금 대상
+            <span class="fine-chip fine-chip-pending">-</span> 미래/미보고
+          </div>
+        </div>
+
+        <div class="fine-card">
+          <div class="fine-card-head">
+            <h3>📋 규정 요약</h3>
+          </div>
+          <ul class="fine-rules">
+            <li><strong>보증금</strong> — 주 50,000원. 매주 월요일 환급·탈퇴 가능</li>
+            <li><strong>벌금</strong> — 리그 일일 목표(≥1pt) 미달 시 하루당 -10,000원</li>
+            <li><strong>면제</strong> — 주 2회까지 면제 (3번째 미달부터 벌금 시작)</li>
+            <li><strong>한도 소진</strong> — Claude Max 주간 한도를 다 쓴 주는 전체 면제</li>
+            <li><strong>탈퇴 제한</strong> — 탈퇴 시 4주간 재참여 불가 (쿨다운)</li>
+          </ul>
+        </div>
+      </div>
+
       <!-- 관리자 탭 -->
       <div id="tab-admin" class="tab-content">
         <div class="admin-card">
@@ -431,6 +533,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260419a"></script>
+  <script src="app.js?v=20260419b"></script>
 </body>
 </html>

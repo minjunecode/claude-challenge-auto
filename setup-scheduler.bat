@@ -47,7 +47,9 @@ echo.
 echo   등록 중...
 
 :: PowerShell로 스케줄러 등록
-powershell -Command "& { $a = New-ScheduledTaskAction -Execute '%PY%' -Argument '%SCRIPT%'; $t = New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration ([TimeSpan]::MaxValue); $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10); Register-ScheduledTask -TaskName 'ClaudeChallenge' -Action $a -Trigger $t -Settings $s -Force | Out-Null }" 2>nul
+:: 매 정각마다 개별 Daily Trigger 24개 등록 (단일 RepetitionInterval 방식은 절전 복귀 후 trigger를 놓치는 이슈가 있음)
+:: ExecutionTimeLimit 30분 (48h 스캔 + 3회 전송 여유)
+powershell -Command "& { $a = New-ScheduledTaskAction -Execute '%PY%' -Argument '%SCRIPT%'; $triggers = @(); for ($h = 0; $h -lt 24; $h++) { $triggers += New-ScheduledTaskTrigger -Daily -At ([datetime]('{0:D2}:00' -f $h)) }; $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 30); Register-ScheduledTask -TaskName 'ClaudeChallenge' -Action $a -Trigger $triggers -Settings $s -Force | Out-Null }" 2>nul
 
 if %errorlevel% neq 0 (
     echo.

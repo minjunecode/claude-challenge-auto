@@ -476,8 +476,11 @@
             <div class="substep-num">a</div>
             <div class="substep-body">
               <div class="code">
-                <button class="copy-btn" onclick="copyText('(crontab -l 2>/dev/null; echo &quot;0 * * * * python3 ~/.claude/challenge-report.py&quot;) | crontab -')">복사</button>
-                (crontab -l 2>/dev/null; echo "0 * * * * python3 ~/.claude/challenge-report.py") | crontab -
+                <button class="copy-btn" onclick="copyText('PY=$(which python3); (crontab -l 2>/dev/null | grep -v challenge-report.py; echo &quot;PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin&quot;; echo &quot;0 * * * * $PY $HOME/.claude/challenge-report.py&quot;) | crontab -')">복사</button>
+                PY=$(which python3); (crontab -l 2>/dev/null | grep -v challenge-report.py; echo "PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"; echo "0 * * * * $PY $HOME/.claude/challenge-report.py") | crontab -
+              </div>
+              <div style="color:#52525b;font-size:12px;margin-top:4px;">
+                ℹ️ python3 풀 경로를 자동 탐지 + PATH 설정. 기존 등록분이 있으면 교체.
               </div>
             </div>
           </div>
@@ -491,9 +494,21 @@
                 crontab -l
               </div>
               <div class="expected" style="margin-top:6px;">
-                <span class="ok">0 * * * * python3 ~/.claude/challenge-report.py</span>
+                <span class="ok">0 * * * * /…/python3 /…/.claude/challenge-report.py</span>
               </div>
-              <span style="color:#52525b;font-size:12px;">위처럼 나오면 성공!</span>
+              <span style="color:#52525b;font-size:12px;">python3의 풀 경로가 찍혀있으면 성공!</span>
+            </div>
+          </div>
+
+          <div class="substep">
+            <div class="substep-num">c</div>
+            <div class="substep-body">
+              실행 여부 확인은 로그 파일:
+              <div class="code" style="margin-top:6px;">
+                <button class="copy-btn" onclick="copyText('tail -n 30 ~/.claude/challenge-report.log')">복사</button>
+                tail -n 30 ~/.claude/challenge-report.log
+              </div>
+              <span style="color:#52525b;font-size:12px;">매 시간 "tick start / OK / tick end"가 찍히면 정상.</span>
             </div>
           </div>
         </div>

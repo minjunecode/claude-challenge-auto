@@ -116,26 +116,45 @@ function toDateTimeStr(v) {
 function migrateSheetIfNeeded_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // ── 멤버 시트: league 컬럼(E) 보장 ──
+  // ── 멤버 시트: league(E), participating(F), deposit(G) 컬럼 보장 ──
   var memSheet = ss.getSheetByName('멤버');
   if (memSheet && memSheet.getLastRow() >= 1) {
     var memLastCol = memSheet.getLastColumn();
-    // E열(5번째) 헤더가 'league'가 아니면 추가
+    // E열: league
     if (memLastCol < 5) {
       memSheet.getRange(1, 5).setValue('league');
     } else {
       var eHeader = String(memSheet.getRange(1, 5).getValue() || '').toLowerCase();
       if (eHeader !== 'league') memSheet.getRange(1, 5).setValue('league');
     }
-    // 기존 멤버 중 league가 비어있으면 '1M' 기본값 할당
+    // F열: participating ('참여 중' / '참여 안 함')
+    if (memSheet.getLastColumn() < 6) {
+      memSheet.getRange(1, 6).setValue('participating');
+    } else {
+      var fHeader = String(memSheet.getRange(1, 6).getValue() || '').toLowerCase();
+      if (fHeader !== 'participating') memSheet.getRange(1, 6).setValue('participating');
+    }
+    // G열: deposit (잔여 보증금, 원)
+    if (memSheet.getLastColumn() < 7) {
+      memSheet.getRange(1, 7).setValue('deposit');
+    } else {
+      var gHeader = String(memSheet.getRange(1, 7).getValue() || '').toLowerCase();
+      if (gHeader !== 'deposit') memSheet.getRange(1, 7).setValue('deposit');
+    }
+    // 기존 멤버의 기본값 채우기 (league='1M', participating='참여 중', deposit=50000)
     if (memSheet.getLastRow() > 1) {
-      var memRange = memSheet.getRange(2, 5, memSheet.getLastRow() - 1, 1);
+      var memRange = memSheet.getRange(2, 5, memSheet.getLastRow() - 1, 3);  // E, F, G
       var memVals = memRange.getValues();
       var changed = false;
       for (var mi = 0; mi < memVals.length; mi++) {
         if (!memVals[mi][0] || String(memVals[mi][0]).trim() === '') {
-          memVals[mi][0] = LEAGUE_1M;
-          changed = true;
+          memVals[mi][0] = LEAGUE_1M; changed = true;
+        }
+        if (!memVals[mi][1] || String(memVals[mi][1]).trim() === '') {
+          memVals[mi][1] = '참여 중'; changed = true;
+        }
+        if (memVals[mi][2] === '' || memVals[mi][2] === null || memVals[mi][2] === undefined) {
+          memVals[mi][2] = 50000; changed = true;
         }
       }
       if (changed) memRange.setValues(memVals);
@@ -457,7 +476,7 @@ function handleRegister(params) {
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] === nickname) return { success: false, error: '이미 존재하는 닉네임입니다.' };
   }
-  sheet.appendRow([nickname, password, false, '', LEAGUE_1M]);
+  sheet.appendRow([nickname, password, false, '', LEAGUE_1M, '참여 중', 50000]);
   return { success: true };
 }
 
@@ -471,10 +490,10 @@ function handleInit(params) {
   var memberSheet = ss.getSheetByName('멤버');
   if (!memberSheet) {
     memberSheet = ss.insertSheet('멤버');
-    memberSheet.appendRow(['nickname', 'password', 'isAdmin', 'color', 'league']);
+    memberSheet.appendRow(['nickname', 'password', 'isAdmin', 'color', 'league', 'participating', 'deposit']);
   }
   if (memberSheet.getLastRow() > 1) return { success: false, error: '이미 초기화되어 있습니다.' };
-  memberSheet.appendRow([nickname, password, true, '', LEAGUE_1M]);
+  memberSheet.appendRow([nickname, password, true, '', LEAGUE_1M, '참여 중', 50000]);
 
   var recordSheet = ss.getSheetByName('인증기록');
   if (!recordSheet) {
@@ -521,11 +540,23 @@ function handleDashboard(params) {
     if (memberData[i][0]) {
       var mLeague = String(memberData[i][4] || '').trim() || LEAGUE_1M;
       if (mLeague !== LEAGUE_1M && mLeague !== LEAGUE_10M) mLeague = LEAGUE_1M;
+      // F열: 참여 여부 (기본 '참여 중'). '참여 안 함' 또는 유사 표현이면 벌금 제외
+      // 관대한 매칭: 공백 유무, 대소문자, false/탈퇴 등 변형 허용
+      var rawP = String(memberData[i][5] || '').trim().replace(/\s+/g, '').toLowerCase();
+      var inactiveSet = { '참여안함': 1, '탈퇴': 1, '불참': 1, 'off': 1, 'false': 1, 'no': 1, 'n': 1 };
+      var mParticipating = inactiveSet[rawP] ? '참여 안 함' : '참여 중';
+      // G열: 잔여 보증금 (기본 50000). 시트 값이 있으면 우선 사용
+      var mDeposit = memberData[i][6];
+      mDeposit = (mDeposit === '' || mDeposit === null || mDeposit === undefined)
+        ? null
+        : safeInt(mDeposit);
       members.push({
         nickname: memberData[i][0],
         isAdmin: memberData[i][2] === true || memberData[i][2] === 'TRUE',
         hasAutoReport: checkHasAutoReport(memberData[i][0]),
-        league: mLeague
+        league: mLeague,
+        participating: mParticipating,
+        deposit: mDeposit  // null이면 프론트에서 자동 계산
       });
       memberLeagues[memberData[i][0]] = mLeague;
       if (memberData[i][3]) memberColors[memberData[i][0]] = String(memberData[i][3]);
@@ -938,10 +969,28 @@ function handleReportUsage(params) {
 
   var usageData = usageSheet.getDataRange().getValues();
   var existingRow = -1;
+  var existingScore = 0;
   for (var j = 1; j < usageData.length; j++) {
     if (String(usageData[j][0]) === nickname && toDateStr(usageData[j][1]) === date) {
-      existingRow = j + 1; break;
+      existingRow = j + 1;
+      existingScore = safeInt(usageData[j][9]);
+      break;
     }
+  }
+
+  // ── 데이터 손실 방지 ──
+  // 리포터가 48시간 창으로 과거 데이터를 반복 전송하는데,
+  // JSONL 파일 일부 유실 등으로 새 값이 기존 값보다 작아지는 경우를 대비.
+  // 새 score가 기존 score보다 작으면 사용량/인증기록 업데이트를 skip.
+  // (사용량_raw의 append-only 히스토리는 이미 기록됨)
+  if (existingRow > 0 && existingScore > 0 && score < existingScore) {
+    return {
+      success: true,
+      message: 'skip: 기존 값 보존 (new=' + score + ' < existing=' + existingScore + ')',
+      date: date,
+      score: existingScore,
+      skipped: true
+    };
   }
 
   if (existingRow > 0) {
@@ -1077,7 +1126,7 @@ function handleAddMember(params) {
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] === nickname) return { success: false, error: '이미 존재하는 닉네임입니다.' };
   }
-  sheet.appendRow([nickname, password, false, '', LEAGUE_1M]);
+  sheet.appendRow([nickname, password, false, '', LEAGUE_1M, '참여 중', 50000]);
   return { success: true };
 }
 

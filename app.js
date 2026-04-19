@@ -281,6 +281,7 @@ function switchTab(tabName) {
     }
     loadPersonalStats();
   }
+  if (tabName === 'fine') renderFineTab();
   if (tabName === 'admin') renderAdminTab();
 }
 
@@ -1079,6 +1080,177 @@ function renderPodium(view) {
     restRanking.appendChild(listEl);
   }
 }
+
+// ── 벌금 탭 ──
+let fineWeekOffset = 0;
+const FINE_DEPOSIT = 50000;
+const FINE_PER_DAY = 10000;
+const FINE_FREE_DAYS = 2;
+
+function renderFineTab() {
+  if (!dashboardData) return;
+  // 주 시작(월요일) 계산 (dailyWeekOffset과 독립)
+  const now = new Date();
+  const dayOfWeek = now.getDay() || 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - dayOfWeek + 1 + fineWeekOffset * 7);
+  const today = getTodayStr();
+
+  const days = [];
+  const dayLabels = ['일', '월', '화', '수', '목', '금', '토'];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push({
+      label: dayLabels[d.getDay()],
+      dayNum: d.getDate(),
+      month: d.getMonth() + 1,
+      date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    });
+  }
+
+  // 주차 라벨
+  const thursday = new Date(monday);
+  thursday.setDate(monday.getDate() + 3);
+  const weekInMonth = Math.ceil(thursday.getDate() / 7);
+  document.getElementById('fine-week-label').textContent = `${thursday.getMonth() + 1}월 ${weekInMonth}주차`;
+
+  // 멤버별 날짜별 토큰/리그 수집 (주간뷰 로직 재사용)
+  const members = dashboardData.members || [];
+  const submissions = dashboardData.submissions || [];
+  const dailyMap = {};
+  members.forEach(m => { dailyMap[m.nickname] = {}; });
+  submissions.forEach(s => {
+    if (s.type !== 'session') return;
+    const dateStr = normalizeDate(s.submittedAt);
+    if (!dateStr || !dailyMap[s.nickname]) return;
+    if (!dailyMap[s.nickname][dateStr]) dailyMap[s.nickname][dateStr] = { tokens: 0, league: '' };
+    if (s.source === 'auto' && s.tokens) dailyMap[s.nickname][dateStr].tokens = s.tokens;
+    if (s.league) dailyMap[s.nickname][dateStr].league = s.league;
+  });
+  (dashboardData.usage || []).forEach(u => {
+    if (!dailyMap[u.nickname]) return;
+    const uDate = normalizeDate(u.date);
+    if (!dailyMap[u.nickname][uDate]) dailyMap[u.nickname][uDate] = { tokens: 0, league: '' };
+    dailyMap[u.nickname][uDate].tokens = getScore(u);
+  });
+
+  // 헤더
+  const headerRow = document.getElementById('fine-header-row');
+  headerRow.innerHTML = '<th>멤버</th><th class="fine-th-summary">참여</th>';
+  days.forEach(d => {
+    const th = document.createElement('th');
+    th.textContent = `${d.month}/${d.dayNum}(${d.label})`;
+    if (d.date === today) th.classList.add('fine-th-today');
+    headerRow.appendChild(th);
+  });
+  const thMiss = document.createElement('th'); thMiss.textContent = '미달'; thMiss.className = 'fine-th-summary'; headerRow.appendChild(thMiss);
+  const thFine = document.createElement('th'); thFine.textContent = '벌금'; thFine.className = 'fine-th-summary'; headerRow.appendChild(thFine);
+  const thRem  = document.createElement('th'); thRem.textContent  = '잔여'; thRem.className  = 'fine-th-summary'; headerRow.appendChild(thRem);
+
+  // 본문
+  const tbody = document.getElementById('fine-body-row');
+  tbody.innerHTML = '';
+  let myAmount = 0, myRemaining = FINE_DEPOSIT;
+  members.forEach(m => {
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.className = 'fine-td-name';
+    const dot = document.createElement('span');
+    dot.className = 'member-color-dot';
+    dot.style.background = getMemberColor(m.nickname);
+    nameTd.appendChild(dot);
+    nameTd.appendChild(document.createTextNode(' ' + m.nickname));
+    tr.appendChild(nameTd);
+
+    const isParticipating = m.participating !== '참여 안 함';
+    const partTd = document.createElement('td');
+    partTd.className = 'fine-td-summary fine-td-participating';
+    partTd.textContent = isParticipating ? '참여 중' : '참여 안 함';
+    if (!isParticipating) partTd.classList.add('fine-td-not-participating');
+    tr.appendChild(partTd);
+
+    const currLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
+    let missCount = 0;
+
+    days.forEach(d => {
+      const td = document.createElement('td');
+      td.className = 'fine-cell';
+      const info = dailyMap[m.nickname][d.date];
+      const tokens = info ? info.tokens : 0;
+      const recordedLeague = (info && (info.league === LEAGUE_10M || info.league === LEAGUE_1M)) ? info.league : currLeague;
+      const t = getThresholdsFor(d.date, recordedLeague);
+
+      if (!isParticipating) {
+        td.textContent = '-';
+        td.classList.add('fine-cell-pending');
+      } else if (d.date > today) {
+        td.textContent = '-';
+        td.classList.add('fine-cell-pending');
+      } else if (tokens >= t[0]) {
+        td.textContent = 'O';
+        td.classList.add('fine-cell-ok');
+      } else {
+        missCount += 1;
+        if (missCount <= FINE_FREE_DAYS) {
+          td.textContent = '면제';
+          td.classList.add('fine-cell-exempt');
+        } else {
+          td.textContent = 'X';
+          td.classList.add('fine-cell-fine');
+        }
+      }
+      tr.appendChild(td);
+    });
+
+    const chargedDays = isParticipating ? Math.max(0, missCount - FINE_FREE_DAYS) : 0;
+    const fineAmount = chargedDays * FINE_PER_DAY;
+    // 시트에서 직접 입력한 deposit 값이 있으면 사용, 없으면 자동 계산
+    const remaining = (typeof m.deposit === 'number')
+      ? m.deposit
+      : Math.max(0, FINE_DEPOSIT - fineAmount);
+
+    const tdMiss = document.createElement('td');
+    tdMiss.textContent = isParticipating ? `${missCount}일` : '-';
+    tdMiss.className = 'fine-td-summary';
+    tr.appendChild(tdMiss);
+
+    const tdFine = document.createElement('td');
+    if (!isParticipating) {
+      tdFine.textContent = '-';
+      tdFine.className = 'fine-td-summary';
+    } else {
+      tdFine.textContent = fineAmount > 0 ? `-${fineAmount.toLocaleString()}원` : '0원';
+      tdFine.className = 'fine-td-summary ' + (fineAmount > 0 ? 'fine-td-fine' : 'fine-td-clean');
+    }
+    tr.appendChild(tdFine);
+
+    const tdRem = document.createElement('td');
+    tdRem.textContent = `${remaining.toLocaleString()}원`;
+    tdRem.className = 'fine-td-summary fine-td-remaining';
+    tr.appendChild(tdRem);
+
+    if (!isParticipating) tr.classList.add('fine-tr-inactive');
+    if (currentUser && m.nickname === currentUser.nickname) {
+      tr.classList.add('fine-tr-me');
+      myAmount = isParticipating ? fineAmount : 0;
+      myRemaining = remaining;
+    }
+
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('fine-my-amount').innerHTML = `${myAmount.toLocaleString()}<span class="fine-stat-unit">원</span>`;
+  document.getElementById('fine-my-remaining').innerHTML = `${myRemaining.toLocaleString()}<span class="fine-stat-unit">원</span>`;
+}
+
+// 벌금 탭 주간 네비게이션
+document.addEventListener('DOMContentLoaded', () => {
+  const prev = document.getElementById('btn-fine-prev');
+  const next = document.getElementById('btn-fine-next');
+  if (prev) prev.addEventListener('click', () => { fineWeekOffset--; renderFineTab(); });
+  if (next) next.addEventListener('click', () => { fineWeekOffset++; renderFineTab(); });
+});
 
 function renderAdminTab() {
   if (!dashboardData) return;
