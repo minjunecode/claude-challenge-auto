@@ -2545,6 +2545,10 @@ header h1 {
 }
 
 /* ── 벌금 탭 ── */
+.fine-container {
+  max-width: 720px;
+  margin: 0 auto;
+}
 .fine-hero {
   background: linear-gradient(135deg, #fff1f2 0%, #fef3c7 100%);
   border: 1px solid #fecaca;
@@ -2674,22 +2678,20 @@ header h1 {
 }
 .fine-table {
   width: 100%;
-  max-width: 900px;
-  margin: 0 auto;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   table-layout: fixed;
 }
 .fine-table th, .fine-table td {
-  padding: 7px 2px;
+  padding: 6px 1px;
   text-align: center;
   border-bottom: 1px solid var(--border-light);
 }
-.fine-table th:first-child, .fine-table td:first-child { width: 78px; }
+.fine-table th:first-child, .fine-table td:first-child { width: 62px; }
 .fine-table th:not(:first-child):not(.fine-th-summary),
-.fine-table td:not(:first-child):not(.fine-td-summary) { width: 52px; }
-.fine-table th.fine-th-summary, .fine-table td.fine-td-summary { width: 68px; }
+.fine-table td:not(:first-child):not(.fine-td-summary) { width: 44px; }
+.fine-table th.fine-th-summary, .fine-table td.fine-td-summary { width: 58px; }
 .fine-table th {
   font-weight: 600;
   color: var(--text-muted);
@@ -2709,11 +2711,12 @@ header h1 {
 .fine-td-name {
   text-align: left !important;
   font-weight: 600;
-  padding-left: 8px !important;
+  padding-left: 6px !important;
   white-space: nowrap;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
 }
-.fine-td-summary { font-size: 0.72rem !important; }
+.fine-td-summary { font-size: 0.68rem !important; }
+.fine-td-participating { font-size: 0.62rem !important; }
 .fine-cell {
   font-weight: 700;
   font-size: 0.72rem;
