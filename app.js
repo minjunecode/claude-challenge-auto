@@ -1087,6 +1087,19 @@ const FINE_DEPOSIT = 50000;
 const FINE_PER_DAY = 10000;
 const FINE_FREE_DAYS = 2;
 
+// 참여 상태 판정: 시트 F열 원본값 → 4가지 상태 중 하나
+//   'active'   : '참여 중' (정상 벌금 계산)
+//   'exempt'   : '주간 면제' (모든 미달이 '면제'로 표시, 벌금 0)
+//   'inactive' : '참여 안 함' (회색 처리, 벌금 집계 제외)
+//   'unknown'  : 그 외 임의 값 → inactive와 동일하게 회색 처리
+function getFineState(raw) {
+  const s = String(raw || '').trim();
+  if (s === '' || s === '참여 중') return 'active';
+  if (s === '주간 면제') return 'exempt';
+  if (s === '참여 안 함') return 'inactive';
+  return 'unknown';
+}
+
 function renderFineTab() {
   if (!dashboardData) return;
   // 주 시작(월요일) 계산 (dailyWeekOffset과 독립)
@@ -1163,11 +1176,19 @@ function renderFineTab() {
     nameTd.appendChild(document.createTextNode(' ' + m.nickname));
     tr.appendChild(nameTd);
 
-    const isParticipating = m.participating !== '참여 안 함';
+    const state = getFineState(m.participating);
     const partTd = document.createElement('td');
     partTd.className = 'fine-td-summary fine-td-participating';
-    partTd.textContent = isParticipating ? '참여 중' : '참여 안 함';
-    if (!isParticipating) partTd.classList.add('fine-td-not-participating');
+    if (state === 'active') {
+      partTd.textContent = '참여 중';
+    } else if (state === 'exempt') {
+      partTd.textContent = '주간 면제';
+      partTd.classList.add('fine-td-exempt');
+    } else {
+      // inactive 또는 unknown (임의 값도 회색 처리)
+      partTd.textContent = state === 'inactive' ? '참여 안 함' : (m.participating || '참여 안 함');
+      partTd.classList.add('fine-td-not-participating');
+    }
     tr.appendChild(partTd);
 
     const currLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
@@ -1181,7 +1202,7 @@ function renderFineTab() {
       const recordedLeague = (info && (info.league === LEAGUE_10M || info.league === LEAGUE_1M)) ? info.league : currLeague;
       const t = getThresholdsFor(d.date, recordedLeague);
 
-      if (!isParticipating) {
+      if (state === 'inactive' || state === 'unknown') {
         td.textContent = '-';
         td.classList.add('fine-cell-pending');
       } else if (d.date > today) {
@@ -1192,7 +1213,11 @@ function renderFineTab() {
         td.classList.add('fine-cell-ok');
       } else {
         missCount += 1;
-        if (missCount <= FINE_FREE_DAYS) {
+        if (state === 'exempt') {
+          // 주간 면제: 모든 미달이 '면제'
+          td.textContent = '면제';
+          td.classList.add('fine-cell-exempt');
+        } else if (missCount <= FINE_FREE_DAYS) {
           td.textContent = '면제';
           td.classList.add('fine-cell-exempt');
         } else {
@@ -1203,20 +1228,20 @@ function renderFineTab() {
       tr.appendChild(td);
     });
 
-    const chargedDays = isParticipating ? Math.max(0, missCount - FINE_FREE_DAYS) : 0;
+    // 벌금 계산: active만 차감, exempt/inactive/unknown은 0
+    const chargedDays = (state === 'active') ? Math.max(0, missCount - FINE_FREE_DAYS) : 0;
     const fineAmount = chargedDays * FINE_PER_DAY;
-    // 시트에서 직접 입력한 deposit 값이 있으면 사용, 없으면 자동 계산
     const remaining = (typeof m.deposit === 'number')
       ? m.deposit
       : Math.max(0, FINE_DEPOSIT - fineAmount);
 
     const tdMiss = document.createElement('td');
-    tdMiss.textContent = isParticipating ? `${missCount}일` : '-';
+    tdMiss.textContent = (state === 'inactive' || state === 'unknown') ? '-' : `${missCount}일`;
     tdMiss.className = 'fine-td-summary';
     tr.appendChild(tdMiss);
 
     const tdFine = document.createElement('td');
-    if (!isParticipating) {
+    if (state === 'inactive' || state === 'unknown') {
       tdFine.textContent = '-';
       tdFine.className = 'fine-td-summary';
     } else {
@@ -1230,10 +1255,11 @@ function renderFineTab() {
     tdRem.className = 'fine-td-summary fine-td-remaining';
     tr.appendChild(tdRem);
 
-    if (!isParticipating) tr.classList.add('fine-tr-inactive');
+    if (state === 'inactive' || state === 'unknown') tr.classList.add('fine-tr-inactive');
+    if (state === 'exempt') tr.classList.add('fine-tr-exempt');
     if (currentUser && m.nickname === currentUser.nickname) {
       tr.classList.add('fine-tr-me');
-      myAmount = isParticipating ? fineAmount : 0;
+      myAmount = (state === 'active') ? fineAmount : 0;
       myRemaining = remaining;
     }
 

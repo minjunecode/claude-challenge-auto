@@ -540,11 +540,8 @@ function handleDashboard(params) {
     if (memberData[i][0]) {
       var mLeague = String(memberData[i][4] || '').trim() || LEAGUE_1M;
       if (mLeague !== LEAGUE_1M && mLeague !== LEAGUE_10M) mLeague = LEAGUE_1M;
-      // F열: 참여 여부 (기본 '참여 중'). '참여 안 함' 또는 유사 표현이면 벌금 제외
-      // 관대한 매칭: 공백 유무, 대소문자, false/탈퇴 등 변형 허용
-      var rawP = String(memberData[i][5] || '').trim().replace(/\s+/g, '').toLowerCase();
-      var inactiveSet = { '참여안함': 1, '탈퇴': 1, '불참': 1, 'off': 1, 'false': 1, 'no': 1, 'n': 1 };
-      var mParticipating = inactiveSet[rawP] ? '참여 안 함' : '참여 중';
+      // F열: 참여 여부 원본값을 그대로 전달 (프론트에서 '참여 중' / '참여 안 함' / '주간 면제' 판정)
+      var mParticipating = String(memberData[i][5] || '참여 중').trim();
       // G열: 잔여 보증금 (기본 50000). 시트 값이 있으면 우선 사용
       var mDeposit = memberData[i][6];
       mDeposit = (mDeposit === '' || mDeposit === null || mDeposit === undefined)

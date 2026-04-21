@@ -2753,6 +2753,9 @@ header h1 {
   opacity: 0.55;
   background: #fafafa;
 }
+.fine-tr-exempt {
+  background: #eff6ff;
+}
 .fine-td-participating {
   font-size: 0.7rem !important;
   color: #16a34a;
@@ -2760,6 +2763,9 @@ header h1 {
 }
 .fine-td-not-participating {
   color: var(--text-muted) !important;
+}
+.fine-td-exempt {
+  color: #2563eb !important;
 }
 .fine-tr-me .fine-td-name::after {
   content: ' (나)';
