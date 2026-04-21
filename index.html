@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260420c">
+  <link rel="stylesheet" href="style.css?v=20260421a">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 </head>
 <body>
@@ -180,6 +180,45 @@
 
             <div class="patch-list">
               <details class="patch-item" open>
+                <summary class="patch-summary">
+                  <span class="patch-version">v2.1</span>
+                  <span class="patch-title">다중 PC 사용량 합산 지원 <em class="patch-tag">[업데이트 선택]</em></span>
+                  <span class="patch-date">2026-04-21</span>
+                  <span class="patch-arrow">&#9656;</span>
+                </summary>
+                <div class="patch-body">
+                  <h4>🖥 여러 PC 사용량 자동 합산</h4>
+                  <ul>
+                    <li>같은 계정으로 2대 이상 PC에 리포터 설치 시 <strong>자동 합산</strong></li>
+                    <li>각 PC는 최초 실행 시 고유 <strong>machine_id</strong>를 자동 생성 (저장: <code>~/.claude/challenge-machine-id</code>)</li>
+                    <li>서버가 (닉네임, 날짜, machine_id) 기준으로 행 분리 → 대시보드 조회 시 합산된 값으로 표시</li>
+                    <li>한 PC가 보고 실패해도 다른 PC 데이터는 그대로 유지</li>
+                  </ul>
+
+                  <h4>🔒 데이터 손실 방지</h4>
+                  <ul>
+                    <li>같은 (닉네임, 날짜)에 <strong>legacy 행</strong>(구 py)과 <strong>machine 행</strong>(새 py)이 공존할 경우
+                      <br>→ <strong>max(legacy 합, machine 합)</strong> 정책으로 기존 값 보존</li>
+                    <li>JSONL 일부 유실로 새 보고 값이 더 작아지는 경우 → 자동 skip</li>
+                    <li>인증기록 포인트 / 리그 배치 / 개인 통계 모두 합산 기준으로 정확하게 재계산</li>
+                  </ul>
+
+                  <h4>🔧 하위 호환</h4>
+                  <ul>
+                    <li>기존 v2.0 리포터(<strong>구 py</strong>)는 그대로 동작 — 업그레이드 강제 X</li>
+                    <li>1대 PC만 쓰는 멤버는 교체 필요 없음</li>
+                    <li>새 py는 48h 윈도우 + 로그 파일 + HTTP retry 등 기존 개선 유지</li>
+                  </ul>
+
+                  <h4>⚙ 적용 시점</h4>
+                  <ul>
+                    <li>AutoCode.gs 재배포 직후 서버 측 적용</li>
+                    <li>py 업데이트는 <strong>선택</strong> — <strong>2대 이상 PC 쓰는 멤버에게만 권장</strong></li>
+                    <li>업그레이드하는 경우 <strong>모든 PC를 같은 시점에 함께</strong> 교체</li>
+                  </ul>
+                </div>
+              </details>
+              <details class="patch-item">
                 <summary class="patch-summary">
                   <span class="patch-version">v2.0</span>
                   <span class="patch-title">벌금 시스템 도입 <em class="patch-tag">[python 재설정 필요]</em></span>
@@ -537,6 +576,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260420c"></script>
+  <script src="app.js?v=20260421a"></script>
 </body>
 </html>
