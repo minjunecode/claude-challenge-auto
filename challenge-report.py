@@ -10,7 +10,7 @@ v2.0 변경사항:
   - 가격 가중치는 서버 측에서 계산 (이 스크립트는 순수 토큰만 수집)
 """
 
-import json, glob, os, sys, io, time, urllib.request, urllib.error
+import json, glob, os, sys, io, time, uuid, platform, urllib.request, urllib.error
 from datetime import datetime, timezone, timedelta
 
 # Windows UTF-8
@@ -21,11 +21,39 @@ if sys.platform == "win32":
 
 # ── 설정 ──
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbys_MSZz16yoH9065nSLtsl4n9N0IMTYGECsvqzKIoD3EgZ30VlVxLjzOciq-8a6a8_KA/exec"
-CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude", "challenge-config.json")
-LOG_PATH    = os.path.join(os.path.expanduser("~"), ".claude", "challenge-report.log")
+CONFIG_PATH     = os.path.join(os.path.expanduser("~"), ".claude", "challenge-config.json")
+LOG_PATH        = os.path.join(os.path.expanduser("~"), ".claude", "challenge-report.log")
+MACHINE_ID_PATH = os.path.join(os.path.expanduser("~"), ".claude", "challenge-machine-id")
 KST = timezone(timedelta(hours=9))
 HTTP_TIMEOUT = 45
 HTTP_RETRIES = 2  # 실패 시 추가 시도 횟수 (총 3회까지)
+
+
+def get_machine_id():
+    """영구 machine_id. 최초 1회 생성 후 파일에 저장.
+    형식: <hostname>_<8자 uuid>  (예: 'mjm-macbook_3a7f92b1')
+    - hostname은 사람이 어느 PC인지 식별하기 쉽도록
+    - uuid는 hostname이 같아도 충돌 방지
+    """
+    try:
+        if os.path.exists(MACHINE_ID_PATH):
+            with open(MACHINE_ID_PATH, "r", encoding="utf-8") as f:
+                mid = f.read().strip()
+            if mid:
+                return mid
+    except Exception:
+        pass
+    host = platform.node() or "pc"
+    # 특수문자 제거 (시트 저장 안전성)
+    host = "".join(c for c in host if c.isalnum() or c in "-_") or "pc"
+    mid = f"{host}_{uuid.uuid4().hex[:8]}"
+    try:
+        os.makedirs(os.path.dirname(MACHINE_ID_PATH), exist_ok=True)
+        with open(MACHINE_ID_PATH, "w", encoding="utf-8") as f:
+            f.write(mid)
+    except Exception:
+        pass
+    return mid
 
 
 def log(msg):
@@ -296,6 +324,7 @@ def report_usage(cfg, usage):
         "action": "reportUsage",
         "nickname": cfg["nickname"],
         "password": str(cfg["password"]),
+        "machine_id": cfg.get("machine_id") or get_machine_id(),
         **usage,
     }
     last = None
@@ -345,7 +374,8 @@ def main():
             cfg = setup_config()
 
         now_kst = datetime.now(KST)
-        log(f"=== tick start (python {sys.version_info.major}.{sys.version_info.minor} {sys.platform}) ===")
+        cfg["machine_id"] = get_machine_id()
+        log(f"=== tick start (python {sys.version_info.major}.{sys.version_info.minor} {sys.platform}, machine={cfg['machine_id']}) ===")
 
         # 최근 48시간 윈도우 커버 (그제·어제·오늘)
         # JSONL을 1회만 스캔하여 3일치 버킷에 동시에 쌓음 (기존 3배 스캔 → 1배)
