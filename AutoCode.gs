@@ -1160,7 +1160,6 @@ function handleReportUsage(params) {
   var usageData = usageSheet.getDataRange().getValues();
   var existingRow = -1;
   var existingScore = 0;
-  var legacyRowToDelete = -1;  // 새 machine 보고 시 legacy 행이 있으면 삭제 (중복 방지)
   for (var j = 1; j < usageData.length; j++) {
     if (String(usageData[j][0]) !== nickname) continue;
     if (toDateStr(usageData[j][1]) !== date) continue;
@@ -1168,9 +1167,7 @@ function handleReportUsage(params) {
     if (rowMid === machineId) {
       existingRow = j + 1;
       existingScore = safeInt(usageData[j][9]);
-    } else if (rowMid === LEGACY_MACHINE_ID && machineId !== LEGACY_MACHINE_ID) {
-      // 첫 machine_id 보고 시점에 legacy 행은 삭제 (중복 집계 방지)
-      legacyRowToDelete = j + 1;
+      break;
     }
   }
 
@@ -1197,12 +1194,8 @@ function handleReportUsage(params) {
       score, sessions, now, machineId
     ]);
   }
-
-  // legacy 행 정리 (저장 뒤 순서로 처리: deleteRow가 인덱스를 변경하지 않도록)
-  if (legacyRowToDelete > 0) {
-    // existingRow 위치 보정: legacy 행이 existingRow보다 앞이면 나중에 삭제 시 인덱스 변동 고려
-    usageSheet.deleteRow(legacyRowToDelete);
-  }
+  // 주의: legacy 행은 자동 삭제하지 않음. 2대 이상 PC 유저의 "다른 PC가
+  // 아직 구 py"일 경우 그 PC 데이터가 손실될 수 있으므로. 합산 시 배제 규칙으로만 처리.
 
   // ── 자동 인증: 해당 (nickname, date)의 모든 machine 합산 score로 포인트 계산 ──
   // (upsert + legacy 삭제 이후 재조회해서 합산)
