@@ -2797,61 +2797,55 @@ header h1 {
 .fine-chip-fine { background: #fee2e2; color: #b91c1c; }
 .fine-chip-pending { background: var(--bg); color: var(--text-muted); }
 
-/* ── 대시보드 상단 Jensen Huang 인용 배너 ── */
+/* ── 대시보드 상단 인용 카드 (미니멀 세리프 톤) ── */
 .hero-quote {
   position: relative;
-  margin: 0 0 20px;
-  padding: 22px 26px 20px 56px;
-  background: linear-gradient(135deg, #111827 0%, #1f2937 50%, #374151 100%);
-  border-radius: var(--radius);
-  color: #e5e7eb;
-  box-shadow: var(--shadow-md);
-  overflow: hidden;
-}
-.hero-quote::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 90% 0%, rgba(129, 140, 248, 0.25), transparent 55%);
-  pointer-events: none;
+  margin: 2px 0 22px;
+  padding: 22px 26px 18px 32px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text);
+  border-radius: 4px;
+  box-shadow: var(--shadow-sm);
 }
 .hero-quote-mark {
   position: absolute;
   top: 4px;
   left: 18px;
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 4rem;
+  font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  font-size: 2.6rem;
   line-height: 1;
-  color: #818cf8;
-  opacity: 0.7;
+  color: var(--text);
+  opacity: 0.12;
+  user-select: none;
+  pointer-events: none;
 }
 .hero-quote blockquote {
-  position: relative;
   margin: 0;
-  font-size: 0.88rem;
-  line-height: 1.7;
-  font-style: italic;
+  font-family: 'Noto Serif KR', 'Nanum Myeongjo', Georgia, serif;
+  font-size: 0.92rem;
+  line-height: 1.8;
   font-weight: 400;
-  color: #f3f4f6;
+  color: var(--text);
+  letter-spacing: -0.01em;
 }
 .hero-quote blockquote strong {
-  font-style: normal;
-  font-weight: 700;
-  color: #c7d2fe;
-  background: linear-gradient(transparent 60%, rgba(129, 140, 248, 0.25) 60%);
-  padding: 0 2px;
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: 1px solid var(--text);
+  padding-bottom: 1px;
 }
 .hero-quote-author {
-  position: relative;
-  margin-top: 10px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: #9ca3af;
+  margin-top: 12px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
   text-align: right;
+  text-transform: uppercase;
 }
 @media (max-width: 600px) {
-  .hero-quote { padding: 18px 18px 16px 44px; }
-  .hero-quote-mark { left: 12px; font-size: 3rem; }
-  .hero-quote blockquote { font-size: 0.8rem; line-height: 1.65; }
+  .hero-quote { padding: 18px 18px 14px 22px; margin-bottom: 16px; }
+  .hero-quote-mark { left: 12px; font-size: 2rem; }
+  .hero-quote blockquote { font-size: 0.84rem; line-height: 1.75; }
 }
