@@ -1231,9 +1231,9 @@ function renderFineTab() {
     // 벌금 계산: active만 차감, exempt/inactive/unknown은 0
     const chargedDays = (state === 'active') ? Math.max(0, missCount - FINE_FREE_DAYS) : 0;
     const fineAmount = chargedDays * FINE_PER_DAY;
-    const remaining = (typeof m.deposit === 'number')
-      ? m.deposit
-      : Math.max(0, FINE_DEPOSIT - fineAmount);
+    // 시트 deposit 값은 "이번 주 시작 보증금"으로 해석 → 여기서 벌금 차감
+    const baseDeposit = (typeof m.deposit === 'number') ? m.deposit : FINE_DEPOSIT;
+    const remaining = Math.max(0, baseDeposit - fineAmount);
 
     const tdMiss = document.createElement('td');
     tdMiss.textContent = (state === 'inactive' || state === 'unknown') ? '-' : `${missCount}일`;
