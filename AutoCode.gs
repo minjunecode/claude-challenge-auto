@@ -1673,7 +1673,9 @@ function runDailyLeagueBatch_() {
     if (!nick) continue;
     var curLeague = String(members[mi][4] || '').trim() || LEAGUE_1M;
 
-    // 3일 모두 보고가 있는지 확인 (multi-PC 합산 기준)
+    // ── 판정 정책 ──
+    // 강등(10M → 1M): 미보고일도 0M으로 간주. 보고 회피로 강등을 피하는 우회 차단.
+    // 승급(1M → 10M): 3일 모두 보고 + 모두 ≥10M 필요. 데이터 부족 신규 유저 보호.
     var allReported = true;
     var allAbove = true;
     var allBelow = true;
@@ -1681,21 +1683,22 @@ function runDailyLeagueBatch_() {
       var dayScore = _sumDayScore(nick, dates[di]);
       if (dayScore === undefined) {
         allReported = false;
-        break;
+        dayScore = 0;  // 강등 판정 시에는 0M 처리
       }
       if (dayScore < THRESH) allAbove = false;
       if (dayScore >= THRESH) allBelow = false;
     }
-    if (!allReported) continue;
 
     var newLeague = curLeague;
     var reason = '';
-    if (curLeague === LEAGUE_1M && allAbove) {
+    if (curLeague === LEAGUE_1M && allAbove && allReported) {
       newLeague = LEAGUE_10M;
       reason = '3일 연속 10M 이상 → 승격';
     } else if (curLeague === LEAGUE_10M && allBelow) {
       newLeague = LEAGUE_1M;
-      reason = '3일 연속 10M 미만 → 강등';
+      reason = allReported
+        ? '3일 연속 10M 미만 → 강등'
+        : '3일 중 미보고 포함, 모두 10M 미만 → 강등';
     }
 
     if (newLeague !== curLeague) {
