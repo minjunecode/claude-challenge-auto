@@ -558,9 +558,11 @@ function renderDailyTable(members, submissions) {
   members.forEach(m => { dailyMap[m.nickname] = {}; });
 
   // submissions에서 날짜별 인증 여부 (league는 보고 시점 리그)
+  // dateStr은 사용량 '해당 일자'(resetsAt) 우선. 없으면 submittedAt fallback.
+  // 48h 윈도우로 4/24 사용량을 4/26에 보고하는 경우 league가 잘못된 셀에 매핑되는 문제 방지.
   submissions.forEach(s => {
     if (s.type === 'session') {
-      const dateStr = normalizeDate(s.submittedAt);
+      const dateStr = normalizeDate(s.resetsAt || s.submittedAt);
       if (dateStr && dailyMap[s.nickname]) {
         if (!dailyMap[s.nickname][dateStr]) dailyMap[s.nickname][dateStr] = { done: true, tokens: 0, allTokens: 0, source: s.source, league: '' };
         dailyMap[s.nickname][dateStr].done = true;
@@ -1135,7 +1137,8 @@ function renderFineTab() {
   members.forEach(m => { dailyMap[m.nickname] = {}; });
   submissions.forEach(s => {
     if (s.type !== 'session') return;
-    const dateStr = normalizeDate(s.submittedAt);
+    // 사용량 일자(resetsAt) 우선, 없으면 submittedAt fallback
+    const dateStr = normalizeDate(s.resetsAt || s.submittedAt);
     if (!dateStr || !dailyMap[s.nickname]) return;
     if (!dailyMap[s.nickname][dateStr]) dailyMap[s.nickname][dateStr] = { tokens: 0, league: '' };
     if (s.source === 'auto' && s.tokens) dailyMap[s.nickname][dateStr].tokens = s.tokens;
