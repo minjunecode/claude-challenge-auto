@@ -4,29 +4,27 @@
 
 ## 저장소 구조
 
-**단일 레포로 통합됨 (2026-04-11).** 이전에는 `claude-challenge-site`(프론트엔드)와 `claude-challenge-auto`(운영 자산) 두 레포로 분리돼 있었으나, 동기화 누락 문제가 반복되어 `claude-challenge-auto` 단일 레포로 통합.
+두 개의 Git 저장소가 쌍으로 운영됨:
 
-| 항목 | 위치 |
-|------|------|
-| 운영 레포 | `claude-challenge-auto` |
-| 라이브 URL | https://minjunecode.github.io/claude-challenge-auto/#dashboard |
-| 구 레포 | `claude-challenge-site` — **archived**. 더 이상 편집·푸시 금지 |
+| 저장소 | 역할 | 배포 |
+|--------|------|------|
+| `claude-challenge-site` | GitHub Pages 프론트엔드 | https://minjunecode.github.io/claude-challenge-site |
+| `claude-challenge-auto` | 리포터 스크립트 + Apps Script 원본 | — |
 
-> ⚠️ 옛 레포 `claude-challenge-site`에 잘못 커밋하지 말 것. 모든 변경은 `claude-challenge-auto`에서 수행.
+두 레포 모두 `app.js`, `index.html`, `style.css`를 갖고 있으며 **항상 동기화**해야 함. `claude-challenge-site`를 편집한 뒤 `cp`로 `claude-challenge-auto`에 복사하고 양쪽 모두 커밋·푸시.
 
 ## 주요 파일
 
-### 프론트엔드
+### 프론트엔드 (`claude-challenge-site`)
 - `app.js` — 모든 렌더링 로직. 대시보드, 내 분석, 인증 탭.
 - `index.html` — 단일 페이지. 캐시 버스터 `v=20260409k` 형식으로 관리.
 - `style.css` — 스타일 전체.
 - `setup-guide.html` — 자동 리포팅 설정 가이드 (멤버 배포용).
 - `diagram.html`, `about.html` — 부가 페이지.
 
-### 서버 / 리포터
+### 서버 (`claude-challenge-auto`)
 - `AutoCode.gs` — Google Apps Script 원본. 실제 운영 코드는 Apps Script 에디터에서 **수동 재배포** 필요. 깃에 있는 파일은 소스 백업용.
 - `challenge-report.py` — 멤버 PC에서 1시간마다 실행되는 리포터. Claude Code의 `~/.claude/projects/**/*.jsonl`을 파싱해 토큰 수를 집계한 뒤 Apps Script 엔드포인트로 POST.
-- `setup-scheduler.bat` — 멤버 PC용 Windows 스케줄러 등록 배치 파일.
 
 ## 스코어 공식
 
@@ -113,27 +111,21 @@ localStorage에 `dashboardCache`, `personalStatsCache` 저장. 이슈 디버깅 
 
 ## 주요 UI 컴포넌트
 
-- **대시보드 주간뷰**: `renderDailyTable` — 월~오늘, 각 셀은 `OOO/OO/O/-/X`. 멤버명 옆에는 직전 1시간 가중 스코어 ≥500K 인 사람만 🔥 표시 (`dashboardData.memberLastActivity` 사용). 기존 'auto' 텍스트 배지는 제거됨.
+- **대시보드 주간뷰**: `renderDailyTable` — 월~오늘, 각 셀은 `OOO/OO/O/-/X`.
 - **TOP 3 순위표**: `renderPodium` — `포인트 | 주간 토큰 | 월간 토큰` 3개 탭.
 - **일간 사용량 차트**: `renderDailyTrendChart` — 최근 14일 수평 바. 스케일 60M 고정. 1M/10M/50M 3개 임계선 표시. 티어별 색상: 회색/파랑/초록/골드.
 - **시간대별 사용량**: `renderHourlyChart` — 24시간 스택 바 (input/output/cc/cr 4개 세그먼트). 날짜 선택기는 raw 데이터가 있는 최신 날짜를 자동 선택.
-- **탑 티어 vs 나 비교 차트**: `renderHourlyCompareChart` — 내 분석 탭. 24시간 페어 바, 노란 막대 = 주간 1위 사용자(`dashboardData.topUser`)의 hourly, 보라 막대 = 본인 raw 최신 hourly. 내가 1위면 비교 대상 없음 메시지.
-- **월간 캘린더**: `renderMonthlyCalendar` — **내 분석 탭으로 이동됨** (구 대시보드 월간 뷰). 본인 데이터 우선 (`personalStatsData.daily`), 없으면 `dashboardData.usage` fallback.
 - **게이지 바** (`stats-goal-fill`): 오늘 스코어를 50M 대비 진행률로 표시. 2%(1M)/20%(10M)/100%(50M) 위치에 마커.
-
-### 대시보드 vs 내 분석 구분
-- **대시보드 탭**: 타인/랭킹과의 비교. TOP3, 주간 표, 활동 피드.
-- **내 분석 탭**: 개인 사용량 분석. 월간 캘린더, 일간 트렌드, 시간대별, 활동 패턴, 탑 티어 비교.
-- 구 `view-tabs` (주간/월간 토글)는 제거됨.
 
 ## 배포 체크리스트
 
 코드 변경 시:
-1. `claude-challenge-auto`에서 편집·테스트 (프리뷰 서버: `.claude/launch.json`).
-2. 프론트엔드 변경 시 캐시 버스터 버전 증가 (`v=20260409X` 다음 문자).
-3. `git commit && git push` — GitHub Pages가 자동 재배포.
-4. `AutoCode.gs` 변경 시: Apps Script 에디터에서 **새 배포 만들기** (배포 > 배포 관리 > 새 버전). URL은 유지됨.
-5. `challenge-report.py` 변경 시: 각 멤버가 `git pull` 또는 파일 재다운로드 필요 (가이드 참고).
+1. `claude-challenge-site`에서 편집·테스트 (프리뷰 서버: `launch.json`의 `challenge-site`).
+2. 캐시 버스터 버전 증가 (`v=20260409X` 다음 문자).
+3. `cp app.js style.css index.html ../claude-challenge-auto/` 로 동기화.
+4. 양쪽 레포에 커밋·푸시.
+5. `AutoCode.gs` 변경 시: Apps Script 에디터에서 **새 배포 만들기** (배포 > 배포 관리 > 새 버전). URL은 유지됨.
+6. `challenge-report.py` 변경 시: 각 멤버가 `git pull` 또는 파일 재다운로드 필요 (가이드 참고).
 
 ## 자주 발생한 이슈
 
@@ -156,13 +148,30 @@ localStorage에 `dashboardCache`, `personalStatsCache` 저장. 이슈 디버깅 
 
 ---
 
-## 현재 상태 (2026-04-12 기준)
+## 현재 상태 (2026-05-10 기준)
+
+### 평가 (VC IR 시뮬레이션) 탭 — 앵커 기반 평가 시스템 (BETA)
+
+**아키텍처 3단 파이프라인** (AutoCode.gs):
+1. **Phase 0** — `extractFeatures_`: LLM이 프로젝트를 5차원 enum으로 분류 (temp 0.0)
+   - service_type / monetization / target_market / tech_complexity / validation_stage
+   - `평가` 시트의 `featuresJson` 컬럼(W, index 22)에 저장
+2. **Phase 1** — VC 6개 후속 질문 생성 (temp 0.7, 창의성)
+3. **Phase 2** — 앵커 기반 평가 (temp 0.3, 일관성)
+   - `BOOTSTRAP_ANCHORS_` (6개 정밀 캘리브레이션, 1만원~2억원 스펙트럼)
+   - 챌린지 내 같은 service_type 완료 평가 상위 3개 (자가 강화)
+   - 프롬프트가 "앵커 대비 ±X% 위치 결정" 강제, 동일 KRW 부여 금지
+
+**주요 함수**:
+- `extractFeatures_`, `getRelevantAnchors_`, `scoreFeatureSimilarity_`, `formatAnchorsForPrompt_`
+- `callAnthropic_(systemPrompt, userPrompt, maxTokens, temperature)` — 4번째 인자로 temp 제어
+
+**상수**: `BOOTSTRAP_ANCHORS_` (배열, 6개) — 신규 카테고리 등장 시 admin이 추가 가능.
+
+**Rate limit**: 주 1회 (`EVAL_WEEKLY_LIMIT_`).
 
 ### 최근 주요 변경사항
-- **🔥 활성 멤버 표시** — 주간 표 멤버명 옆 'auto' 텍스트 배지 → 🔥 이모지로 교체. 직전 1시간 가중 스코어 ≥500K 인 멤버만 표시 (`dashboardData.memberLastActivity` 신규 응답 필드 기반).
-- **탑 티어 vs 나 비교 차트** — 내 분석 탭에 24시간 페어 바 차트 추가. 주간 1위 사용자의 hourly와 본인 hourly 비교. 서버는 `dashboardData.topUser = {nickname, weekScore, hourly}` 필드 신규 반환.
-- **월간 캘린더 → 내 분석 탭으로 이동** — 구 대시보드 월간 뷰 제거. `view-tabs` (주간/월간 토글) 자체 삭제. 캘린더는 본인 daily 우선 사용.
-- **AutoCode.gs handleDashboard 확장** — `사용량_raw` 시트 전체 순회하며 멤버별 최신 hourly 추출. 마지막 보고의 가장 최근 시간 버킷에서 가중 스코어를 계산해 `memberLastActivity[nick] = {hour, score, reportedAt}` 생성. 주간 1위 닉의 전체 hourly를 `topUser.hourly`로 응답.
+- **앵커 기반 평가 시스템 도입** — 위 참조. 평가 휘발성 해결: 같은 프로젝트 → 비슷한 결과 (앵커 + temp 0.3), 다른 프로젝트 → 차별화된 결과 (동일 KRW 금지 규칙).
 - **50M=3pt 티어 추가** — `POINT_3_THRESHOLD = 50000000`. 주간뷰 `OOO`, 일간 차트 gold 티어, 게이지 바 50M 기준.
 - **시간대별 차트 cache 가중치 반영** — `hourly` 데이터에 `cc`/`cr` 필드 추가. 4개 컴포넌트 스택 바 (`I×1 + O×5 + Cw×1.25 + Cr×0.1`).
 - **`challenge-report.py` 업데이트** — Python 리포터가 hourly에 `cc`/`cr` 전송하도록 수정.
@@ -176,7 +185,6 @@ localStorage에 `dashboardCache`, `personalStatsCache` 저장. 이슈 디버깅 
 - **AutoCode.gs 재배포 필요** — Apps Script 에디터에서 새 배포 생성해야 서버 측 50M=3pt 기준 + submittedAt 갱신 적용됨.
 - **멤버 PC `challenge-report.py` 업데이트 필요** — 가이드대로 새로 받거나 `git pull` 필요. 안 하면 hourly에 `cc`/`cr` 누락된 채로 계속 보고됨 (기존 데이터는 호환됨).
 - **인증기록 시트 수동 보정** — 옛 임계값으로 잘못 부여된 포인트가 있을 수 있음 (필요 시 수동 조정).
-- **`claude-challenge-site` 레포 archive 필요** — GitHub UI에서 Settings → Archive (그리고 GitHub Pages 비활성화 권장).
 
 ### 캐시 버스터 현재 버전
-`v=20260412l` — 다음 변경 시 `m`으로 증가.
+`v=20260409k` — 다음 변경 시 `l`로 증가.

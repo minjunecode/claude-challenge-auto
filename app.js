@@ -283,6 +283,7 @@ function switchTab(tabName) {
   }
   if (tabName === 'fine') renderFineTab();
   if (tabName === 'admin') renderAdminTab();
+  if (tabName === 'eval') renderEval();
 }
 
 // ── 자동 리포팅 상태 ──
@@ -612,19 +613,16 @@ function renderDailyTable(members, submissions) {
     }
     nameTd.appendChild(dot);
     nameTd.appendChild(document.createTextNode(m.nickname));
-    // 오늘 500K+ 가중 스코어를 보고한 멤버에게 🔥 표시 (서버 시간 기준, 모든 사용자 동일)
+    // 직전 2시간 내 500K+ 가중 스코어를 보고한 멤버에게 🔥 표시
     if (dashboardData && dashboardData.memberLastActivity) {
       const act = dashboardData.memberLastActivity[m.nickname];
-      if (act && act.score >= 500000 && act.reportedAt) {
-        const reportedDate = act.reportedAt.substring(0, 10);
-        const today = getTodayStr();
-        if (reportedDate === today) {
-          const fire = document.createElement('span');
-          fire.className = 'fire-badge';
-          fire.textContent = '🔥';
-          fire.title = `오늘 ${(act.score / 1000).toFixed(0)}K (가중)`;
-          nameTd.appendChild(fire);
-        }
+      if (act && act.score >= 500000 && act.reportedAt &&
+          (Date.now() - new Date(act.reportedAt).getTime()) <= 7200000) {
+        const fire = document.createElement('span');
+        fire.className = 'fire-badge';
+        fire.textContent = '🔥';
+        fire.title = `직전 2시간 내 ${(act.score / 1000).toFixed(0)}K (가중)`;
+        nameTd.appendChild(fire);
       }
     }
     tr.appendChild(nameTd);
@@ -1085,6 +1083,9 @@ function renderPodium(view) {
 
 // ── 벌금 탭 ──
 let fineWeekOffset = 0;
+// 벌금 기록 조회 가능한 최소 주차의 월요일 (2026 4월 4주차 = 2026-04-20).
+// 그 이전 주차는 챌린지 시작 전 / 사전 운영 데이터라 노출하지 않음.
+const FINE_MIN_MONDAY = new Date(2026, 3, 20);  // month=3 → April
 const FINE_DEPOSIT = 50000;
 const FINE_PER_DAY = 10000;
 const FINE_FREE_DAYS = 2;
@@ -1102,14 +1103,59 @@ function getFineState(raw) {
   return 'unknown';
 }
 
+// ISO 주차 계산 (Mon=1 ~ Sun=7 기준).
+function fineIsoWeekFromDate(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return { week, year: d.getUTCFullYear() };
+}
+
 function renderFineTab() {
   if (!dashboardData) return;
   // 주 시작(월요일) 계산 (dailyWeekOffset과 독립)
   const now = new Date();
   const dayOfWeek = now.getDay() || 7;
-  const monday = new Date(now);
+  let monday = new Date(now);
   monday.setDate(now.getDate() - dayOfWeek + 1 + fineWeekOffset * 7);
+
+  // 최소 주차 클램프: 2026-04-20 (4월 4주차) 이전은 노출 금지
+  if (monday < FINE_MIN_MONDAY) {
+    // offset을 FINE_MIN_MONDAY에 맞게 보정
+    const todayMonday = new Date(now);
+    todayMonday.setDate(now.getDate() - dayOfWeek + 1);
+    fineWeekOffset = Math.round((FINE_MIN_MONDAY - todayMonday) / (7 * 24 * 3600 * 1000));
+    monday = new Date(FINE_MIN_MONDAY);
+  }
+
+  // 이전 버튼 활성/비활성 (이미 최소 주차면 더 이상 못 감)
+  // monday는 현재 시각의 시·분·초를 가지므로 날짜만 비교.
+  const prevBtn = document.getElementById('btn-fine-prev');
+  if (prevBtn) {
+    const mondayDateOnly = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate());
+    const isAtMin = (mondayDateOnly.getTime() <= FINE_MIN_MONDAY.getTime());
+    prevBtn.disabled = isAtMin;
+    prevBtn.classList.toggle('daily-nav-btn-disabled', isAtMin);
+  }
+
   const today = getTodayStr();
+
+  // 표시 중인 주차의 ISO week / year (정산 시트와 매칭용)
+  const displayedIso = fineIsoWeekFromDate(monday);
+  const currentIso = fineIsoWeekFromDate(new Date());
+  // 과거 주차 여부 (정산이 적용된 주차)
+  const isPastWeek = (displayedIso.year < currentIso.year) ||
+                     (displayedIso.year === currentIso.year && displayedIso.week < currentIso.week);
+
+  // 정산 시트의 (nickname, week, year) 매칭용 인덱스
+  const settlements = dashboardData.settlements || [];
+  const settlementByKey = {};
+  settlements.forEach(s => {
+    settlementByKey[`${s.nickname}__${s.year}-W${s.week}`] = s;
+  });
+  const getSettlement = (nick) => settlementByKey[`${nick}__${displayedIso.year}-W${displayedIso.week}`];
 
   const days = [];
   const dayLabels = ['일', '월', '화', '수', '목', '금', '토'];
@@ -1179,7 +1225,11 @@ function renderFineTab() {
     nameTd.appendChild(document.createTextNode(' ' + m.nickname));
     tr.appendChild(nameTd);
 
-    const state = getFineState(m.participating);
+    // 과거 주차에 대해서는 정산 시트의 freeze된 status를 우선 사용 (소급 변경 차단).
+    const settlement = getSettlement(m.nickname);
+    const statusForWeek = (isPastWeek && settlement) ? settlement.status : m.participating;
+    const state = getFineState(statusForWeek);
+
     const partTd = document.createElement('td');
     partTd.className = 'fine-td-summary fine-td-participating';
     if (state === 'active') {
@@ -1189,7 +1239,7 @@ function renderFineTab() {
       partTd.classList.add('fine-td-exempt');
     } else {
       // inactive 또는 unknown (임의 값도 회색 처리)
-      partTd.textContent = state === 'inactive' ? '참여 안 함' : (m.participating || '참여 안 함');
+      partTd.textContent = state === 'inactive' ? '참여 안 함' : (statusForWeek || '참여 안 함');
       partTd.classList.add('fine-td-not-participating');
     }
     tr.appendChild(partTd);
@@ -1231,12 +1281,21 @@ function renderFineTab() {
       tr.appendChild(td);
     });
 
-    // 벌금 계산: active만 차감, exempt/inactive/unknown은 0
-    const chargedDays = (state === 'active') ? Math.max(0, missCount - FINE_FREE_DAYS) : 0;
-    const fineAmount = chargedDays * FINE_PER_DAY;
-    // 시트 deposit 값은 "이번 주 시작 보증금"으로 해석 → 여기서 벌금 차감
-    const baseDeposit = (typeof m.deposit === 'number') ? m.deposit : FINE_DEPOSIT;
-    const remaining = Math.max(0, baseDeposit - fineAmount);
+    // 과거 주차 + 정산 row 존재 시: 정산 시트의 freeze된 값 사용 (소급 변경 차단)
+    // 그 외: 실시간 계산
+    let fineAmount, chargedDays, remaining;
+    if (isPastWeek && settlement) {
+      fineAmount = settlement.fineAmount;
+      chargedDays = settlement.chargedDays;
+      missCount = settlement.missCount;
+      remaining = settlement.depositAfter;
+    } else {
+      chargedDays = (state === 'active') ? Math.max(0, missCount - FINE_FREE_DAYS) : 0;
+      fineAmount = chargedDays * FINE_PER_DAY;
+      // 시트 deposit 값은 "이번 주 시작 보증금"으로 해석 → 여기서 벌금 차감
+      const baseDeposit = (typeof m.deposit === 'number') ? m.deposit : FINE_DEPOSIT;
+      remaining = Math.max(0, baseDeposit - fineAmount);
+    }
 
     const tdMiss = document.createElement('td');
     tdMiss.textContent = (state === 'inactive' || state === 'unknown') ? '-' : `${missCount}일`;
@@ -1277,7 +1336,17 @@ function renderFineTab() {
 document.addEventListener('DOMContentLoaded', () => {
   const prev = document.getElementById('btn-fine-prev');
   const next = document.getElementById('btn-fine-next');
-  if (prev) prev.addEventListener('click', () => { fineWeekOffset--; renderFineTab(); });
+  if (prev) prev.addEventListener('click', () => {
+    // 최소 주차 도달 시 클릭 무시 (renderFineTab에서 클램프되지만 이중 안전)
+    const now = new Date();
+    const dayOfWeek = now.getDay() || 7;
+    const candidateMonday = new Date(now);
+    candidateMonday.setDate(now.getDate() - dayOfWeek + 1 + (fineWeekOffset - 1) * 7);
+    const candidateDateOnly = new Date(candidateMonday.getFullYear(), candidateMonday.getMonth(), candidateMonday.getDate());
+    if (candidateDateOnly < FINE_MIN_MONDAY) return;
+    fineWeekOffset--;
+    renderFineTab();
+  });
   if (next) next.addEventListener('click', () => { fineWeekOffset++; renderFineTab(); });
 });
 
@@ -1885,7 +1954,7 @@ function initPeerCompare(raw) {
 
     // 활동 지표 뱃지
     const act = dashboardData.memberLastActivity ? dashboardData.memberLastActivity[m.nickname] : null;
-    const isActive = act && act.score >= 500000 && act.reportedAt && (Date.now() - new Date(act.reportedAt).getTime()) <= 3600000;
+    const isActive = act && act.score >= 500000 && act.reportedAt && (Date.now() - new Date(act.reportedAt).getTime()) <= 7200000;
 
     let label = escapeHtml(m.nickname);
     if (m.nickname === topNick) label += ' <span class="peer-tag peer-tag-top">주간 1위</span>';
@@ -2091,5 +2160,830 @@ function renderPeerCompare(peerNick, raw) {
 
   area.innerHTML = html;
 }
+
+// ════════════════════════════════════════════════════════
+// 평가 (VC IR 시뮬레이션) 탭 — 비차단 + 폴링
+// ════════════════════════════════════════════════════════
+//
+// 상태 머신 (status):
+//   idle → questions_pending → answering → evaluation_pending → completed
+//
+// UX 흐름:
+//   1) 사용자가 IR 폼 제출 → 즉시 진행 패널 노출 ("질문 작성 중")
+//      백엔드 fetch는 await하지 않고 fire-and-forget. 응답 받으면 UI 갱신.
+//      이탈해도 OK — 다시 들어오면 evalStatus 폴링으로 현재 상태 회수.
+//   2) 질문 도착 → "답변 대기 중" 상태로 표시. 답변 폼 노출.
+//   3) 답변 제출 → "평가 중" 상태로 표시. fire-and-forget.
+//   4) 평가 완료 → 결과 카드 노출.
+
+const EVAL_FEED_PAGE_SIZE = 10;
+let evalFeedOffset = 0;
+let evalFeedHasMore = false;
+let evalFeedItems = [];
+
+// 프리뷰(localhost) 환경 감지 → 데모 피드 + 백엔드 미배포 시 우아한 동작
+const EVAL_IS_PREVIEW = (typeof location !== 'undefined') &&
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+
+// 5,000원 ~ 3억원 범위에 맞춘 통일 한국어 포맷.
+//   - 1만 미만: "5,000원" / "9,500원"
+//   - 1만 이상 ~ 1억 미만: "N만원" (반올림, 8만원 / 25만원 / 80만원 / 250만원)
+//   - 1억 이상: "N억 N,NNN만원" or "N억원"
+function formatKRW(n) {
+  n = Math.round(Number(n) || 0);
+  if (n < 10000) return n.toLocaleString('ko-KR') + '원';
+  if (n < 100000000) {
+    const man = Math.round(n / 10000);
+    return man.toLocaleString('ko-KR') + '만원';
+  }
+  const eok = Math.floor(n / 100000000);
+  const remainMan = Math.round((n - eok * 100000000) / 10000);
+  if (remainMan === 0) return eok + '억원';
+  return eok + '억 ' + remainMan.toLocaleString('ko-KR') + '만원';
+}
+
+// 평균 표시용: 백원 단위 내림 (366,667 → 366,600).
+function formatAvgKRW(n) {
+  const floored = Math.floor((Number(n) || 0) / 100) * 100;
+  return formatKRW(floored);
+}
+
+const EVAL_LS_KEY = 'evalInProgress';
+
+function evalGetInProgress() {
+  try { return JSON.parse(localStorage.getItem(EVAL_LS_KEY) || 'null'); } catch { return null; }
+}
+function evalSetInProgress(v) {
+  if (v == null) localStorage.removeItem(EVAL_LS_KEY);
+  else localStorage.setItem(EVAL_LS_KEY, JSON.stringify(v));
+}
+
+// 진행 패널이 어떤 상태로 노출되는지: questions_pending / answering / evaluation_pending / completed
+function evalShowStep(name) {
+  ['form', 'questions', 'result'].forEach(s => {
+    const el = document.getElementById('eval-step-' + s);
+    if (el) el.style.display = (s === name) ? '' : 'none';
+  });
+}
+
+function renderEval() {
+  if (!currentUser) return;
+  bindEvalHandlersOnce();
+  evalRenderFromState();
+  // 피드 로딩
+  evalFeedOffset = 0;
+  evalFeedItems = [];
+  loadEvalFeed(true);
+}
+
+// 현재 localStorage state에 따라 UI 분기. 호출될 때마다 idempotent.
+function evalRenderFromState() {
+  const ip = evalGetInProgress();
+  const panel = document.getElementById('eval-progress-panel');
+  if (!ip || !ip.evalId || ip.nickname !== currentUser.nickname) {
+    if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+    evalShowStep('form');
+    evalStopPolling();
+    return;
+  }
+
+  // 진행 패널 노출
+  renderEvalProgressPanel(ip);
+
+  // 본문 영역 분기
+  if (ip.status === 'completed' && ip.result) {
+    renderEvalResult(ip.result, ip.project);
+    evalShowStep('result');
+    evalStopPolling();
+  } else if (ip.status === 'answering' && Array.isArray(ip.questions)) {
+    renderEvalQuestions(ip.questions, ip.evalId, ip.answers || {});
+    evalShowStep('questions');
+    evalStopPolling();
+  } else {
+    // questions_pending 또는 evaluation_pending → 폼 숨기고 진행 패널만
+    evalShowStep('form');
+    document.getElementById('eval-step-form').style.display = 'none';
+    evalStartPolling();
+  }
+}
+
+function renderEvalProgressPanel(ip) {
+  const panel = document.getElementById('eval-progress-panel');
+  if (!panel) return;
+  const proj = ip.project || {};
+  let badge = '', actionBtn = '', subtitle = '', icon = '';
+  switch (ip.status) {
+    case 'questions_pending':
+      badge = '<span class="eval-progress-badge eval-progress-waiting">VC가 질문 작성 중</span>';
+      subtitle = '잠시 기다려주세요. 다른 탭으로 이동하셔도 결과는 보존됩니다.';
+      icon = '⏳';
+      break;
+    case 'answering':
+      badge = '<span class="eval-progress-badge eval-progress-ready">답변 대기 중</span>';
+      actionBtn = '<button class="eval-btn-secondary" data-eval-action="continue-answer">이어서 답변하기</button>';
+      icon = '✍️';
+      break;
+    case 'evaluation_pending':
+      badge = '<span class="eval-progress-badge eval-progress-waiting">VC 패널이 평가 중</span>';
+      subtitle = '잠시 기다려주세요. 다른 탭으로 이동하셔도 결과는 보존됩니다.';
+      icon = '⏳';
+      break;
+    case 'completed':
+      badge = '<span class="eval-progress-badge eval-progress-done">평가 완료</span>';
+      actionBtn = '<button class="eval-btn-secondary" data-eval-action="show-result">결과 보기</button>';
+      icon = '✅';
+      break;
+    default:
+      panel.style.display = 'none';
+      panel.innerHTML = '';
+      return;
+  }
+  const isWaiting = (ip.status === 'questions_pending' || ip.status === 'evaluation_pending');
+  panel.style.display = '';
+  panel.className = 'eval-progress-panel' + (isWaiting ? ' eval-progress-waiting-panel' : '');
+  panel.innerHTML = `
+    <div class="eval-progress-row">
+      <div class="eval-progress-icon">${icon}</div>
+      <div class="eval-progress-main">
+        <div class="eval-progress-project">${escapeHtml(proj.projectName || '진행 중인 IR')}</div>
+        <div class="eval-progress-status">${badge}</div>
+        ${subtitle ? `<div class="eval-progress-subtitle">${escapeHtml(subtitle)}</div>` : ''}
+      </div>
+      <div class="eval-progress-actions">
+        ${actionBtn}
+        <button class="eval-btn-link" data-eval-action="discard">폐기</button>
+      </div>
+    </div>
+  `;
+  // 패널 내부 버튼 핸들러 (위임)
+  panel.querySelectorAll('[data-eval-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const a = btn.dataset.evalAction;
+      if (a === 'continue-answer') { evalShowStep('questions'); }
+      else if (a === 'show-result') { evalShowStep('result'); }
+      else if (a === 'discard') {
+        if (!confirm('진행 중인 IR을 폐기합니다. (주 2회 제한엔 카운트되지 않습니다)')) return;
+        evalSetInProgress(null);
+        evalRenderFromState();
+      }
+    });
+  });
+}
+
+let evalHandlersBound = false;
+function bindEvalHandlersOnce() {
+  if (evalHandlersBound) return;
+  evalHandlersBound = true;
+  document.getElementById('eval-start-btn').addEventListener('click', submitEvalStep1);
+  document.getElementById('eval-submit-btn').addEventListener('click', submitEvalStep2);
+  document.getElementById('eval-restart-btn').addEventListener('click', () => {
+    if (!confirm('진행 중인 IR을 폐기하고 처음부터 다시 시작합니다. (주 2회 제한엔 카운트되지 않습니다)')) return;
+    evalSetInProgress(null);
+    evalRenderFromState();
+  });
+  document.getElementById('eval-new-btn').addEventListener('click', () => {
+    evalSetInProgress(null);
+    ['eval-project-name', 'eval-one-liner', 'eval-description', 'eval-github-url', 'eval-demo-url'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    const fileInput = document.getElementById('eval-file-input');
+    if (fileInput) fileInput.value = '';
+    document.getElementById('eval-file-info').style.display = 'none';
+    evalRenderFromState();
+  });
+  document.getElementById('eval-feed-more').addEventListener('click', () => loadEvalFeed(false));
+  document.getElementById('eval-file-input').addEventListener('change', onEvalFileChange);
+  // Sub-tab nav
+  document.querySelectorAll('.eval-subtab').forEach(btn => {
+    btn.addEventListener('click', () => switchEvalSubtab(btn.dataset.evalSubtab));
+  });
+}
+
+let currentEvalSubtab = 'submit';
+function switchEvalSubtab(name) {
+  currentEvalSubtab = name;
+  document.querySelectorAll('.eval-subtab').forEach(b => b.classList.toggle('active', b.dataset.evalSubtab === name));
+  document.querySelectorAll('.eval-subcontent').forEach(d => d.classList.toggle('active', d.dataset.evalSubcontent === name));
+  if (name === 'feed') {
+    // 피드 탭: 랭킹 + 컴팩트 카드
+    loadEvalFeed(true);
+  } else if (name === 'my') {
+    renderEvalMyFeed();
+  }
+}
+
+const EVAL_FILE_MAX_BYTES = 1.5 * 1024 * 1024; // 1.5MB
+
+function onEvalFileChange() {
+  const inp = document.getElementById('eval-file-input');
+  const info = document.getElementById('eval-file-info');
+  const f = inp.files && inp.files[0];
+  if (!f) {
+    info.style.display = 'none';
+    info.textContent = '';
+    return;
+  }
+  if (f.size > EVAL_FILE_MAX_BYTES) {
+    info.style.display = '';
+    info.className = 'eval-file-info eval-file-info-error';
+    info.textContent = `파일이 너무 큽니다 (${Math.round(f.size/1024)}KB). 최대 1.5MB까지 첨부 가능합니다.`;
+    inp.value = '';
+    return;
+  }
+  info.style.display = '';
+  info.className = 'eval-file-info';
+  info.textContent = `${f.name} · ${Math.round(f.size/1024)}KB · ${f.type}`;
+}
+
+// File → base64 (data URL의 base64 부분만)
+function readFileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      const idx = dataUrl.indexOf(',');
+      resolve(idx >= 0 ? dataUrl.substring(idx + 1) : '');
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function submitEvalStep1() {
+  const errEl = document.getElementById('eval-form-error');
+  errEl.style.display = 'none';
+  const projectName = document.getElementById('eval-project-name').value.trim();
+  const oneLiner    = document.getElementById('eval-one-liner').value.trim();
+  const description = document.getElementById('eval-description').value.trim();
+  const githubUrl   = document.getElementById('eval-github-url').value.trim();
+  const demoUrl     = document.getElementById('eval-demo-url').value.trim();
+  const fileInput   = document.getElementById('eval-file-input');
+  const file        = fileInput && fileInput.files && fileInput.files[0];
+
+  if (!projectName || !oneLiner || !description) {
+    errEl.textContent = '프로젝트명, 한줄 설명, 상세 설명은 필수입니다.';
+    errEl.style.display = '';
+    return;
+  }
+  if (description.length < 30) {
+    errEl.textContent = '상세 설명은 최소 30자 이상 작성해주세요.';
+    errEl.style.display = '';
+    return;
+  }
+  if (!githubUrl && !demoUrl && !file) {
+    errEl.textContent = 'GitHub URL · 데모 URL · 파일 첨부 중 최소 한 가지는 제출해주세요.';
+    errEl.style.display = '';
+    return;
+  }
+
+  // 파일을 base64로 미리 읽기
+  let fileBase64 = '', fileName = '', fileType = '';
+  if (file) {
+    if (file.size > EVAL_FILE_MAX_BYTES) {
+      errEl.textContent = '파일이 너무 큽니다 (최대 1.5MB).';
+      errEl.style.display = '';
+      return;
+    }
+    try {
+      fileBase64 = await readFileBase64(file);
+      fileName = file.name;
+      fileType = file.type || 'application/octet-stream';
+    } catch (e) {
+      errEl.textContent = '파일을 읽지 못했습니다.';
+      errEl.style.display = '';
+      return;
+    }
+  }
+
+  // 임시 evalId (서버 응답 전까지). 서버 응답 받으면 진짜 evalId로 교체.
+  const tempId = 'temp-' + Date.now();
+  evalSetInProgress({
+    evalId: tempId,
+    nickname: currentUser.nickname,
+    project: { projectName, oneLiner, description, githubUrl, demoUrl, hasFile: !!file },
+    status: 'questions_pending',
+    questions: null,
+    answers: {},
+    result: null,
+    startedAt: Date.now()
+  });
+  evalRenderFromState();
+
+  // fire-and-forget — await하지 않음. 응답 도착하면 핸들러가 처리.
+  apiCall('evalStart', {
+    nickname: currentUser.nickname,
+    password: currentUser.password,
+    projectName, oneLiner, description, githubUrl, demoUrl,
+    fileBase64, fileName, fileType
+  }).then(res => {
+    const ip = evalGetInProgress();
+    if (!ip || ip.evalId !== tempId) return; // 사용자가 폐기/다른 IR 시작 등
+    if (!res || !res.success) {
+      evalSetInProgress(null);
+      errEl.textContent = (res && res.error) || '서버 오류';
+      errEl.style.display = '';
+      evalRenderFromState();
+      return;
+    }
+    ip.evalId = res.evalId;
+    ip.questions = res.questions;
+    ip.status = 'answering';
+    evalSetInProgress(ip);
+    if (location.hash === '#eval' || isEvalTabActive()) evalRenderFromState();
+  }).catch(err => {
+    const ip = evalGetInProgress();
+    if (!ip || ip.evalId !== tempId) return;
+    // 네트워크 오류도 서버는 처리 중일 수 있으므로, evalId가 임시면 상태 유지 + 폴링
+    // (만약 서버가 진짜 받지 못했으면 폴링이 답을 못 찾고, 사용자가 직접 폐기해야 함)
+    console.warn('evalStart fetch error (서버는 처리 중일 수 있음):', err);
+  });
+}
+
+function isEvalTabActive() {
+  const t = document.getElementById('tab-eval');
+  return t && t.classList.contains('active');
+}
+
+function renderEvalQuestions(questions, evalId, savedAnswers) {
+  const list = document.getElementById('eval-questions-list');
+  list.innerHTML = '';
+  questions.forEach((q, idx) => {
+    const card = document.createElement('div');
+    card.className = 'eval-question-card eval-vc-' + (q.vc || '').replace(/\s+/g, '-').toLowerCase();
+    const prev = savedAnswers && savedAnswers[idx] ? savedAnswers[idx] : '';
+    card.innerHTML = `
+      <div class="eval-q-header">
+        <span class="eval-q-vc">${escapeHtml(q.vc)}</span>
+        <span class="eval-q-num">Q${idx + 1}</span>
+      </div>
+      <div class="eval-q-text">${escapeHtml(q.question)}</div>
+      <textarea class="eval-q-answer" data-idx="${idx}" maxlength="200" rows="3" placeholder="200자 이내">${escapeHtml(prev)}</textarea>
+    `;
+    list.appendChild(card);
+  });
+  // 답변 변경 시 localStorage에 자동 저장
+  list.querySelectorAll('.eval-q-answer').forEach(t => {
+    t.addEventListener('input', () => {
+      const inProgress = evalGetInProgress();
+      if (!inProgress) return;
+      inProgress.answers = inProgress.answers || {};
+      inProgress.answers[t.dataset.idx] = t.value;
+      evalSetInProgress(inProgress);
+    });
+  });
+}
+
+async function submitEvalStep2() {
+  const errEl = document.getElementById('eval-questions-error');
+  errEl.style.display = 'none';
+
+  const inProgress = evalGetInProgress();
+  if (!inProgress || !inProgress.evalId || !Array.isArray(inProgress.questions)) {
+    errEl.textContent = '진행 중인 IR이 없습니다. 다시 시작해주세요.';
+    errEl.style.display = '';
+    return;
+  }
+  const questions = inProgress.questions;
+  const textareas = document.querySelectorAll('.eval-q-answer');
+  const answers = [];
+  for (let i = 0; i < questions.length; i++) {
+    const ta = textareas[i];
+    const v = (ta && ta.value || '').trim();
+    if (!v) {
+      errEl.textContent = `Q${i + 1} 답변이 비어있습니다.`;
+      errEl.style.display = '';
+      return;
+    }
+    answers.push({ vc: questions[i].vc, question: questions[i].question, answer: v });
+  }
+
+  // 즉시 status를 evaluation_pending으로 — UI는 진행 패널만 보여줌
+  inProgress.status = 'evaluation_pending';
+  inProgress.qa = answers;
+  evalSetInProgress(inProgress);
+  evalRenderFromState();
+
+  // fire-and-forget
+  apiCall('evalSubmit', {
+    nickname: currentUser.nickname,
+    password: currentUser.password,
+    evalId: inProgress.evalId,
+    answers
+  }).then(res => {
+    const ip = evalGetInProgress();
+    if (!ip || ip.evalId !== inProgress.evalId) return;
+    if (!res || !res.success) {
+      // 실패 → answering으로 복구
+      ip.status = 'answering';
+      evalSetInProgress(ip);
+      const e = document.getElementById('eval-questions-error');
+      if (e) {
+        e.textContent = (res && res.error) || '서버 오류';
+        e.style.display = '';
+      }
+      evalRenderFromState();
+      return;
+    }
+    ip.status = 'completed';
+    ip.result = res.result;
+    evalSetInProgress(ip);
+    if (isEvalTabActive()) evalRenderFromState();
+    // 피드 갱신
+    evalFeedOffset = 0;
+    evalFeedItems = [];
+    loadEvalFeed(true);
+  }).catch(err => {
+    console.warn('evalSubmit fetch error (서버는 처리 중일 수 있음):', err);
+    // 폴링이 결과를 잡아줌
+  });
+}
+
+function renderEvalResult(result, project) {
+  const panel = document.getElementById('eval-result-panel');
+  if (!panel) return;
+  const evalsHtml = result.evaluations.map(ev => `
+    <div class="vc-card vc-card-${(ev.vc || '').replace(/\s+/g, '-').toLowerCase()}">
+      <div class="vc-card-name">${escapeHtml(ev.vc)}</div>
+      <div class="vc-card-krw">${formatKRW(ev.krw)}</div>
+      <div class="vc-card-note">${escapeHtml(ev.note || '')}</div>
+    </div>
+  `).join('');
+  panel.innerHTML = `
+    <div class="eval-result-project">
+      <div class="eval-result-name">${escapeHtml(project ? project.projectName : '')}</div>
+      <div class="eval-result-oneliner">${escapeHtml(project ? project.oneLiner : '')}</div>
+    </div>
+    <div class="eval-result-avg">
+      <div class="eval-result-avg-label">VC 패널 평균 추정 가치</div>
+      <div class="eval-result-avg-value">${formatAvgKRW(result.avgKrw)}</div>
+    </div>
+    <div class="vc-card-grid">${evalsHtml}</div>
+    <div class="eval-result-summary">
+      <div class="eval-result-summary-label">패널 종합</div>
+      <div class="eval-result-summary-text">${escapeHtml(result.summary || '')}</div>
+    </div>
+  `;
+}
+
+// ── 폴링 ──
+let evalPollTimer = null;
+let evalPollAttempts = 0;
+const EVAL_POLL_INTERVAL_MS = 5000;
+const EVAL_POLL_MAX_ATTEMPTS = 60; // 5분
+
+function evalStopPolling() {
+  if (evalPollTimer) { clearInterval(evalPollTimer); evalPollTimer = null; }
+  evalPollAttempts = 0;
+}
+
+function evalStartPolling() {
+  if (evalPollTimer) return;
+  evalPollAttempts = 0;
+  evalPollTimer = setInterval(evalPollOnce, EVAL_POLL_INTERVAL_MS);
+}
+
+async function evalPollOnce() {
+  evalPollAttempts++;
+  if (evalPollAttempts > EVAL_POLL_MAX_ATTEMPTS) { evalStopPolling(); return; }
+
+  const ip = evalGetInProgress();
+  if (!ip || !ip.evalId) { evalStopPolling(); return; }
+  // 임시 evalId면 아직 서버에 반영 안 됨 → 스킵
+  if (String(ip.evalId).startsWith('temp-')) return;
+
+  try {
+    const res = await apiCall('evalStatus', {
+      nickname: currentUser.nickname,
+      password: currentUser.password,
+      evalId: ip.evalId
+    });
+    if (!res || !res.success) return;
+    let changed = false;
+    if (res.status && res.status !== ip.status) {
+      ip.status = res.status;
+      changed = true;
+    }
+    if (res.questions && (!ip.questions || ip.questions.length !== res.questions.length)) {
+      ip.questions = res.questions;
+      changed = true;
+    }
+    if (res.result && !ip.result) {
+      ip.result = res.result;
+      changed = true;
+    }
+    if (changed) {
+      evalSetInProgress(ip);
+      if (isEvalTabActive()) evalRenderFromState();
+      if (ip.status === 'completed') {
+        evalStopPolling();
+        // 피드 갱신
+        evalFeedOffset = 0;
+        evalFeedItems = [];
+        loadEvalFeed(true);
+      }
+    }
+  } catch (err) {
+    // 무시 - 다음 폴링에서 재시도
+  }
+}
+
+// ── 피드 (멤버 평가 피드 sub-tab) ──
+async function loadEvalFeed(reset) {
+  const listEl = document.getElementById('eval-feed-list');
+  const moreBtn = document.getElementById('eval-feed-more');
+  if (!listEl) return;
+  if (reset) {
+    evalFeedOffset = 0;
+    evalFeedItems = [];
+    listEl.innerHTML = '<div class="eval-feed-loading">피드를 불러오는 중...</div>';
+  }
+
+  // 프리뷰: 데모 데이터로 즉시 채움
+  if (EVAL_IS_PREVIEW) {
+    listEl.innerHTML = '';
+    EVAL_DEMO_FEED.forEach(item => listEl.appendChild(renderEvalCompactFeedCard(item)));
+    moreBtn.style.display = 'none';
+    evalFeedItems = EVAL_DEMO_FEED.slice();
+    renderEvalRankings(computeDemoRankings(EVAL_DEMO_FEED));
+    return;
+  }
+
+  try {
+    const res = await apiCall('evalFeed', {
+      nickname: currentUser.nickname,
+      password: currentUser.password,
+      offset: evalFeedOffset,
+      limit: EVAL_FEED_PAGE_SIZE
+    });
+    if (!res || !res.success) {
+      listEl.innerHTML = '<div class="eval-feed-empty">피드를 불러오지 못했습니다.</div>';
+      moreBtn.style.display = 'none';
+      return;
+    }
+    if (reset) listEl.innerHTML = '';
+    if (res.items.length === 0 && evalFeedItems.length === 0) {
+      listEl.innerHTML = '<div class="eval-feed-empty">아직 평가된 프로젝트가 없습니다. 첫 평가의 주인공이 되어보세요.</div>';
+      moreBtn.style.display = 'none';
+      renderEvalRankings(res.rankings || {});
+      return;
+    }
+    res.items.forEach(item => {
+      evalFeedItems.push(item);
+      listEl.appendChild(renderEvalCompactFeedCard(item));
+    });
+    evalFeedOffset += res.items.length;
+    evalFeedHasMore = !!res.hasMore;
+    moreBtn.style.display = evalFeedHasMore ? '' : 'none';
+    if (res.rankings) renderEvalRankings(res.rankings);
+  } catch (err) {
+    listEl.innerHTML = '<div class="eval-feed-empty">네트워크 오류</div>';
+    moreBtn.style.display = 'none';
+  }
+}
+
+// 데모 데이터로 랭킹 계산 (백엔드와 동일한 로직).
+function computeDemoRankings(items) {
+  const now = new Date();
+  const monthKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  // ISO 주차 (frontend)
+  function isoWeek(d) {
+    const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const day = x.getUTCDay() || 7;
+    x.setUTCDate(x.getUTCDate() + 4 - day);
+    const yearStart = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
+    return { week: Math.ceil((((x - yearStart) / 86400000) + 1) / 7), year: x.getUTCFullYear() };
+  }
+  const nowIso = isoWeek(now);
+  const sums = { week: {}, month: {}, all: {} };
+  items.forEach(it => {
+    const krw = it.avgKrw || 0;
+    const dt = new Date(it.completedAt);
+    sums.all[it.nickname] = (sums.all[it.nickname] || 0) + krw;
+    const mk = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+    if (mk === monthKey) sums.month[it.nickname] = (sums.month[it.nickname] || 0) + krw;
+    const wk = isoWeek(dt);
+    if (wk.week === nowIso.week && wk.year === nowIso.year) sums.week[it.nickname] = (sums.week[it.nickname] || 0) + krw;
+  });
+  function top(map) {
+    let best = null;
+    Object.keys(map).forEach(n => {
+      if (!best || map[n] > best.krw) best = { nickname: n, krw: map[n] };
+    });
+    return best;
+  }
+  return { week: top(sums.week), month: top(sums.month), all: top(sums.all) };
+}
+
+function renderEvalRankings(rankings) {
+  rankings = rankings || {};
+  ['week', 'month', 'all'].forEach(p => {
+    const card = document.querySelector(`.eval-ranking-card[data-period="${p}"]`);
+    if (!card) return;
+    const body = card.querySelector('.eval-ranking-body');
+    const r = rankings[p];
+    if (r && r.nickname) {
+      body.innerHTML = `<div class="eval-ranking-nick">${escapeHtml(r.nickname)}</div><div class="eval-ranking-krw">${formatAvgKRW(r.krw)}</div>`;
+    } else {
+      body.innerHTML = '<span class="eval-ranking-empty">기록 없음</span>';
+    }
+  });
+}
+
+// 컴팩트 카드 (멤버 피드용): 닉네임·날짜·링크·VC 3 카드만. 제목/한줄/요약 없음.
+function renderEvalCompactFeedCard(item) {
+  const card = document.createElement('div');
+  card.className = 'feed-card feed-card-compact';
+  const dateStr = (item.completedAt || '').slice(0, 10);
+  const githubLink = item.githubUrl ? `<a href="${escapeHtml(item.githubUrl)}" target="_blank" rel="noopener" class="feed-link">GitHub</a>` : '';
+  const demoLink = item.demoUrl ? `<a href="${escapeHtml(item.demoUrl)}" target="_blank" rel="noopener" class="feed-link">데모</a>` : '';
+  const fileTag = item.hasFile ? `<span class="feed-link feed-link-file">📎 첨부</span>` : '';
+  const links = [githubLink, demoLink, fileTag].filter(Boolean).join(' · ');
+  const evalsHtml = (item.evaluations || []).map(ev => `
+    <div class="vc-card-mini vc-card-${(ev.vc || '').replace(/\s+/g, '-').toLowerCase()}">
+      <div class="vc-mini-name">${escapeHtml(ev.vc)}</div>
+      <div class="vc-mini-krw">${formatKRW(ev.krw)}</div>
+      <div class="vc-mini-note">${escapeHtml(ev.note || '')}</div>
+    </div>
+  `).join('');
+  card.innerHTML = `
+    <div class="feed-card-header">
+      <span class="feed-card-nick">${escapeHtml(item.nickname)}</span>
+      <span class="feed-card-date">${dateStr}</span>
+    </div>
+    ${links ? `<div class="feed-card-links">${links}</div>` : ''}
+    <div class="vc-card-grid vc-card-grid-mini">${evalsHtml}</div>
+    <div class="feed-card-avg-mini">평균 ${formatAvgKRW(item.avgKrw)}</div>
+  `;
+  return card;
+}
+
+// ── 내 평가 피드 sub-tab ──
+function renderEvalMyFeed() {
+  const listEl = document.getElementById('eval-my-list');
+  if (!listEl) return;
+  const items = EVAL_IS_PREVIEW
+    ? EVAL_DEMO_FEED.filter(it => it.nickname === currentUser.nickname)
+    : evalFeedItems.filter(it => it.nickname === currentUser.nickname);
+  // 프리뷰에서 evalFeedItems가 비어있으면 자동 로드
+  if (!EVAL_IS_PREVIEW && items.length === 0 && evalFeedItems.length === 0) {
+    listEl.innerHTML = '<div class="eval-feed-loading">불러오는 중...</div>';
+    loadEvalFeed(true).then(() => renderEvalMyFeed());
+    return;
+  }
+  if (items.length === 0) {
+    listEl.innerHTML = '<div class="eval-feed-empty">아직 제출한 IR이 없습니다. "IR 자료 제출" 탭에서 첫 평가를 받아보세요.</div>';
+    return;
+  }
+  listEl.innerHTML = '';
+  items.forEach(item => listEl.appendChild(renderEvalDetailFeedCard(item)));
+}
+
+// 상세 카드 (내 피드용): 제목·한줄설명·상세설명·VC 카드·평균·종합·링크.
+function renderEvalDetailFeedCard(item) {
+  const card = document.createElement('div');
+  card.className = 'feed-card feed-card-detail';
+  const dateStr = (item.completedAt || '').slice(0, 10);
+  const githubLink = item.githubUrl ? `<a href="${escapeHtml(item.githubUrl)}" target="_blank" rel="noopener" class="feed-link">GitHub</a>` : '';
+  const demoLink = item.demoUrl ? `<a href="${escapeHtml(item.demoUrl)}" target="_blank" rel="noopener" class="feed-link">데모</a>` : '';
+  const fileTag = item.hasFile ? `<span class="feed-link feed-link-file">📎 첨부</span>` : '';
+  const links = [githubLink, demoLink, fileTag].filter(Boolean).join(' · ');
+  const evalsHtml = (item.evaluations || []).map(ev => `
+    <div class="vc-card-mini vc-card-${(ev.vc || '').replace(/\s+/g, '-').toLowerCase()}">
+      <div class="vc-mini-name">${escapeHtml(ev.vc)}</div>
+      <div class="vc-mini-krw">${formatKRW(ev.krw)}</div>
+      <div class="vc-mini-note">${escapeHtml(ev.note || '')}</div>
+    </div>
+  `).join('');
+  card.innerHTML = `
+    <div class="feed-card-header">
+      <span class="feed-card-nick">${escapeHtml(item.nickname)} · 내 IR</span>
+      <span class="feed-card-date">${dateStr}</span>
+    </div>
+    <div class="feed-card-project">${escapeHtml(item.projectName || '')}</div>
+    <div class="feed-card-oneliner">${escapeHtml(item.oneLiner || '')}</div>
+    ${item.description ? `<div class="feed-card-desc">${escapeHtml(item.description)}</div>` : ''}
+    ${links ? `<div class="feed-card-links">${links}</div>` : ''}
+    <div class="feed-card-avg">
+      <span class="feed-card-avg-label">평균</span>
+      <span class="feed-card-avg-value">${formatAvgKRW(item.avgKrw)}</span>
+    </div>
+    <div class="vc-card-grid vc-card-grid-mini">${evalsHtml}</div>
+    ${item.summary ? `<div class="feed-card-summary"><span class="feed-card-summary-label">패널 종합</span> ${escapeHtml(item.summary)}</div>` : ''}
+  `;
+  return card;
+}
+
+// ── 프리뷰 데모 피드 (localhost 전용) ──
+const EVAL_DEMO_FEED = [
+  {
+    evalId: 'demo-1',
+    nickname: '민준',
+    completedAt: '2026-04-20T13:42:00.000Z',  // 지난달 — 누적엔 잡히지만 월간/주간엔 X
+    projectName: '일일 토큰 알림봇',
+    oneLiner: '하루 토큰 사용 한도 90% 도달 시 슬랙으로 알림.',
+    description: '개인 개발자 대상 SaaS. Anthropic API 사용량을 모니터링하고 한도 초과 위험을 감지하면 슬랙·이메일로 즉시 알림. 월 9,900원 구독 모델, 현재 베타 사용자 30명.',
+    githubUrl: 'https://github.com/example/token-alert',
+    demoUrl: 'https://token-alert.example.com',
+    hasFile: false,
+    evaluations: [
+      { vc: 'VC Vault',  krw: 18000000, note: '월 구독 모델 명확. 30명 베타도 PMF 신호.' },
+      { vc: 'VC Rocket', krw: 38000000, note: '개발자 커뮤니티 입소문 가능성 높음.' },
+      { vc: 'VC Forge',  krw: 19000000, note: 'API hooking 구조는 클린. 차별점은 약함.' }
+    ],
+    avgKrw: 25000000,
+    summary: '명확한 페인 포인트와 실제 유료 사용자가 있어 견조한 가치. 경쟁 진입은 시간 문제.'
+  },
+  {
+    evalId: 'demo-2',
+    nickname: '민준',
+    completedAt: '2026-05-02T11:00:00.000Z',  // 이번달, 지난주
+    projectName: 'Claude 챌린지 사이트',
+    oneLiner: '친구들끼리 Claude Max 사용량을 경쟁하는 랭킹 사이트.',
+    description: '5명 친구 그룹의 토큰 사용량을 매시간 자동 집계하고 일/주/월 단위로 시각화. 벌금 시스템과 IR 평가까지 포함된 내부용 동기부여 도구.',
+    githubUrl: 'https://github.com/example/claude-challenge-site',
+    demoUrl: 'https://minjunecode.github.io/claude-challenge-site',
+    hasFile: false,
+    evaluations: [
+      { vc: 'VC Vault',  krw: 50000,    note: '내부 친목용. 유료 전환 가능성 거의 없음.' },
+      { vc: 'VC Rocket', krw: 800000,   note: '챌린지 모티브는 흥미. 폐쇄적 친구 그룹 한계.' },
+      { vc: 'VC Forge',  krw: 250000,   note: 'Apps Script + 정적 사이트 — 구현은 깔끔.' }
+    ],
+    avgKrw: 366667,
+    summary: '친구 그룹 내부 동기 부여 도구로 잘 작동. 외부 시장 가치는 제한적.'
+  },
+  {
+    evalId: 'demo-3',
+    nickname: '서연',
+    completedAt: '2026-05-07T22:15:00.000Z',  // 이번주
+    projectName: 'AI 회의록 요약기',
+    oneLiner: 'Zoom 녹음을 자동으로 요약·할일 추출하는 사내 도구.',
+    description: 'Whisper로 트랜스크립트 추출 → Claude로 요약 + 액션 아이템 자동 생성. 사내 슬랙에 자동 게시. 50인 규모 회사 1곳에서 실제 운영 중이며 만족도 높음.',
+    githubUrl: '',
+    demoUrl: 'https://meet-summary.example.com',
+    hasFile: true,
+    evaluations: [
+      { vc: 'VC Vault',  krw: 12000000, note: '명확한 페인 포인트. B2B 라이선스 가능성 있음.' },
+      { vc: 'VC Rocket', krw: 25000000, note: '바이럴 잠재력. 팀 도입 후 입소문 강함.' },
+      { vc: 'VC Forge',  krw: 5000000,  note: 'Whisper + Claude 조합 — 기술 차별화 약함.' }
+    ],
+    avgKrw: 14000000,
+    summary: 'B2B 사내 도구로 명확한 가치. 기술 해자가 약해 카피캣 위험 있음.'
+  },
+  {
+    evalId: 'demo-4',
+    nickname: '지훈',
+    completedAt: '2026-05-08T15:00:00.000Z',  // 이번주
+    projectName: '코딩 학습 트래커',
+    oneLiner: '매일 푼 LeetCode 문제 + 학습 시간을 자동 기록·분석.',
+    description: 'GitHub commit과 LeetCode 활동을 크롤링하여 시간대별·언어별 패턴 시각화. 주간 리포트 PDF 자동 생성.',
+    githubUrl: 'https://github.com/example/code-tracker',
+    demoUrl: '',
+    hasFile: false,
+    evaluations: [
+      { vc: 'VC Vault',  krw: 4000000, note: '월정액 5천원 정도면 수요 있음. 시장은 작음.' },
+      { vc: 'VC Rocket', krw: 15000000, note: '게이미피케이션 추가하면 훅이 생김.' },
+      { vc: 'VC Forge',  krw: 2500000, note: '크롤링 + 차트 — 기술적 난이도 낮음.' }
+    ],
+    avgKrw: 7166667,
+    summary: '개발자 학습 보조 도구로 가능성. 차별화 포인트와 커뮤니티 효과가 관건.'
+  },
+  {
+    evalId: 'demo-5',
+    nickname: '도현',
+    completedAt: '2026-05-09T09:30:00.000Z',  // 이번주 (오늘)
+    projectName: '매일 영어 단어장',
+    oneLiner: '매일 5개 단어를 카톡으로 보내주는 봇.',
+    description: '카카오톡 챗봇 기반 영단어 학습. 사용자가 제출한 단어 + GPT가 추천한 동의어 5개를 매일 아침 발송. 무료 운영.',
+    githubUrl: 'https://github.com/example/word-bot',
+    demoUrl: '',
+    hasFile: false,
+    evaluations: [
+      { vc: 'VC Vault',  krw: 8000,    note: '월정액 1만원 받기도 어려운 수준. 무료 대체재 너무 많음.' },
+      { vc: 'VC Rocket', krw: 30000,   note: '카톡 채널 = 지속성 의문. 학습 데이터 없음.' },
+      { vc: 'VC Forge',  krw: 5000,    note: '단순 cron + API 호출. 누구나 1시간이면 만듦.' }
+    ],
+    avgKrw: 14333,
+    summary: '학습 동기는 좋지만 차별점·해자가 모두 부재. 토이 프로젝트 영역.'
+  },
+  {
+    evalId: 'demo-mj-1',
+    nickname: 'Mj',
+    completedAt: '2026-05-09T08:00:00.000Z',  // 이번주
+    projectName: '바이브 코딩 평가 사이트',
+    oneLiner: '챌린지 멤버 결과물을 가상 VC가 IR 형식으로 평가.',
+    description: '친구들끼리 만든 사이드 프로젝트의 경제 가치를 정량적으로 비교하기 위한 가상 VC 패널 평가 시스템. 챌린지 참여 멤버 5명을 대상으로 개발. 메인 토큰 챌린지 사이트의 평가 sub-tab으로 통합.',
+    githubUrl: 'https://github.com/example/vc-eval',
+    demoUrl: 'https://challenge.example.com',
+    hasFile: false,
+    evaluations: [
+      { vc: 'VC Vault',  krw: 200000,  note: '내부 도구. 외부 매출 가능성 매우 낮음.' },
+      { vc: 'VC Rocket', krw: 3000000, note: '아이디어는 흥미. 실제 시장 검증 안 됨.' },
+      { vc: 'VC Forge',  krw: 800000,  note: 'LLM 프롬프트 엔지니어링 + 폴링 패턴 — 무난.' }
+    ],
+    avgKrw: 1333333,
+    summary: '재미있는 메타 프로젝트. 친구 그룹 한정의 가치이며 외부 확장은 어려움.'
+  }
+];
 
 // ── 포인트 이력 ──

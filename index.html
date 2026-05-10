@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260427a">
+  <link rel="stylesheet" href="style.css?v=20260511b">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -48,6 +48,7 @@
       <nav class="tabs">
         <button class="tab active" data-tab="dashboard">대시보드</button>
         <button class="tab" data-tab="stats">내 분석</button>
+        <button class="tab" data-tab="eval">평가</button>
         <button class="tab" data-tab="fine">벌금</button>
         <button class="tab" data-tab="cert">인증/패치</button>
         <button class="tab admin-only" data-tab="admin">관리자</button>
@@ -96,7 +97,7 @@
                 <button id="btn-daily-next" class="daily-nav-btn">&rarr;</button>
               </div>
             </div>
-            <div class="daily-legend" id="daily-legend">보고 시점 리그 기준으로 계산 · 🔥 = 오늘 활동중</div>
+            <div class="daily-legend" id="daily-legend">보고 시점 리그 기준으로 계산 · 🔥 = 직전 2시간 활동중</div>
             <div class="daily-table-wrapper">
               <table id="daily-table" class="daily-table">
                 <thead><tr id="daily-header"></tr></thead>
@@ -192,6 +193,33 @@
 
             <div class="patch-list">
               <details class="patch-item" open>
+                <summary class="patch-summary">
+                  <span class="patch-version">v3.0</span>
+                  <span class="patch-title">VC 패널 평가 탭 추가 <em class="patch-tag">[BETA]</em></span>
+                  <span class="patch-date">2026-05-11</span>
+                  <span class="patch-arrow">&#9656;</span>
+                </summary>
+                <div class="patch-body">
+                  <h4>📊 새 탭 — VC 패널 평가</h4>
+                  <ul>
+                    <li>가상 VC 3명(<strong>VC Vault · Rocket · Forge</strong>)이 내 프로젝트 가치를 IR 형식으로 평가</li>
+                    <li>자료 제출 → VC가 <strong>6개 질문</strong> → 답변 → <strong>3 VC 금액 · 한줄평 · 평균</strong> 결과</li>
+                    <li>피드에 <strong>주간 / 월간 / 누적</strong> 평가금액 1위 랭킹 표시</li>
+                  </ul>
+
+                  <h4>📝 사용 규칙</h4>
+                  <ul>
+                    <li>제출 한도 <strong>주 1회</strong>, 추정 가치 범위 <strong>5,000원 ~ 3억원</strong></li>
+                    <li>근거 자료: GitHub URL · 데모 URL · 파일(이미지/PDF ≤1.5MB) 중 <strong>1~3개</strong> 필수</li>
+                  </ul>
+
+                  <h4>🚧 BETA 안내</h4>
+                  <ul>
+                    <li>첫 주 베타 운영 — 평가 결과·UI 피드백 환영</li>
+                  </ul>
+                </div>
+              </details>
+              <details class="patch-item">
                 <summary class="patch-summary">
                   <span class="patch-version">v2.1</span>
                   <span class="patch-title">다중 PC 사용량 합산 지원 <em class="patch-tag">[업데이트 선택]</em></span>
@@ -485,6 +513,128 @@
         </div>
       </div>
 
+      <!-- 평가 탭 (VC IR 시뮬레이션) -->
+      <div id="tab-eval" class="tab-content">
+        <div class="eval-container">
+          <div class="eval-hero">
+            <div class="eval-hero-title">VC 패널 평가 <span class="eval-beta-badge">BETA</span></div>
+            <div class="eval-hero-sub">
+              가상 VC 3명이 당신의 바이브코딩 결과물을 IR 형식으로 평가합니다.
+              <br><strong>주 1회</strong>까지 평가받을 수 있습니다. 첫 주는 베타 운영입니다.
+            </div>
+            <div class="eval-vc-personas">
+              <div class="eval-persona"><span class="eval-persona-name">VC Vault</span><span class="eval-persona-tag">보수 엔터프라이즈</span></div>
+              <div class="eval-persona"><span class="eval-persona-name">VC Rocket</span><span class="eval-persona-tag">얼리 그로스</span></div>
+              <div class="eval-persona"><span class="eval-persona-name">VC Forge</span><span class="eval-persona-tag">기술 시드</span></div>
+            </div>
+          </div>
+
+          <!-- Sub-tab 네비게이션 -->
+          <nav class="eval-subtabs">
+            <button class="eval-subtab active" data-eval-subtab="submit">IR 자료 제출</button>
+            <button class="eval-subtab" data-eval-subtab="feed">멤버 평가 피드</button>
+            <button class="eval-subtab" data-eval-subtab="my">내 평가 피드</button>
+          </nav>
+
+          <!-- Sub-tab 1: IR 자료 제출 -->
+          <div class="eval-subcontent active" data-eval-subcontent="submit">
+
+          <!-- 진행 중 IR 패널 (status가 idle이 아닐 때만 표시) -->
+          <div id="eval-progress-panel" class="eval-progress-panel" style="display:none;"></div>
+
+          <!-- Step 1: 입력 폼 -->
+          <div id="eval-step-form" class="eval-step">
+            <h3 class="eval-step-title">1단계 · IR 자료 제출</h3>
+            <div class="eval-form">
+              <label class="eval-field">
+                <span class="eval-label">프로젝트 이름 <em class="eval-req">*</em> <span class="eval-hint">(최대 30자)</span></span>
+                <input type="text" id="eval-project-name" maxlength="30" placeholder="예: 토큰 사용량 추적기">
+              </label>
+              <label class="eval-field">
+                <span class="eval-label">한줄 설명 <em class="eval-req">*</em> <span class="eval-hint">(최대 100자)</span></span>
+                <input type="text" id="eval-one-liner" maxlength="100" placeholder="이 프로젝트가 무엇을 하는지 한 줄로">
+              </label>
+              <label class="eval-field">
+                <span class="eval-label">상세 설명 <em class="eval-req">*</em> <span class="eval-hint">(어떤 문제를 어떻게 푸는지, 최소 30자 / 최대 1000자)</span></span>
+                <textarea id="eval-description" maxlength="1000" rows="6" placeholder="문제·해결 방식·타겟 사용자·차별점·현재 사용자 수 등을 자유롭게"></textarea>
+              </label>
+
+              <div class="eval-evidence-group">
+                <div class="eval-evidence-label">
+                  근거 자료 <em class="eval-req">*</em>
+                  <span class="eval-hint">아래 셋 중 <strong>최소 1개, 최대 3개</strong>를 제출하세요</span>
+                </div>
+                <label class="eval-field eval-field-inline">
+                  <span class="eval-label-mini">GitHub URL</span>
+                  <input type="url" id="eval-github-url" maxlength="200" placeholder="https://github.com/...">
+                </label>
+                <label class="eval-field eval-field-inline">
+                  <span class="eval-label-mini">데모 URL</span>
+                  <input type="url" id="eval-demo-url" maxlength="200" placeholder="https://...">
+                </label>
+                <label class="eval-field eval-field-inline">
+                  <span class="eval-label-mini">파일 첨부 <span class="eval-hint">(이미지·PDF, 최대 1.5MB)</span></span>
+                  <input type="file" id="eval-file-input" accept="image/png,image/jpeg,image/webp,application/pdf">
+                  <div id="eval-file-info" class="eval-file-info" style="display:none;"></div>
+                </label>
+              </div>
+
+              <button id="eval-start-btn" class="eval-btn-primary">VC에게 IR 시작</button>
+              <div id="eval-form-error" class="eval-error" style="display:none;"></div>
+            </div>
+          </div>
+
+          <!-- Step 2: VC 질문 답변 -->
+          <div id="eval-step-questions" class="eval-step" style="display:none;">
+            <h3 class="eval-step-title">2단계 · VC의 후속 질문</h3>
+            <div class="eval-step-sub">VC 3명이 각각 2개씩 질문했습니다. 각 답변은 200자 이내.</div>
+            <div id="eval-questions-list"></div>
+            <div class="eval-questions-actions">
+              <button id="eval-restart-btn" class="eval-btn-secondary">처음부터 다시</button>
+              <button id="eval-submit-btn" class="eval-btn-primary">최종 평가 받기</button>
+            </div>
+            <div id="eval-questions-error" class="eval-error" style="display:none;"></div>
+          </div>
+
+          <!-- Step 3: 결과 -->
+          <div id="eval-step-result" class="eval-step" style="display:none;">
+            <h3 class="eval-step-title">3단계 · 최종 평가</h3>
+            <div id="eval-result-panel"></div>
+            <button id="eval-new-btn" class="eval-btn-secondary">새 평가 시작</button>
+          </div>
+
+          </div><!-- /eval-subcontent submit -->
+
+          <!-- Sub-tab 2: 멤버 평가 피드 -->
+          <div class="eval-subcontent" data-eval-subcontent="feed">
+            <div class="eval-rankings">
+              <div class="eval-ranking-card" data-period="week">
+                <div class="eval-ranking-label">주간 평가금액 1위</div>
+                <div class="eval-ranking-body">—</div>
+              </div>
+              <div class="eval-ranking-card" data-period="month">
+                <div class="eval-ranking-label">월간 평가금액 1위</div>
+                <div class="eval-ranking-body">—</div>
+              </div>
+              <div class="eval-ranking-card" data-period="all">
+                <div class="eval-ranking-label">누적 평가금액 1위</div>
+                <div class="eval-ranking-body">—</div>
+              </div>
+            </div>
+            <div class="eval-step-sub" style="margin-top:16px;">최신순으로 모든 멤버의 평가가 공개됩니다. (BETA · 첫 주 한정)</div>
+            <div id="eval-feed-list"></div>
+            <button id="eval-feed-more" class="eval-btn-secondary" style="display:none;">더 보기</button>
+          </div>
+
+          <!-- Sub-tab 3: 내 평가 피드 -->
+          <div class="eval-subcontent" data-eval-subcontent="my">
+            <div class="eval-step-sub">내가 제출한 IR 평가 기록 (자세한 설명·종합 코멘트 포함)</div>
+            <div id="eval-my-list"></div>
+          </div>
+
+        </div>
+      </div>
+
       <!-- 벌금 탭 -->
       <div id="tab-fine" class="tab-content">
        <div class="fine-container">
@@ -580,6 +730,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260427a"></script>
+  <script src="app.js?v=20260511b"></script>
 </body>
 </html>

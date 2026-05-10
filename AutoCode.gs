@@ -516,12 +516,41 @@ function handleRequest(e) {
     case 'deleteMember': result = handleDeleteMember(params); break;
     case 'setColor':     result = handleSetColor(params); break;
     case 'personalStats': result = handlePersonalStats(params); break;
+    case 'evalStart':    result = handleEvalStart(params); break;
+    case 'evalSubmit':   result = handleEvalSubmit(params); break;
+    case 'evalFeed':     result = handleEvalFeed(params); break;
+    case 'evalStatus':   result = handleEvalStatus(params); break;
     default: result = { success: false, error: '알 수 없는 action: ' + action };
   }
 
   return ContentService
     .createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// 비밀번호를 멤버 시트에 안전하게 저장.
+// Sheets는 순수 숫자 문자열을 자동으로 Number로 변환해 leading zero("01234"→1234),
+// trailing decimal("12.50"→12.5), 16+자리 정밀도를 손실시킨다.
+// 비밀번호 셀을 텍스트 포맷(@)으로 강제해 원문 그대로 저장한다.
+function writeMemberRow_(sheet, nickname, password, isAdmin) {
+  sheet.appendRow([nickname, '', isAdmin, '', LEAGUE_1M, '참여 중', 50000]);
+  var newRow = sheet.getLastRow();
+  sheet.getRange(newRow, 2).setNumberFormat('@').setValue(password);
+}
+
+// 1회용 마이그레이션: 기존 멤버 시트의 비밀번호 컬럼을 텍스트 포맷으로 잠금.
+// 이미 숫자로 손상된(leading zero 잃은) 값은 복구 불가지만, 이후 재저장으로 인한
+// 추가 손상을 방지한다. Apps Script 에디터에서 수동 1회 실행.
+function migrateMemberPasswordsToText() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('멤버');
+  if (!sheet) return 'no member sheet';
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 'no rows';
+  var range = sheet.getRange(2, 2, lastRow - 1, 1);
+  var values = range.getValues().map(function(r) { return [String(r[0])]; });
+  range.setNumberFormat('@');
+  range.setValues(values);
+  return 'migrated ' + (lastRow - 1) + ' rows';
 }
 
 // ── 로그인 (dashboard + personalStats 통합 응답) ──
@@ -570,9 +599,9 @@ function handleRegister(params) {
 
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === nickname) return { success: false, error: '이미 존재하는 닉네임입니다.' };
+    if (String(data[i][0]).trim() === nickname) return { success: false, error: '이미 존재하는 닉네임입니다.' };
   }
-  sheet.appendRow([nickname, password, false, '', LEAGUE_1M, '참여 중', 50000]);
+  writeMemberRow_(sheet, nickname, password, false);
   return { success: true };
 }
 
@@ -589,7 +618,7 @@ function handleInit(params) {
     memberSheet.appendRow(['nickname', 'password', 'isAdmin', 'color', 'league', 'participating', 'deposit']);
   }
   if (memberSheet.getLastRow() > 1) return { success: false, error: '이미 초기화되어 있습니다.' };
-  memberSheet.appendRow([nickname, password, true, '', LEAGUE_1M, '참여 중', 50000]);
+  writeMemberRow_(memberSheet, nickname, password, true);
 
   var recordSheet = ss.getSheetByName('인증기록');
   if (!recordSheet) {
@@ -614,6 +643,8 @@ function handleInit(params) {
     rawSheet = ss.insertSheet('사용량_raw');
     rawSheet.appendRow(RAW_V2_HEADERS_);
   }
+
+  getEvalSheet_();  // 평가 시트 lazy 생성
 
   return { success: true, message: '초기 설정 완료!' };
 }
@@ -1078,6 +1109,29 @@ function handleDashboard(params) {
     topUser = { nickname: topNick, weekScore: topScore, hourly: memberAllHourly[topNick] || null };
   }
 
+  // ── 주간 정산 audit log (벌금 탭의 과거 주차 freeze) ──
+  var settlements = [];
+  var settlementSh = ss.getSheetByName(WEEKLY_SETTLEMENT_SHEET_);
+  if (settlementSh && settlementSh.getLastRow() > 1) {
+    var sVals = settlementSh.getRange(2, 1, settlementSh.getLastRow() - 1, WEEKLY_SETTLEMENT_HEADERS_.length).getValues();
+    for (var si = 0; si < sVals.length; si++) {
+      var sr = sVals[si];
+      if (!sr[0]) continue;
+      settlements.push({
+        nickname: String(sr[0]),
+        week: Number(sr[1]) || 0,
+        year: Number(sr[2]) || 0,
+        status: String(sr[3] || '참여 중'),
+        missCount: Number(sr[4]) || 0,
+        chargedDays: Number(sr[5]) || 0,
+        fineAmount: Number(sr[6]) || 0,
+        depositBefore: Number(sr[7]) || 0,
+        depositAfter: Number(sr[8]) || 0,
+        settledAt: toDateTimeStr(sr[9])
+      });
+    }
+  }
+
   return {
     success: true,
     members: members,
@@ -1087,7 +1141,8 @@ function handleDashboard(params) {
     memberLastActivity: memberLastActivity,
     topUser: topUser,
     memberHourly: memberAllHourly,
-    memberColors: memberColors
+    memberColors: memberColors,
+    settlements: settlements
   };
 }
 
@@ -1355,9 +1410,9 @@ function handleAddMember(params) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('멤버');
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === nickname) return { success: false, error: '이미 존재하는 닉네임입니다.' };
+    if (String(data[i][0]).trim() === nickname) return { success: false, error: '이미 존재하는 닉네임입니다.' };
   }
-  sheet.appendRow([nickname, password, false, '', LEAGUE_1M, '참여 중', 50000]);
+  writeMemberRow_(sheet, nickname, password, false);
   return { success: true };
 }
 
@@ -1734,6 +1789,255 @@ function manualRunDailyLeagueBatch() {
   return '리그 배치 수동 실행 완료';
 }
 
+// ════════════════════════════════════════════════════════
+// 주간 벌금 정산 (cron + 시트 audit log)
+// ════════════════════════════════════════════════════════
+//
+// 동작:
+//   매주 월요일 00:30 KST에 cron이 지난주를 정산:
+//     1) 각 멤버의 그 주 일별 토큰을 사용량/인증기록에서 집계
+//     2) 임계값 비교 → missCount → fineAmount 계산 (FINE_FREE_DAYS=2)
+//     3) 그 시점의 멤버 F열 status를 정산 시트에 freeze (소급 변경 차단)
+//     4) 멤버 G열 deposit에서 fineAmount 자동 차감
+//     5) 정산 시트에 audit row 추가
+//   이미 정산된 (nickname, week, year)는 skip → idempotent.
+//
+// 시트: 주간정산 (lazy 생성)
+//   nickname, week, year, status, missCount, chargedDays, fineAmount,
+//   depositBefore, depositAfter, settledAt
+
+var WEEKLY_SETTLEMENT_SHEET_ = '주간정산';
+var WEEKLY_SETTLEMENT_HEADERS_ = [
+  'nickname', 'week', 'year', 'status', 'missCount', 'chargedDays',
+  'fineAmount', 'depositBefore', 'depositAfter', 'settledAt'
+];
+var FINE_PER_DAY_ = 10000;
+var FINE_FREE_DAYS_ = 2;
+
+function getWeeklySettlementSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(WEEKLY_SETTLEMENT_SHEET_);
+  if (!sh) {
+    sh = ss.insertSheet(WEEKLY_SETTLEMENT_SHEET_);
+    sh.appendRow(WEEKLY_SETTLEMENT_HEADERS_);
+  }
+  return sh;
+}
+
+// 이미 정산된 (nickname, week, year)인지 확인.
+function isAlreadySettled_(settlementRows, nickname, week, year) {
+  for (var i = 0; i < settlementRows.length; i++) {
+    if (String(settlementRows[i][0]).trim() === nickname &&
+        Number(settlementRows[i][1]) === week &&
+        Number(settlementRows[i][2]) === year) return true;
+  }
+  return false;
+}
+
+// 특정 주차(targetWeek, targetYear)의 모든 멤버를 정산.
+// 이미 정산된 멤버는 skip. 정산된 row 수를 반환.
+function runWeeklyFineSettlement_(targetWeek, targetYear) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var memberSheet = ss.getSheetByName('멤버');
+  if (!memberSheet) throw new Error('멤버 시트 없음');
+  var settlementSheet = getWeeklySettlementSheet_();
+
+  // 기존 정산 row 캐시 (idempotency 체크용)
+  var settled = [];
+  if (settlementSheet.getLastRow() >= 2) {
+    settled = settlementSheet.getRange(2, 1, settlementSheet.getLastRow() - 1, 3).getValues();
+  }
+
+  // 그 주차의 7일 날짜 문자열
+  var weekDates = isoWeekDates_(targetWeek, targetYear);  // ['YYYY-MM-DD' x 7]
+
+  // 사용량 시트 로드 (전체 — 작은 시트라 OK)
+  var usageSheet = ss.getSheetByName('사용량');
+  var usageMap = {};  // nickname → { date → score }
+  if (usageSheet && usageSheet.getLastRow() >= 2) {
+    var uVals = usageSheet.getRange(2, 1, usageSheet.getLastRow() - 1, USAGE_V2_HEADERS_.length).getValues();
+    uVals.forEach(function(r) {
+      var nick = String(r[0]).trim();
+      var dateStr = formatDateStr_(r[1]);
+      if (!nick || !dateStr) return;
+      var score = computeWeightedScoreFromRow_(r);
+      if (!usageMap[nick]) usageMap[nick] = {};
+      usageMap[nick][dateStr] = score;
+    });
+  }
+
+  // 인증기록 시트 (리그 정보 추출용)
+  var recordSheet = ss.getSheetByName('인증기록');
+  var leagueMap = {};  // nickname → { date → league }
+  if (recordSheet && recordSheet.getLastRow() >= 2) {
+    var rVals = recordSheet.getRange(2, 1, recordSheet.getLastRow() - 1, 10).getValues();
+    rVals.forEach(function(r) {
+      if (String(r[3]).trim() !== 'session') return;
+      var nick = String(r[0]).trim();
+      var resetsAt = formatDateStr_(r[8]);
+      if (!nick || !resetsAt) return;
+      var league = String(r[9] || '').trim();
+      if (!league) return;
+      if (!leagueMap[nick]) leagueMap[nick] = {};
+      leagueMap[nick][resetsAt] = league;
+    });
+  }
+
+  var members = memberSheet.getDataRange().getValues();
+  var nowStr = new Date().toISOString();
+  var settledCount = 0;
+
+  for (var mi = 1; mi < members.length; mi++) {
+    var nick = String(members[mi][0] || '').trim();
+    if (!nick) continue;
+    var statusRaw = String(members[mi][5] || '참여 중').trim();
+    var depositRaw = members[mi][6];
+    var depositBefore = (depositRaw === '' || depositRaw === null || depositRaw === undefined)
+      ? 50000 : safeInt(depositRaw);
+
+    if (isAlreadySettled_(settled, nick, targetWeek, targetYear)) continue;
+
+    var curLeague = String(members[mi][4] || LEAGUE_1M).trim();
+    if (curLeague !== LEAGUE_10M && curLeague !== LEAGUE_1M) curLeague = LEAGUE_1M;
+
+    // 미달 카운트
+    var missCount = 0;
+    weekDates.forEach(function(dStr) {
+      var tokens = (usageMap[nick] && usageMap[nick][dStr]) || 0;
+      var rec = (leagueMap[nick] && leagueMap[nick][dStr]) || curLeague;
+      var league = (rec === LEAGUE_10M || rec === LEAGUE_1M) ? rec : curLeague;
+      var threshold = (league === LEAGUE_10M) ? 10000000 : 1000000;  // 1pt 임계값
+      if (tokens < threshold) missCount++;
+    });
+
+    // 상태에 따른 fineAmount
+    var chargedDays = 0;
+    var fineAmount = 0;
+    if (statusRaw === '참여 중' || statusRaw === '') {
+      chargedDays = Math.max(0, missCount - FINE_FREE_DAYS_);
+      fineAmount = chargedDays * FINE_PER_DAY_;
+    } // exempt / 참여 안 함 / 기타 → 0
+
+    var depositAfter = Math.max(0, depositBefore - fineAmount);
+
+    // 정산 시트 row 추가 (status freeze)
+    settlementSheet.appendRow([
+      nick, targetWeek, targetYear, statusRaw, missCount, chargedDays,
+      fineAmount, depositBefore, depositAfter, nowStr
+    ]);
+
+    // 멤버 G열 deposit 업데이트
+    if (fineAmount > 0) {
+      memberSheet.getRange(mi + 1, 7).setValue(depositAfter);
+    }
+
+    settledCount++;
+  }
+
+  return settledCount;
+}
+
+// 사용량 시트 row(13열, USAGE_V2_HEADERS_)에서 가중 스코어 계산.
+// inp×1 + out×5 + cc×1.25 + cr×0.1 (Codex 컴포넌트 포함).
+function computeWeightedScoreFromRow_(r) {
+  var inp = safeInt(r[2]);
+  var out = safeInt(r[3]);
+  var cc  = safeInt(r[4]);
+  var cr  = safeInt(r[5]);
+  var cIn = safeInt(r[6]);
+  var cOut = safeInt(r[7]);
+  var cCr = safeInt(r[8]);
+  return Math.round(
+    (inp + cIn) * 1 +
+    (out + cOut) * 5 +
+    cc * 1.25 +
+    (cr + cCr) * 0.1
+  );
+}
+
+// 시트 셀의 날짜 표현(Date 객체 / 문자열 / epoch)을 'YYYY-MM-DD'로 정규화.
+function formatDateStr_(v) {
+  if (!v) return '';
+  if (v instanceof Date) {
+    var y = v.getFullYear(), m = v.getMonth() + 1, d = v.getDate();
+    return y + '-' + ('0' + m).slice(-2) + '-' + ('0' + d).slice(-2);
+  }
+  var s = String(v).trim();
+  if (s.length >= 10) return s.substring(0, 10);
+  return '';
+}
+
+// ISO week + year → 그 주의 7일 (월~일) 'YYYY-MM-DD' 배열.
+function isoWeekDates_(week, year) {
+  // ISO 8601: 1월 4일이 속한 주를 그 해의 1주차로 정의.
+  var jan4 = new Date(Date.UTC(year, 0, 4));
+  var jan4Day = jan4.getUTCDay() || 7;  // 1=Mon, 7=Sun
+  // 1주차 월요일
+  var firstMon = new Date(jan4);
+  firstMon.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
+  // 대상 주의 월요일
+  var targetMon = new Date(firstMon);
+  targetMon.setUTCDate(firstMon.getUTCDate() + (week - 1) * 7);
+  var dates = [];
+  for (var i = 0; i < 7; i++) {
+    var d = new Date(targetMon);
+    d.setUTCDate(targetMon.getUTCDate() + i);
+    var y = d.getUTCFullYear(), m = d.getUTCMonth() + 1, dd = d.getUTCDate();
+    dates.push(y + '-' + ('0' + m).slice(-2) + '-' + ('0' + dd).slice(-2));
+  }
+  return dates;
+}
+
+// Cron 진입점: 어제(=일요일) 기준 ISO 주차를 정산.
+// 매주 월요일 00:30 KST에 실행되도록 트리거 설치.
+function runWeeklyFineSettlementCron_() {
+  // KST 기준 어제
+  var nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  var yesterdayKst = new Date(nowKst);
+  yesterdayKst.setDate(nowKst.getDate() - 1);
+  var iso = isoWeekFromDate_(yesterdayKst);
+  var count = runWeeklyFineSettlement_(iso.week, iso.year);
+  Logger.log('주간 정산 완료: ' + iso.year + '-W' + iso.week + ' / ' + count + '건');
+}
+
+function isoWeekFromDate_(date) {
+  var d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  var dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  var weekNum = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return { week: weekNum, year: d.getUTCFullYear() };
+}
+
+// 주간 정산 cron 트리거 설치 (admin이 1회 실행).
+function installWeeklyFineSettlementTrigger() {
+  var existing = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getHandlerFunction() === 'runWeeklyFineSettlementCron_') {
+      ScriptApp.deleteTrigger(existing[i]);
+    }
+  }
+  ScriptApp.newTrigger('runWeeklyFineSettlementCron_')
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY)
+    .atHour(0)
+    .nearMinute(30)
+    .inTimezone('Asia/Seoul')
+    .create();
+  return '주간 정산 트리거 설치 완료 (매주 월요일 00:30 KST ±15분)';
+}
+
+// 수동 정산 (admin이 특정 주차를 강제 정산할 때).
+function manualRunWeeklyFineSettlement(week, year) {
+  var w = Number(week), y = Number(year);
+  if (!w || !y) {
+    var iso = isoWeekFromDate_(new Date(Date.now() - 24 * 3600 * 1000));  // 어제
+    w = iso.week; y = iso.year;
+  }
+  var count = runWeeklyFineSettlement_(w, y);
+  return '정산 완료: ' + y + '-W' + w + ' / ' + count + '건';
+}
+
 // ──────────────────────────────────────────────
 // v1.0 시트 백업 (Codex 통합 전에 1회 실행)
 // ──────────────────────────────────────────────
@@ -1755,4 +2059,927 @@ function backupSpreadsheetV1_() {
 // Apps Script 에디터에서 직접 실행용 (public wrapper)
 function runBackupV1() {
   return backupSpreadsheetV1_();
+}
+
+// ════════════════════════════════════════════════════════
+// 평가 (VC IR 시뮬레이션) 모듈
+// ════════════════════════════════════════════════════════
+//
+// 흐름:
+//   1) evalStart  - 사용자가 1차 IR 자료 제출 → LLM 호출 1 → VC 6개 질문 반환
+//   2) evalSubmit - 사용자가 6개 답변 제출      → LLM 호출 2 → 3 VC 평가 + 평균 + 종합
+//   3) evalFeed   - 완료된 평가 피드 조회
+//
+// 시트: 평가 (21열, lazy 생성)
+// API 키: PropertiesService.ScriptProperties.ANTHROPIC_API_KEY
+// 모델:   PropertiesService.ScriptProperties.ANTHROPIC_MODEL (기본 claude-sonnet-4-5)
+// 주당 횟수 제한: 2회 (status='completed' 만 카운트)
+
+var EVAL_SHEET_NAME_ = '평가';
+// 23열. status는 인덱스 20, fileId는 인덱스 21, featuresJson은 인덱스 22.
+// status 진행 단계: questions_pending → answering → evaluation_pending → completed
+// featuresJson: Phase 0에서 LLM이 추출한 5차원 분류 (앵커 매칭용)
+var EVAL_HEADERS_ = [
+  'id', 'nickname', 'week', 'year', 'submittedAt', 'completedAt',
+  'projectName', 'oneLiner', 'description', 'githubUrl', 'demoUrl',
+  'qaJson', 'vc1Krw', 'vc1Note', 'vc2Krw', 'vc2Note', 'vc3Krw', 'vc3Note',
+  'avgKrw', 'summary', 'status', 'fileId', 'featuresJson'
+];
+var EVAL_KRW_MIN_ = 5000;
+var EVAL_KRW_MAX_ = 300000000;
+var EVAL_WEEKLY_LIMIT_ = 1;
+var EVAL_FILES_FOLDER_NAME_ = 'VC Eval Files';
+
+var VC_NAMES_ = ['VC Vault', 'VC Rocket', 'VC Forge'];
+
+// ── 부트스트랩 앵커 ──────────────────────────────────────
+// 시스템 캘리브레이션을 위한 6개 기준점. 1만원~2억원 스펙트럼 커버.
+// Phase 2 평가 시 항상 일부가 LLM에 주입되어 "이 정도 프로젝트는 대략 X원" 기준 형성.
+// 시간이 지나며 챌린지 내 실제 평가가 추가 앵커로 합류 (자가 강화).
+var BOOTSTRAP_ANCHORS_ = [
+  {
+    name: '매일 영어 단어 카톡봇',
+    features: { service_type: 'toy', monetization: 'free', target_market: 'individual', tech_complexity: 'low', validation_stage: 'working' },
+    krw: 10000,
+    note: '대체재 다수, 진입장벽 0, 매출 모델 부재. 학습용 사이드 프로젝트 영역.'
+  },
+  {
+    name: '친구 그룹 토큰 사용량 랭킹 사이트',
+    features: { service_type: 'internal_tool', monetization: 'free', target_market: 'friends', tech_complexity: 'medium', validation_stage: 'working' },
+    krw: 370000,
+    note: '폐쇄적 친구 그룹 한정. 외부 시장 가치 제한적이나 내부 동기부여 도구로는 잘 작동.'
+  },
+  {
+    name: '개인 코딩 학습 트래커 (LeetCode + GitHub 자동 집계)',
+    features: { service_type: 'b2c_saas', monetization: 'freemium', target_market: 'individual', tech_complexity: 'medium', validation_stage: 'working' },
+    krw: 7170000,
+    note: '시장은 작지만 명확. 차별화·게이미피케이션 추가하면 PMF 가능. 현재는 잠재력 평가.'
+  },
+  {
+    name: 'AI 회의록 요약기 (50인 회사 1곳 실사용)',
+    features: { service_type: 'b2b_saas', monetization: 'license', target_market: 'company', tech_complexity: 'medium', validation_stage: 'paying_users' },
+    krw: 14000000,
+    note: 'B2B 라이선스 가능성 명확. 1곳 실사용. 카피캣 위험 있으나 매출 가시성 높음.'
+  },
+  {
+    name: '개발자 토큰 사용량 알림 SaaS (월 9,900원, 베타 30명)',
+    features: { service_type: 'b2b_saas', monetization: 'subscription', target_market: 'individual', tech_complexity: 'medium', validation_stage: 'paying_users' },
+    krw: 25000000,
+    note: '월 구독 검증 완료. 30명 유료 베타 = 강한 PMF 신호. 개발자 커뮤니티 입소문 가능.'
+  },
+  {
+    name: '엔터프라이즈 프롬프트 관리 SaaS (ARR 1억+, 5+ 기업 고객)',
+    features: { service_type: 'b2b_saas', monetization: 'subscription', target_market: 'company', tech_complexity: 'high', validation_stage: 'pmf' },
+    krw: 200000000,
+    note: '명확한 ICP, ARR 1억+, 기업 고객 5+, 기술 해자 (audit log·RBAC·on-prem). 본격 SaaS.'
+  }
+];
+
+// admin이 1회 실행 (Apps Script 에디터에서 직접). 키는 깃에 안 담김.
+function setAnthropicKey(key) {
+  PropertiesService.getScriptProperties().setProperty('ANTHROPIC_API_KEY', String(key || '').trim());
+  return 'OK';
+}
+
+function setAnthropicModel(model) {
+  PropertiesService.getScriptProperties().setProperty('ANTHROPIC_MODEL', String(model || '').trim());
+  return 'OK';
+}
+
+function getEvalSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(EVAL_SHEET_NAME_);
+  if (!sh) {
+    sh = ss.insertSheet(EVAL_SHEET_NAME_);
+    sh.appendRow(EVAL_HEADERS_);
+    return sh;
+  }
+  // 기존 시트 마이그레이션: 컬럼 부족 시 헤더 보강
+  var lastCol = sh.getLastColumn();
+  if (lastCol < EVAL_HEADERS_.length) {
+    var missing = EVAL_HEADERS_.slice(lastCol);
+    sh.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+  }
+  return sh;
+}
+
+// 첨부 파일을 저장할 Drive 폴더 (lazy 생성).
+function getEvalFilesFolder_() {
+  var folders = DriveApp.getFoldersByName(EVAL_FILES_FOLDER_NAME_);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(EVAL_FILES_FOLDER_NAME_);
+}
+
+// base64 → Drive 파일 저장. 성공 시 fileId, 실패 시 null.
+function saveEvalFile_(evalId, base64, fileName, mimeType) {
+  if (!base64 || !fileName || !mimeType) return null;
+  try {
+    var bytes = Utilities.base64Decode(base64);
+    var safeName = String(fileName || 'attachment').replace(/[^a-zA-Z0-9._-]/g, '_').substring(0, 80);
+    var blob = Utilities.newBlob(bytes, mimeType, evalId + '_' + safeName);
+    var folder = getEvalFilesFolder_();
+    var file = folder.createFile(blob);
+    return file.getId();
+  } catch (err) {
+    Logger.log('saveEvalFile_ failed: ' + err.message);
+    return null;
+  }
+}
+
+// fileId → { mimeType, base64 } (LLM vision content용). 실패 시 null.
+function getEvalFileBase64_(fileId) {
+  if (!fileId) return null;
+  try {
+    var file = DriveApp.getFileById(fileId);
+    var blob = file.getBlob();
+    return {
+      mimeType: blob.getContentType(),
+      base64: Utilities.base64Encode(blob.getBytes())
+    };
+  } catch (err) {
+    Logger.log('getEvalFileBase64_ failed: ' + err.message);
+    return null;
+  }
+}
+
+// imageData가 image/*면 vision content block으로 감싸 반환, 아니면 단일 텍스트.
+function buildLLMUserContent_(textPrompt, imageData) {
+  if (!imageData) return textPrompt;
+  if (!/^image\/(png|jpeg|gif|webp)$/i.test(imageData.mimeType || '')) return textPrompt;
+  return [
+    { type: 'image', source: { type: 'base64', media_type: imageData.mimeType, data: imageData.base64 } },
+    { type: 'text', text: textPrompt }
+  ];
+}
+
+// 사용자 인증 (login 패턴 동일).
+function authenticateMember_(nickname, password) {
+  nickname = String(nickname || '').trim();
+  password = String(password || '').trim();
+  if (!nickname || !password) return { ok: false, error: '닉네임과 비밀번호가 필요합니다.' };
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('멤버');
+  if (!sheet) return { ok: false, error: '멤버 시트를 찾을 수 없습니다.' };
+
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === nickname && String(data[i][1]).trim() === password) {
+      return { ok: true, nickname: nickname };
+    }
+  }
+  return { ok: false, error: '인증 실패' };
+}
+
+// ISO 8601 주차 (Date → {week, year}).
+function getIsoWeek_(date) {
+  var d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  var dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  var weekNum = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return { week: weekNum, year: d.getUTCFullYear() };
+}
+
+function countCompletedEvalsThisWeek_(nickname) {
+  var sh = getEvalSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) return 0;
+  var iso = getIsoWeek_(new Date());
+  var values = sh.getRange(2, 1, last - 1, EVAL_HEADERS_.length).getValues();
+  var count = 0;
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (String(row[1]).trim() === nickname &&
+        Number(row[2]) === iso.week &&
+        Number(row[3]) === iso.year &&
+        String(row[20]).trim() === 'completed') {
+      count++;
+    }
+  }
+  return count;
+}
+
+// LLM이 코드펜스/잡담을 섞어 보내도 JSON만 추출.
+function parseLLMJson_(text) {
+  if (!text) return null;
+  var s = String(text).trim();
+  // ```json ... ``` 또는 ``` ... ``` 제거
+  s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+  // 첫 { 부터 마지막 } 까지만
+  var first = s.indexOf('{');
+  var last = s.lastIndexOf('}');
+  if (first < 0 || last < 0 || last <= first) return null;
+  var jsonText = s.substring(first, last + 1);
+  try {
+    return JSON.parse(jsonText);
+  } catch (err) {
+    return null;
+  }
+}
+
+// 5,000 ~ 300,000,000 범위로 강제. 잘못된 숫자는 5,000.
+function clampKrw_(v) {
+  var n = Number(v);
+  if (!isFinite(n) || isNaN(n)) return EVAL_KRW_MIN_;
+  n = Math.round(n);
+  if (n < EVAL_KRW_MIN_) return EVAL_KRW_MIN_;
+  if (n > EVAL_KRW_MAX_) return EVAL_KRW_MAX_;
+  return n;
+}
+
+// Anthropic Messages API 호출. 응답 텍스트(첫 content[0].text) 반환.
+// userPrompt는 string 또는 content block array (vision용) 모두 가능.
+// temperature: 미지정 시 0.7. 분류 작업은 0.0, 평가는 0.3 권장.
+function callAnthropic_(systemPrompt, userPrompt, maxTokens, temperature) {
+  var props = PropertiesService.getScriptProperties();
+  var apiKey = props.getProperty('ANTHROPIC_API_KEY');
+  if (!apiKey) throw new Error('Anthropic API 키가 설정되지 않았습니다. (admin: setAnthropicKey 실행 필요)');
+  var model = props.getProperty('ANTHROPIC_MODEL') || 'claude-sonnet-4-5';
+
+  var payload = {
+    model: model,
+    max_tokens: maxTokens || 1000,
+    temperature: (typeof temperature === 'number') ? temperature : 0.7,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }]
+  };
+
+  var resp;
+  try {
+    resp = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    throw new Error('Anthropic 호출 실패: ' + err.message);
+  }
+
+  var code = resp.getResponseCode();
+  var body = resp.getContentText();
+  if (code < 200 || code >= 300) {
+    throw new Error('Anthropic 오류 (' + code + '): ' + body.substring(0, 300));
+  }
+  var json;
+  try { json = JSON.parse(body); } catch (e) { throw new Error('Anthropic 응답 파싱 실패'); }
+  if (!json.content || !json.content[0] || !json.content[0].text) {
+    throw new Error('Anthropic 응답에 content가 없습니다.');
+  }
+  return json.content[0].text;
+}
+
+// 입력 길이 제한 + 안전한 트림.
+function clampStr_(v, max) {
+  var s = String(v == null ? '' : v).trim();
+  if (s.length > max) s = s.substring(0, max);
+  return s;
+}
+
+// ── Phase 0: 특성 추출 (앵커 매칭용 5차원 분류) ──
+// LLM에게 프로젝트의 본질을 정해진 라벨로만 분류하게 함 (deterministic, temp=0).
+// 실패 시 null 반환 → 평가는 부트스트랩 앵커만으로 계속 진행 (gracefully degrade).
+function extractFeatures_(projectName, oneLiner, description, githubUrl, demoUrl) {
+  var systemPrompt =
+    '이 프로젝트의 본질을 분류하세요. 차원별 정해진 enum 값만 사용:\n\n' +
+    'service_type: toy | internal_tool | b2c_saas | b2b_saas | marketplace | platform | content\n' +
+    '  - toy: 학습용·개인 사이드 프로젝트\n' +
+    '  - internal_tool: 친구·팀 내부 도구 (외부 매출 가능성 거의 없음)\n' +
+    '  - b2c_saas: 일반 소비자 대상 SaaS\n' +
+    '  - b2b_saas: 기업·전문가 대상 SaaS\n' +
+    '  - marketplace: 양면 시장\n' +
+    '  - platform: 플랫폼/인프라\n' +
+    '  - content: 콘텐츠·미디어\n\n' +
+    'monetization: free | ad | subscription | transaction | license | freemium\n\n' +
+    'target_market: individual | friends | team | company | industry | mass\n' +
+    '  - individual: 개인 사용자 (대중 X)\n' +
+    '  - friends: 폐쇄적 친구 그룹\n' +
+    '  - team: 5~50인 팀\n' +
+    '  - company: 회사 단위\n' +
+    '  - industry: 특정 산업·전문 도메인\n' +
+    '  - mass: 일반 대중\n\n' +
+    'tech_complexity: low | medium | high\n' +
+    '  - low: 누구나 1~2시간이면 만듦 (cron + API call 등)\n' +
+    '  - medium: 며칠~몇 주 작업, 일반 풀스택\n' +
+    '  - high: 진짜 기술적 깊이 (분산 시스템·ML·인프라 등)\n\n' +
+    'validation_stage: idea | working | beta_users | paying_users | pmf\n' +
+    '  - idea: 아이디어만\n' +
+    '  - working: 동작은 함\n' +
+    '  - beta_users: 무료 베타 사용자 있음\n' +
+    '  - paying_users: 유료 사용자 1명+\n' +
+    '  - pmf: 명확한 PMF 신호 (반복 구매·NPS 높음·ARR 가시성)\n\n' +
+    '반드시 JSON으로만 응답:\n' +
+    '{"service_type":"...","monetization":"...","target_market":"...","tech_complexity":"...","validation_stage":"..."}';
+
+  var userPrompt =
+    '프로젝트명: ' + projectName + '\n' +
+    '한줄 설명: ' + oneLiner + '\n' +
+    '상세 설명: ' + description + '\n' +
+    'GitHub: ' + (githubUrl || '(미제출)') + '\n' +
+    '데모: ' + (demoUrl || '(미제출)');
+
+  try {
+    var raw = callAnthropic_(systemPrompt, userPrompt, 200, 0.0);
+    var parsed = parseLLMJson_(raw);
+    if (!parsed) return null;
+    return {
+      service_type: String(parsed.service_type || '').trim(),
+      monetization: String(parsed.monetization || '').trim(),
+      target_market: String(parsed.target_market || '').trim(),
+      tech_complexity: String(parsed.tech_complexity || '').trim(),
+      validation_stage: String(parsed.validation_stage || '').trim()
+    };
+  } catch (err) {
+    Logger.log('extractFeatures_ failed: ' + err.message);
+    return null;
+  }
+}
+
+// ── 앵커 검색 + 유사도 ──
+// service_type 매칭이 가장 큰 가중치 (×3), 나머지 차원은 ×1~2.
+function scoreFeatureSimilarity_(a, b) {
+  if (!a || !b) return 0;
+  var s = 0;
+  if (a.service_type && a.service_type === b.service_type) s += 3;
+  if (a.monetization && a.monetization === b.monetization) s += 2;
+  if (a.target_market && a.target_market === b.target_market) s += 1;
+  if (a.tech_complexity && a.tech_complexity === b.tech_complexity) s += 1;
+  if (a.validation_stage && a.validation_stage === b.validation_stage) s += 1;
+  return s;
+}
+
+// 새 평가에 적용할 앵커 셋트 반환.
+// 우선순위:
+//   1) 챌린지 내 완료된 같은 service_type 평가 — 상위 유사도 3개
+//   2) 부트스트랩 앵커 — 같은 service_type 우선 + 가치 spread 보장 위해 다른 티어 포함
+function getRelevantAnchors_(features, currentEvalId) {
+  var realAnchors = [];
+  try {
+    var sh = getEvalSheet_();
+    var last = sh.getLastRow();
+    if (last >= 2 && features) {
+      var values = sh.getRange(2, 1, last - 1, EVAL_HEADERS_.length).getValues();
+      var scored = [];
+      for (var i = 0; i < values.length; i++) {
+        var row = values[i];
+        if (String(row[0]) === currentEvalId) continue;  // 자기 자신 제외
+        if (String(row[20]).trim() !== 'completed') continue;
+        var fJson = String(row[22] || '');
+        if (!fJson) continue;
+        var rowFeat = null;
+        try { rowFeat = JSON.parse(fJson); } catch (e) { continue; }
+        var sc = scoreFeatureSimilarity_(features, rowFeat);
+        if (sc >= 3) {  // 최소 service_type 매칭 필수
+          scored.push({
+            score: sc,
+            name: String(row[6]),
+            features: rowFeat,
+            krw: Number(row[18]) || 0,
+            note: clampStr_(String(row[19]), 120)
+          });
+        }
+      }
+      scored.sort(function(a, b) { return b.score - a.score; });
+      realAnchors = scored.slice(0, 3);
+    }
+  } catch (err) {
+    Logger.log('getRelevantAnchors_ real read failed: ' + err.message);
+  }
+
+  // 부트스트랩: 같은 service_type 우선, 부족하면 가치 분포 spread 위해 다른 티어 추가
+  var sameType = [], otherType = [];
+  BOOTSTRAP_ANCHORS_.forEach(function(a) {
+    if (features && features.service_type && a.features.service_type === features.service_type) sameType.push(a);
+    else otherType.push(a);
+  });
+  // 다른 티어를 가치 차이가 큰 순으로 정렬해 일부 포함
+  otherType.sort(function(a, b) { return b.krw - a.krw; });
+  var bootAnchors;
+  if (sameType.length >= 2) {
+    // 같은 타입이 충분: 같은 타입 2 + 가치 spread 위해 극단(저/고) 1개씩
+    bootAnchors = sameType.slice(0, 2);
+    if (otherType.length > 0) bootAnchors.push(otherType[0]);                                  // 가장 비싼
+    if (otherType.length > 1) bootAnchors.push(otherType[otherType.length - 1]);              // 가장 싼
+  } else {
+    // 같은 타입 부족: 모든 부트스트랩 6개 사용 (전체 스펙트럼 캘리브레이션)
+    bootAnchors = sameType.concat(otherType);
+  }
+
+  return { real: realAnchors, bootstrap: bootAnchors };
+}
+
+function featuresInline_(f) {
+  if (!f) return '(미분류)';
+  return [f.service_type, f.monetization, f.target_market, f.tech_complexity, f.validation_stage]
+    .filter(function(x) { return !!x; }).join(' / ');
+}
+
+function formatAnchorsForPrompt_(anchorsObj) {
+  var lines = [];
+  var idx = 1;
+
+  if (anchorsObj.real && anchorsObj.real.length > 0) {
+    lines.push('▼ 챌린지 내 평가된 유사 프로젝트 (실제 데이터)');
+    anchorsObj.real.forEach(function(a) {
+      lines.push('[앵커 #' + idx + '] ' + a.name);
+      lines.push('  특성: ' + featuresInline_(a.features));
+      lines.push('  평가: ' + a.krw.toLocaleString('ko-KR') + '원');
+      lines.push('  근거: ' + a.note);
+      idx++;
+    });
+    lines.push('');
+  }
+
+  lines.push('▼ 시스템 캘리브레이션 앵커 (가치 스펙트럼 기준점)');
+  anchorsObj.bootstrap.forEach(function(a) {
+    lines.push('[앵커 #' + idx + '] ' + a.name);
+    lines.push('  특성: ' + featuresInline_(a.features));
+    lines.push('  기준 가치: ' + a.krw.toLocaleString('ko-KR') + '원');
+    lines.push('  근거: ' + a.note);
+    idx++;
+  });
+
+  return lines.join('\n');
+}
+
+// ── evalStart ─────────────────────────────────────
+// 흐름:
+//   1) 검증 + rate limit
+//   2) 첨부 파일 Drive 저장
+//   3) 시트 row 삽입 (status='questions_pending')
+//   4) LLM 호출 (이미지면 vision 포함)
+//   5) row 업데이트: qaJson(빈 답변), status='answering'
+//   6) 응답 반환
+//
+// 클라이언트가 fetch를 await하지 않더라도 서버는 끝까지 처리하므로,
+// 클라이언트가 도중에 reload해도 evalStatus 폴링으로 결과 회수 가능.
+function handleEvalStart(params) {
+  var auth = authenticateMember_(params.nickname, params.password);
+  if (!auth.ok) return { success: false, error: auth.error };
+  var nickname = auth.nickname;
+
+  var projectName = clampStr_(params.projectName, 30);
+  var oneLiner    = clampStr_(params.oneLiner, 100);
+  var description = clampStr_(params.description, 1000);
+  var githubUrl   = clampStr_(params.githubUrl, 200);
+  var demoUrl     = clampStr_(params.demoUrl, 200);
+  var fileBase64  = String(params.fileBase64 || '');
+  var fileName    = clampStr_(params.fileName, 100);
+  var fileType    = clampStr_(params.fileType, 80);
+  var hasFile     = !!(fileBase64 && fileName && fileType);
+
+  if (!projectName || !oneLiner || !description) {
+    return { success: false, error: '프로젝트명, 한줄 설명, 상세 설명은 필수입니다.' };
+  }
+  if (description.length < 30) {
+    return { success: false, error: '상세 설명은 최소 30자 이상 작성해주세요.' };
+  }
+  // GitHub URL / 데모 URL / 파일 셋 중 최소 1개는 필수
+  if (!githubUrl && !demoUrl && !hasFile) {
+    return { success: false, error: 'GitHub URL · 데모 URL · 파일 첨부 중 최소 한 가지는 제출해야 합니다.' };
+  }
+
+  var weekCount = countCompletedEvalsThisWeek_(nickname);
+  if (weekCount >= EVAL_WEEKLY_LIMIT_) {
+    return { success: false, error: '이번 주 평가 횟수(' + EVAL_WEEKLY_LIMIT_ + '회)를 모두 사용했습니다.' };
+  }
+
+  // 1단계: row 먼저 삽입 (status=questions_pending)
+  var evalId = Utilities.getUuid();
+  var iso = getIsoWeek_(new Date());
+  var nowIso = new Date().toISOString();
+  var sh = getEvalSheet_();
+
+  var fileId = '';
+  if (hasFile) {
+    fileId = saveEvalFile_(evalId, fileBase64, fileName, fileType) || '';
+  }
+
+  var row = new Array(EVAL_HEADERS_.length);
+  for (var k = 0; k < row.length; k++) row[k] = '';
+  row[0] = evalId;
+  row[1] = nickname;
+  row[2] = iso.week;
+  row[3] = iso.year;
+  row[4] = nowIso;
+  row[6] = projectName;
+  row[7] = oneLiner;
+  row[8] = description;
+  row[9] = githubUrl;
+  row[10] = demoUrl;
+  row[20] = 'questions_pending';
+  row[21] = fileId;
+  sh.appendRow(row);
+  var insertedRowNum = sh.getLastRow();
+
+  // 1.5단계: Phase 0 — 특성 추출 (앵커 매칭용 5차원 분류)
+  // 실패해도 평가는 계속 진행 (gracefully degrade — 부트스트랩 앵커만 사용)
+  var features = extractFeatures_(projectName, oneLiner, description, githubUrl, demoUrl);
+  if (features) {
+    sh.getRange(insertedRowNum, 23).setValue(JSON.stringify(features));  // featuresJson (column W = 23, 1-indexed)
+  }
+
+  // 2단계: LLM 호출 (vision 가능)
+  var fileLabel = hasFile ? ('첨부: ' + fileName + ' (' + fileType + (/^image\//i.test(fileType) ? ', VC가 직접 확인합니다' : '') + ')') : '(첨부 없음)';
+
+  var systemPrompt =
+    '당신은 한국 VC 패널입니다. 멤버는 3명이며 각자의 시각이 다릅니다:\n\n' +
+    '1. VC Vault (보수 엔터프라이즈): 매출 모델, 유료 전환, 운영 비용 중시. 토이 프로젝트는 박하게.\n' +
+    '2. VC Rocket (얼리 그로스): 시장 잠재력, 바이럴, UX 중시. PMF 보이면 후하게.\n' +
+    '3. VC Forge (기술 시드): 코드 품질, 엔지니어링 깊이, 기술 해자 중시. 클론은 박하게.\n\n' +
+    '각 VC가 IR 후속 질문 2개씩(총 6개)을 작성합니다.\n' +
+    '- 질문은 평가에 결정적인 정보를 끌어낼 것\n' +
+    '- 각 VC의 시각이 명확히 드러나야 함\n' +
+    '- 한 질문당 30자 이내 (간결하게)\n\n' +
+    '반드시 JSON으로만 응답 (다른 텍스트 금지):\n' +
+    '{"questions":[{"vc":"VC Vault","q":"..."},{"vc":"VC Vault","q":"..."},{"vc":"VC Rocket","q":"..."},{"vc":"VC Rocket","q":"..."},{"vc":"VC Forge","q":"..."},{"vc":"VC Forge","q":"..."}]}';
+
+  var userText =
+    '프로젝트명: ' + projectName + '\n' +
+    '한줄 설명: ' + oneLiner + '\n' +
+    '상세 설명: ' + description + '\n' +
+    'GitHub: ' + (githubUrl || '(미제출)') + '\n' +
+    '데모: ' + (demoUrl || '(미제출)') + '\n' +
+    fileLabel;
+
+  var imageData = fileId ? getEvalFileBase64_(fileId) : null;
+  var userContent = buildLLMUserContent_(userText, imageData);
+
+  var rawText;
+  try {
+    rawText = callAnthropic_(systemPrompt, userContent, 600);
+  } catch (err) {
+    // LLM 실패 → row를 abandoned 처리하고 에러 반환
+    sh.getRange(insertedRowNum, 21).setValue('abandoned');
+    return { success: false, error: err.message };
+  }
+
+  var parsed = parseLLMJson_(rawText);
+  if (!parsed || !parsed.questions || !parsed.questions.length) {
+    sh.getRange(insertedRowNum, 21).setValue('abandoned');
+    return { success: false, error: 'VC 질문 생성에 실패했습니다. 다시 시도해주세요.' };
+  }
+
+  // 질문 정규화 (vc 이름 정확하지 않으면 라운드로빈)
+  var questions = [];
+  for (var i = 0; i < parsed.questions.length && questions.length < 6; i++) {
+    var q = parsed.questions[i] || {};
+    var vc = String(q.vc || '').trim();
+    if (VC_NAMES_.indexOf(vc) < 0) vc = VC_NAMES_[Math.floor(questions.length / 2)];
+    var qText = clampStr_(q.q || q.question || '', 80);
+    if (!qText) continue;
+    questions.push({ vc: vc, question: qText });
+  }
+  if (questions.length < 6) {
+    sh.getRange(insertedRowNum, 21).setValue('abandoned');
+    return { success: false, error: 'VC 질문이 부족합니다. 다시 시도해주세요.' };
+  }
+
+  // 3단계: 시트에 questions 저장 + status=answering
+  var qaSeed = questions.map(function(q) { return { vc: q.vc, question: q.question, answer: '' }; });
+  sh.getRange(insertedRowNum, 12).setValue(JSON.stringify(qaSeed)); // qaJson (column L = 12, 1-indexed)
+  sh.getRange(insertedRowNum, 21).setValue('answering');             // status (column U = 21)
+
+  return {
+    success: true,
+    evalId: evalId,
+    status: 'answering',
+    questions: questions
+  };
+}
+
+// ── evalSubmit ────────────────────────────────────
+// 흐름:
+//   1) 검증, row 찾기
+//   2) qaJson에 답변 저장 + status='evaluation_pending' (즉시 반영)
+//   3) LLM 호출 (vision 포함)
+//   4) row 업데이트: 평가 결과 + status='completed'
+//   5) 응답 반환
+//
+// 클라이언트가 fetch를 await하지 않더라도 evalStatus 폴링으로 결과 회수 가능.
+function handleEvalSubmit(params) {
+  var auth = authenticateMember_(params.nickname, params.password);
+  if (!auth.ok) return { success: false, error: auth.error };
+  var nickname = auth.nickname;
+
+  var evalId = String(params.evalId || '').trim();
+  if (!evalId) return { success: false, error: 'evalId가 필요합니다.' };
+
+  var answers = Array.isArray(params.answers) ? params.answers : [];
+  if (answers.length < 6) return { success: false, error: '6개 답변이 모두 필요합니다.' };
+
+  // 시트에서 row 찾기
+  var sh = getEvalSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) return { success: false, error: '평가 기록이 없습니다.' };
+  var values = sh.getRange(2, 1, last - 1, EVAL_HEADERS_.length).getValues();
+  var rowIdx = -1;
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0]) === evalId) { rowIdx = i; break; }
+  }
+  if (rowIdx < 0) return { success: false, error: '평가를 찾을 수 없습니다.' };
+  var row = values[rowIdx];
+  if (String(row[1]).trim() !== nickname) return { success: false, error: '본인 평가만 제출할 수 있습니다.' };
+  var curStatus = String(row[20]).trim();
+  if (curStatus === 'completed') return { success: false, error: '이미 완료된 평가입니다.' };
+  if (curStatus === 'evaluation_pending') return { success: false, error: '이미 평가가 진행 중입니다. 잠시 후 다시 확인해주세요.' };
+  if (curStatus !== 'answering') return { success: false, error: '답변을 받을 수 있는 단계가 아닙니다. (현재: ' + curStatus + ')' };
+
+  var projectName = String(row[6]);
+  var oneLiner    = String(row[7]);
+  var description = String(row[8]);
+  var githubUrl   = String(row[9]);
+  var demoUrl     = String(row[10]);
+  var fileId      = String(row[21] || '');
+
+  // Q&A 정규화
+  var qa = [];
+  for (var j = 0; j < Math.min(answers.length, 6); j++) {
+    var a = answers[j] || {};
+    var vc = VC_NAMES_.indexOf(String(a.vc || '')) >= 0 ? a.vc : VC_NAMES_[Math.floor(j / 2)];
+    qa.push({
+      vc: vc,
+      question: clampStr_(a.question, 80),
+      answer: clampStr_(a.answer, 200)
+    });
+  }
+
+  // 즉시 status='evaluation_pending'로 표시 (폴링 클라이언트가 진행 상태를 볼 수 있도록)
+  var sheetRow = rowIdx + 2;  // 1-indexed + header
+  sh.getRange(sheetRow, 12).setValue(JSON.stringify(qa)); // qaJson
+  sh.getRange(sheetRow, 21).setValue('evaluation_pending');
+  SpreadsheetApp.flush();
+
+  // 특성 + 앵커 로딩 (Phase 0 결과 활용)
+  var featuresJsonRaw = String(row[22] || '');
+  var features = null;
+  try { features = JSON.parse(featuresJsonRaw); } catch (e) { features = null; }
+  var anchors = getRelevantAnchors_(features, evalId);
+  var anchorsText = formatAnchorsForPrompt_(anchors);
+
+  var systemPrompt =
+    '당신은 한국 VC 패널 VC Vault / VC Rocket / VC Forge입니다.\n\n' +
+    '페르소나 (반드시 차별화하여 평가):\n' +
+    '- VC Vault (보수 엔터프라이즈): 매출 모델·유료 전환·운영 비용 중시. 같은 앵커 보고도 가장 박하게 평가.\n' +
+    '- VC Rocket (얼리 그로스): 시장 잠재력·바이럴·UX 중시. PMF 보이면 가장 후하게 평가.\n' +
+    '- VC Forge (기술 시드): 코드 품질·엔지니어링 깊이·기술 해자 중시. 클론은 박하게, 진짜 기술은 후하게.\n\n' +
+    '═══════════════════════════════════════\n' +
+    '★ 평가 핵심 원칙 — 앵커 기반 비교 평가 ★\n' +
+    '═══════════════════════════════════════\n\n' +
+    '아래 앵커들은 이 챌린지의 평가 기준점입니다. 새 프로젝트는 반드시 이 앵커들과 비교하여 정량적 위치를 결정하세요.\n\n' +
+    anchorsText + '\n\n' +
+    '═══════════════════════════════════════\n' +
+    '★ 앵커 활용 규칙 (엄격 준수) ★\n' +
+    '═══════════════════════════════════════\n' +
+    '1. 새 프로젝트의 특성과 가장 유사한 앵커를 1~2개 명시적으로 식별하세요.\n' +
+    '2. 그 앵커 대비 새 프로젝트의 본질적 우열을 판단:\n' +
+    '   - 본질적으로 더 좋다면: 앵커 가치 +20% ~ +200% 범위\n' +
+    '   - 본질적으로 비슷하지만 작은 차이가 있다면: ±5% ~ ±20%\n' +
+    '   - 본질적으로 나쁘다면: -20% ~ -80%\n' +
+    '3. 절대 금지: 앵커와 동일 KRW 부여. 미묘한 차이라도 가격에 반영하세요.\n' +
+    '4. 절대 금지: 모든 VC가 동일 KRW. 페르소나에 따라 명확히 다르게 평가 (보통 VC 간 ±20%~50% 차이).\n' +
+    '5. note에는 어떤 앵커 대비 어떻게(±몇%, 어떤 본질적 차이) 평가했는지 명시.\n\n' +
+    '═══════════════════════════════════════\n' +
+    '★ 절대 상한 ★\n' +
+    '═══════════════════════════════════════\n' +
+    '- 5,000원 이상 ~ 300,000,000원 이하 정수만 가능. 위반 절대 금지.\n' +
+    '- note는 60자 이내. 앵커 참조 명시.\n\n' +
+    '═══════════════════════════════════════\n' +
+    '★ 응답 형식 (JSON만, 다른 텍스트 금지) ★\n' +
+    '═══════════════════════════════════════\n' +
+    '{\n' +
+    ' "evaluations":[\n' +
+    '   {"vc":"VC Vault","krw":<int>,"anchor_ref":"앵커 #N (이름)","note":"앵커 #N 대비 [±X%]. <차별점/약점>"},\n' +
+    '   {"vc":"VC Rocket","krw":<int>,"anchor_ref":"앵커 #N (이름)","note":"..."},\n' +
+    '   {"vc":"VC Forge","krw":<int>,"anchor_ref":"앵커 #N (이름)","note":"..."}\n' +
+    ' ],\n' +
+    ' "summary":"<3 VC의 결론과 차이를 종합한 1~2문장, 120자 이내>"\n' +
+    '}';
+
+  var userText = '[1차 자료]\n' +
+    '프로젝트명: ' + projectName + '\n' +
+    '한줄 설명: ' + oneLiner + '\n' +
+    '상세 설명: ' + description + '\n' +
+    'GitHub: ' + (githubUrl || '(미제출)') + '\n' +
+    '데모: ' + (demoUrl || '(미제출)') + '\n' +
+    (fileId ? '첨부 파일: 있음 (image면 직접 확인)\n' : '첨부 파일: 없음\n') +
+    '\n[추출된 특성]\n' + featuresInline_(features) + '\n' +
+    '\n[Q&A]\n';
+  for (var q = 0; q < qa.length; q++) {
+    userText += qa[q].vc + ' Q: ' + qa[q].question + '\nA: ' + qa[q].answer + '\n';
+  }
+
+  var imageData2 = fileId ? getEvalFileBase64_(fileId) : null;
+  var userContent2 = buildLLMUserContent_(userText, imageData2);
+
+  var rawText;
+  try {
+    // temperature 0.3: 일관성 우선 (앵커 기반 평가의 안정성 확보)
+    rawText = callAnthropic_(systemPrompt, userContent2, 1500, 0.3);
+  } catch (err) {
+    // LLM 실패 → 답변 단계로 되돌림 (사용자가 다시 시도 가능)
+    sh.getRange(sheetRow, 21).setValue('answering');
+    return { success: false, error: err.message };
+  }
+
+  var parsed = parseLLMJson_(rawText);
+  if (!parsed || !Array.isArray(parsed.evaluations) || parsed.evaluations.length < 3) {
+    sh.getRange(sheetRow, 21).setValue('answering');
+    return { success: false, error: 'VC 평가 생성에 실패했습니다. 다시 시도해주세요.' };
+  }
+
+  // VC 이름 매핑 (순서 보장)
+  function findEval(name) {
+    for (var idx = 0; idx < parsed.evaluations.length; idx++) {
+      if (String(parsed.evaluations[idx].vc || '').trim() === name) return parsed.evaluations[idx];
+    }
+    return parsed.evaluations[0];
+  }
+  var eVault  = findEval('VC Vault');
+  var eRocket = findEval('VC Rocket');
+  var eForge  = findEval('VC Forge');
+
+  var k1 = clampKrw_(eVault && eVault.krw);
+  var k2 = clampKrw_(eRocket && eRocket.krw);
+  var k3 = clampKrw_(eForge && eForge.krw);
+  var n1 = clampStr_(eVault && eVault.note, 100);
+  var n2 = clampStr_(eRocket && eRocket.note, 100);
+  var n3 = clampStr_(eForge && eForge.note, 100);
+  var avg = Math.round((k1 + k2 + k3) / 3);
+  var summary = clampStr_(parsed.summary, 200);
+
+  // 시트 row 업데이트 (qaJson은 이미 위에서 저장됨)
+  var nowIso = new Date().toISOString();
+  sh.getRange(sheetRow, 6).setValue(nowIso);              // completedAt
+  sh.getRange(sheetRow, 13).setValue(k1);
+  sh.getRange(sheetRow, 14).setValue(n1);
+  sh.getRange(sheetRow, 15).setValue(k2);
+  sh.getRange(sheetRow, 16).setValue(n2);
+  sh.getRange(sheetRow, 17).setValue(k3);
+  sh.getRange(sheetRow, 18).setValue(n3);
+  sh.getRange(sheetRow, 19).setValue(avg);
+  sh.getRange(sheetRow, 20).setValue(summary);
+  sh.getRange(sheetRow, 21).setValue('completed');
+
+  return {
+    success: true,
+    result: {
+      evaluations: [
+        { vc: 'VC Vault',  krw: k1, note: n1 },
+        { vc: 'VC Rocket', krw: k2, note: n2 },
+        { vc: 'VC Forge',  krw: k3, note: n3 }
+      ],
+      avgKrw: avg,
+      summary: summary
+    }
+  };
+}
+
+// ── evalFeed ──────────────────────────────────────
+function handleEvalFeed(params) {
+  var auth = authenticateMember_(params.nickname, params.password);
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  var offset = Math.max(0, parseInt(params.offset, 10) || 0);
+  var limit = Math.max(1, Math.min(50, parseInt(params.limit, 10) || 20));
+
+  var sh = getEvalSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) return { success: true, items: [], total: 0, hasMore: false };
+
+  var values = sh.getRange(2, 1, last - 1, EVAL_HEADERS_.length).getValues();
+  var completed = [];
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][20]).trim() === 'completed') completed.push(values[i]);
+  }
+  // completedAt(인덱스 5) DESC
+  completed.sort(function(a, b) {
+    return String(b[5]).localeCompare(String(a[5]));
+  });
+
+  var total = completed.length;
+  var slice = completed.slice(offset, offset + limit);
+  var items = slice.map(function(r) {
+    return {
+      evalId:      String(r[0]),
+      nickname:    String(r[1]),
+      completedAt: String(r[5]),
+      projectName: String(r[6]),
+      oneLiner:    String(r[7]),
+      description: String(r[8]),
+      githubUrl:   String(r[9]),
+      demoUrl:     String(r[10]),
+      hasFile:     !!String(r[21] || ''),
+      evaluations: [
+        { vc: 'VC Vault',  krw: Number(r[12]) || 0, note: String(r[13]) },
+        { vc: 'VC Rocket', krw: Number(r[14]) || 0, note: String(r[15]) },
+        { vc: 'VC Forge',  krw: Number(r[16]) || 0, note: String(r[17]) }
+      ],
+      avgKrw:  Number(r[18]) || 0,
+      summary: String(r[19])
+    };
+  });
+
+  // ── 랭킹 계산 (주간/월간/누적, 멤버별 avgKrw 합계 1위) ──
+  var now = new Date();
+  var iso = getIsoWeek_(now);
+  var monthKey = now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2);
+  var sums = { week: {}, month: {}, all: {} };
+  completed.forEach(function(r) {
+    var nick = String(r[1]).trim();
+    var krw = Number(r[18]) || 0;
+    var compAt = String(r[5]);
+    sums.all[nick] = (sums.all[nick] || 0) + krw;
+    if (compAt.length >= 7 && compAt.substring(0, 7) === monthKey) {
+      sums.month[nick] = (sums.month[nick] || 0) + krw;
+    }
+    var rWeekRaw = Number(r[2]); var rYearRaw = Number(r[3]);
+    if (rWeekRaw === iso.week && rYearRaw === iso.year) {
+      sums.week[nick] = (sums.week[nick] || 0) + krw;
+    }
+  });
+  function topMember_(map) {
+    var best = null;
+    Object.keys(map).forEach(function(nick) {
+      if (!best || map[nick] > best.krw) best = { nickname: nick, krw: map[nick] };
+    });
+    return best;
+  }
+  var rankings = {
+    week:  topMember_(sums.week),
+    month: topMember_(sums.month),
+    all:   topMember_(sums.all)
+  };
+
+  return {
+    success: true,
+    items: items,
+    total: total,
+    hasMore: offset + limit < total,
+    rankings: rankings
+  };
+}
+
+// ── evalStatus ────────────────────────────────────
+// 진행 중인 IR의 현재 상태 + 가능한 데이터 (questions / result)를 반환.
+// 클라이언트가 evalStart/evalSubmit 응답을 놓쳤을 때 (reload 등) 폴링용.
+function handleEvalStatus(params) {
+  var auth = authenticateMember_(params.nickname, params.password);
+  if (!auth.ok) return { success: false, error: auth.error };
+  var nickname = auth.nickname;
+
+  var evalId = String(params.evalId || '').trim();
+  if (!evalId) return { success: false, error: 'evalId가 필요합니다.' };
+
+  var sh = getEvalSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) return { success: false, error: '평가를 찾을 수 없습니다.' };
+  var values = sh.getRange(2, 1, last - 1, EVAL_HEADERS_.length).getValues();
+  var row = null;
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0]) === evalId) { row = values[i]; break; }
+  }
+  if (!row) return { success: false, error: '평가를 찾을 수 없습니다.' };
+  if (String(row[1]).trim() !== nickname) return { success: false, error: '본인 평가만 조회할 수 있습니다.' };
+
+  var status = String(row[20]).trim();
+  var resp = {
+    success: true,
+    evalId: evalId,
+    status: status,
+    project: {
+      projectName: String(row[6]),
+      oneLiner: String(row[7]),
+      description: String(row[8]),
+      githubUrl: String(row[9]),
+      demoUrl: String(row[10]),
+      hasFile: !!String(row[21] || '')
+    }
+  };
+
+  // qaJson 파싱 → status가 answering 이상이면 questions 노출
+  var qa = null;
+  try { qa = JSON.parse(String(row[11] || '[]')); } catch (e) { qa = []; }
+  if (status === 'answering' || status === 'evaluation_pending' || status === 'completed') {
+    resp.questions = (qa || []).map(function(q) { return { vc: q.vc, question: q.question }; });
+    resp.answers = (qa || []).map(function(q) { return q.answer || ''; });
+  }
+
+  if (status === 'completed') {
+    resp.result = {
+      evaluations: [
+        { vc: 'VC Vault',  krw: Number(row[12]) || 0, note: String(row[13]) },
+        { vc: 'VC Rocket', krw: Number(row[14]) || 0, note: String(row[15]) },
+        { vc: 'VC Forge',  krw: Number(row[16]) || 0, note: String(row[17]) }
+      ],
+      avgKrw:  Number(row[18]) || 0,
+      summary: String(row[19])
+    };
+  }
+
+  return resp;
 }
