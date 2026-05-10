@@ -2285,7 +2285,16 @@ function renderEvalProgressPanel(ip) {
       break;
     case 'evaluation_pending':
       badge = '<span class="eval-progress-badge eval-progress-waiting">VC 패널이 평가 중</span>';
-      subtitle = '잠시 기다려주세요. 다른 탭으로 이동하셔도 결과는 보존됩니다.';
+      subtitle = (() => {
+        if (ip.revealAt) {
+          const remainMs = ip.revealAt - Date.now();
+          if (remainMs > 0) {
+            const mins = Math.max(1, Math.ceil(remainMs / 60000));
+            return `약 ${mins}분 후 결과가 공개됩니다. 다른 탭으로 이동하셔도 결과는 보존됩니다.`;
+          }
+        }
+        return 'VC 패널이 검토 중입니다. 다른 탭으로 이동하셔도 결과는 보존됩니다.';
+      })();
       icon = '⏳';
       break;
     case 'completed':
@@ -2564,7 +2573,9 @@ async function submitEvalStep2() {
   evalSetInProgress(inProgress);
   evalRenderFromState();
 
-  // fire-and-forget
+  // fire-and-forget — 응답이 와도 즉시 결과로 flip하지 않음.
+  // 백엔드는 LLM 평가 후 5~10분 random reveal 지연을 두고 status를 'evaluation_pending'으로 유지.
+  // 프론트는 폴링(evalStatus)이 status='completed'를 가져올 때까지 대기 화면 유지.
   apiCall('evalSubmit', {
     nickname: currentUser.nickname,
     password: currentUser.password,
@@ -2585,14 +2596,10 @@ async function submitEvalStep2() {
       evalRenderFromState();
       return;
     }
-    ip.status = 'completed';
-    ip.result = res.result;
+    // 성공 응답: revealAt 정보만 캐시. status는 'evaluation_pending' 유지.
+    if (res.revealAt) ip.revealAt = res.revealAt;
     evalSetInProgress(ip);
-    if (isEvalTabActive()) evalRenderFromState();
-    // 피드 갱신
-    evalFeedOffset = 0;
-    evalFeedItems = [];
-    loadEvalFeed(true);
+    // 화면은 이미 evaluation_pending 패널 노출 중 — 폴링이 reveal 시점에 'completed'로 flip해줌
   }).catch(err => {
     console.warn('evalSubmit fetch error (서버는 처리 중일 수 있음):', err);
     // 폴링이 결과를 잡아줌
@@ -2671,6 +2678,11 @@ async function evalPollOnce() {
     if (res.result && !ip.result) {
       ip.result = res.result;
       changed = true;
+    }
+    if (res.revealAt && res.revealAt !== ip.revealAt) {
+      ip.revealAt = res.revealAt;
+      // revealAt만 변하고 status 변화 없을 때도 진행 패널 부제(분 카운트) 갱신
+      if (!changed) changed = true;
     }
     if (changed) {
       evalSetInProgress(ip);

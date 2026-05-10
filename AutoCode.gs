@@ -2076,15 +2076,19 @@ function runBackupV1() {
 // 주당 횟수 제한: 2회 (status='completed' 만 카운트)
 
 var EVAL_SHEET_NAME_ = '평가';
-// 23열. status는 인덱스 20, fileId는 인덱스 21, featuresJson은 인덱스 22.
-// status 진행 단계: questions_pending → answering → evaluation_pending → completed
-// featuresJson: Phase 0에서 LLM이 추출한 5차원 분류 (앵커 매칭용)
+// 24열. status=인덱스 20, fileId=21, featuresJson=22, revealAt=23.
+// status 진행: questions_pending → answering → evaluation_pending → completed
+// revealAt(ms epoch): LLM은 빨리 끝나도 사용자에게 결과 노출은 5~10분 지연 (평가에 무게감 부여).
+//                    Date.now() >= revealAt 시점에 status가 'completed'로 lazy flip.
 var EVAL_HEADERS_ = [
   'id', 'nickname', 'week', 'year', 'submittedAt', 'completedAt',
   'projectName', 'oneLiner', 'description', 'githubUrl', 'demoUrl',
   'qaJson', 'vc1Krw', 'vc1Note', 'vc2Krw', 'vc2Note', 'vc3Krw', 'vc3Note',
-  'avgKrw', 'summary', 'status', 'fileId', 'featuresJson'
+  'avgKrw', 'summary', 'status', 'fileId', 'featuresJson', 'revealAt'
 ];
+
+var EVAL_REVEAL_DELAY_MIN_MS = 5 * 60 * 1000;   // 5분
+var EVAL_REVEAL_DELAY_MAX_MS = 10 * 60 * 1000;  // 10분
 var EVAL_KRW_MIN_ = 5000;
 var EVAL_KRW_MAX_ = 300000000;
 var EVAL_WEEKLY_LIMIT_ = 1;
@@ -2348,6 +2352,28 @@ function normalizeSingleQuestion_(s) {
   if (firstQ >= 0 && firstQ < s.length - 1) {
     s = s.substring(0, firstQ + 1).trim();
   }
+  return s;
+}
+
+// 사용자에게 보여지는 note/summary에서 내부 메커니즘(앵커) 언급 제거.
+// LLM이 프롬프트 어겨도 안전망 — "앵커 #1 대비 -24%" 같은 패턴을 자동 strip.
+function stripAnchorMentions_(text) {
+  if (!text) return '';
+  var s = String(text);
+  // "앵커 #N (이름)" 또는 "앵커 #N" 또는 "앵커 #1번"
+  s = s.replace(/앵커\s*#?\s*\d+\s*(?:번)?\s*(?:\([^)]*\))?\s*/g, '');
+  // "앵커" 단독 + 한국어 조사
+  s = s.replace(/앵커(?:들|는|은|을|를|와|과|의|로|에|에서|에게|보다|랑)?\s*/g, '');
+  // "벤치마크", "기준점", "비교 대상" 같은 동의어
+  s = s.replace(/(?:벤치마크|기준점|비교 ?대상)(?:와|과|는|은|을|를|의|로|에)?\s*/g, '');
+  // "대비 [+-]X%" or "대비 ±X%" 또는 "대비 +200%"
+  s = s.replace(/\s*대비\s*[+\-±]?\s*\d+(?:\.\d+)?\s*%/g, '');
+  // 시작 부분에 남은 punctuation/whitespace 정리
+  s = s.replace(/^[\s,.;:\-—·]+/, '');
+  // 연속 공백
+  s = s.replace(/\s{2,}/g, ' ').trim();
+  // 끝의 공백+점 정리 (". ." 등)
+  s = s.replace(/(\s*\.)+\s*\.?$/, '.');
   return s;
 }
 
@@ -2749,31 +2775,39 @@ function handleEvalSubmit(params) {
     '아래 앵커들은 이 챌린지의 평가 기준점입니다. 새 프로젝트는 반드시 이 앵커들과 비교하여 정량적 위치를 결정하세요.\n\n' +
     anchorsText + '\n\n' +
     '═══════════════════════════════════════\n' +
-    '★ 앵커 활용 규칙 (엄격 준수) ★\n' +
+    '★ 내부 사고 규칙 (사용자에게 공개 금지) ★\n' +
     '═══════════════════════════════════════\n' +
-    '1. 새 프로젝트의 특성과 가장 유사한 앵커를 1~2개 명시적으로 식별하세요.\n' +
-    '2. 그 앵커 대비 새 프로젝트의 본질적 우열을 판단:\n' +
-    '   - 본질적으로 더 좋다면: 앵커 가치 +20% ~ +200% 범위\n' +
-    '   - 본질적으로 비슷하지만 작은 차이가 있다면: ±5% ~ ±20%\n' +
-    '   - 본질적으로 나쁘다면: -20% ~ -80%\n' +
-    '3. 절대 금지: 앵커와 동일 KRW 부여. 미묘한 차이라도 가격에 반영하세요.\n' +
-    '4. 절대 금지: 모든 VC가 동일 KRW. 페르소나에 따라 명확히 다르게 평가 (보통 VC 간 ±20%~50% 차이).\n' +
-    '5. note에는 어떤 앵커 대비 어떻게(±몇%, 어떤 본질적 차이) 평가했는지 명시.\n\n' +
+    '1. 내부적으로: 새 프로젝트의 특성과 가장 유사한 앵커를 1~2개 식별.\n' +
+    '2. 그 앵커 대비 본질적 우열 판단:\n' +
+    '   - 더 좋다면: 앵커 가치 +20% ~ +200%\n' +
+    '   - 비슷하지만 작은 차이: ±5% ~ ±20%\n' +
+    '   - 나쁘다면: -20% ~ -80%\n' +
+    '3. 절대 금지: 앵커와 동일 KRW 부여. 미묘한 차이라도 가격에 반영.\n' +
+    '4. 절대 금지: 모든 VC가 동일 KRW. 페르소나에 따라 명확히 다르게 (VC 간 ±20%~50% 차이).\n\n' +
+    '═══════════════════════════════════════\n' +
+    '★ note 작성 규칙 (사용자가 직접 보는 텍스트) ★\n' +
+    '═══════════════════════════════════════\n' +
+    '- 프로젝트의 본질적 강점/약점만 한줄 평가 (60자 이내).\n' +
+    '- 절대 금지 단어/표현: "앵커", "#1", "#2", "#3", "대비 +N%", "대비 -N%", "벤치마크", "비교 대상".\n' +
+    '- 비교 대상이 아닌 프로젝트 자체의 특성으로 표현.\n' +
+    '   ❌ "앵커 #1 대비 -24%. 매출 모델 약함"\n' +
+    '   ✅ "매출 모델 부재로 외부 가치 제한적"\n' +
+    '- summary도 동일 규칙 (앵커 언급 절대 금지). 3 VC의 결론과 차이를 자연스럽게 종합.\n\n' +
     '═══════════════════════════════════════\n' +
     '★ 절대 상한 ★\n' +
     '═══════════════════════════════════════\n' +
-    '- 5,000원 이상 ~ 300,000,000원 이하 정수만 가능. 위반 절대 금지.\n' +
-    '- note는 60자 이내. 앵커 참조 명시.\n\n' +
+    '- 5,000원 이상 ~ 300,000,000원 이하 정수만 가능.\n' +
+    '- note는 60자 이내, summary는 120자 이내.\n\n' +
     '═══════════════════════════════════════\n' +
     '★ 응답 형식 (JSON만, 다른 텍스트 금지) ★\n' +
     '═══════════════════════════════════════\n' +
     '{\n' +
     ' "evaluations":[\n' +
-    '   {"vc":"VC Vault","krw":<int>,"anchor_ref":"앵커 #N (이름)","note":"앵커 #N 대비 [±X%]. <차별점/약점>"},\n' +
-    '   {"vc":"VC Rocket","krw":<int>,"anchor_ref":"앵커 #N (이름)","note":"..."},\n' +
-    '   {"vc":"VC Forge","krw":<int>,"anchor_ref":"앵커 #N (이름)","note":"..."}\n' +
+    '   {"vc":"VC Vault","krw":<int>,"note":"<프로젝트 자체의 특성·강약점, 앵커 언급 금지>"},\n' +
+    '   {"vc":"VC Rocket","krw":<int>,"note":"..."},\n' +
+    '   {"vc":"VC Forge","krw":<int>,"note":"..."}\n' +
     ' ],\n' +
-    ' "summary":"<3 VC의 결론과 차이를 종합한 1~2문장, 120자 이내>"\n' +
+    ' "summary":"<3 VC의 결론과 차이를 자연스럽게 종합. 앵커 언급 금지.>"\n' +
     '}';
 
   var userText = '[1차 자료]\n' +
@@ -2822,15 +2856,18 @@ function handleEvalSubmit(params) {
   var k1 = clampKrw_(eVault && eVault.krw);
   var k2 = clampKrw_(eRocket && eRocket.krw);
   var k3 = clampKrw_(eForge && eForge.krw);
-  var n1 = clampStr_(eVault && eVault.note, 100);
-  var n2 = clampStr_(eRocket && eRocket.note, 100);
-  var n3 = clampStr_(eForge && eForge.note, 100);
+  // note/summary는 사용자에게 직접 노출되므로 앵커 언급 제거 (안전망)
+  var n1 = stripAnchorMentions_(clampStr_(eVault && eVault.note, 100));
+  var n2 = stripAnchorMentions_(clampStr_(eRocket && eRocket.note, 100));
+  var n3 = stripAnchorMentions_(clampStr_(eForge && eForge.note, 100));
   var avg = Math.round((k1 + k2 + k3) / 3);
-  var summary = clampStr_(parsed.summary, 200);
+  var summary = stripAnchorMentions_(clampStr_(parsed.summary, 200));
 
-  // 시트 row 업데이트 (qaJson은 이미 위에서 저장됨)
-  var nowIso = new Date().toISOString();
-  sh.getRange(sheetRow, 6).setValue(nowIso);              // completedAt
+  // 시트에 평가 결과 저장. status는 'evaluation_pending' 유지 — revealAt 도달 시 lazy flip.
+  // 사용자에게는 5~10분 사이에 평가가 "지연 노출"되어 묵직한 검토 시간감을 줌.
+  var revealAt = Date.now() + EVAL_REVEAL_DELAY_MIN_MS +
+    Math.floor(Math.random() * (EVAL_REVEAL_DELAY_MAX_MS - EVAL_REVEAL_DELAY_MIN_MS));
+
   sh.getRange(sheetRow, 13).setValue(k1);
   sh.getRange(sheetRow, 14).setValue(n1);
   sh.getRange(sheetRow, 15).setValue(k2);
@@ -2839,20 +2876,33 @@ function handleEvalSubmit(params) {
   sh.getRange(sheetRow, 18).setValue(n3);
   sh.getRange(sheetRow, 19).setValue(avg);
   sh.getRange(sheetRow, 20).setValue(summary);
-  sh.getRange(sheetRow, 21).setValue('completed');
+  sh.getRange(sheetRow, 21).setValue('evaluation_pending');  // reveal 전까지 pending 유지
+  sh.getRange(sheetRow, 24).setValue(revealAt);              // revealAt (column X)
+  // completedAt은 reveal 시점에 evalStatus/evalFeed가 lazy 설정
 
+  // 클라이언트는 폴링으로 reveal을 회수. 응답에 result 포함하지 않음.
   return {
     success: true,
-    result: {
-      evaluations: [
-        { vc: 'VC Vault',  krw: k1, note: n1 },
-        { vc: 'VC Rocket', krw: k2, note: n2 },
-        { vc: 'VC Forge',  krw: k3, note: n3 }
-      ],
-      avgKrw: avg,
-      summary: summary
-    }
+    status: 'evaluation_pending',
+    revealAt: revealAt
   };
+}
+
+// 평가가 reveal 시점에 도달하면 status='completed'로 flip + completedAt 설정.
+// row는 sh.getRange(2,1,...,EVAL_HEADERS_.length).getValues()의 0-indexed row 객체.
+// rowIdx는 그 row의 0-indexed 위치. 시트 1-indexed 행 번호는 rowIdx+2.
+// 반환: 실제로 flip이 일어났는지 여부. row 객체도 in-place 갱신함.
+function maybeFlipReveal_(sh, row, rowIdx) {
+  if (String(row[20]).trim() !== 'evaluation_pending') return false;
+  var revealAtVal = Number(row[23]) || 0;
+  if (!revealAtVal || Date.now() < revealAtVal) return false;
+  var sheetRowNum = rowIdx + 2;
+  var revealIso = new Date(revealAtVal).toISOString();
+  sh.getRange(sheetRowNum, 6).setValue(revealIso);     // completedAt
+  sh.getRange(sheetRowNum, 21).setValue('completed');  // status flip
+  row[5] = revealIso;
+  row[20] = 'completed';
+  return true;
 }
 
 // ── evalFeed ──────────────────────────────────────
@@ -2868,6 +2918,10 @@ function handleEvalFeed(params) {
   if (last < 2) return { success: true, items: [], total: 0, hasMore: false };
 
   var values = sh.getRange(2, 1, last - 1, EVAL_HEADERS_.length).getValues();
+  // Lazy reveal flip: revealAt 도달한 evaluation_pending row를 일괄 completed로 전환
+  for (var fi = 0; fi < values.length; fi++) {
+    maybeFlipReveal_(sh, values[fi], fi);
+  }
   var completed = [];
   for (var i = 0; i < values.length; i++) {
     if (String(values[i][20]).trim() === 'completed') completed.push(values[i]);
@@ -2956,17 +3010,22 @@ function handleEvalStatus(params) {
   if (last < 2) return { success: false, error: '평가를 찾을 수 없습니다.' };
   var values = sh.getRange(2, 1, last - 1, EVAL_HEADERS_.length).getValues();
   var row = null;
+  var rowIdx = -1;
   for (var i = 0; i < values.length; i++) {
-    if (String(values[i][0]) === evalId) { row = values[i]; break; }
+    if (String(values[i][0]) === evalId) { row = values[i]; rowIdx = i; break; }
   }
   if (!row) return { success: false, error: '평가를 찾을 수 없습니다.' };
   if (String(row[1]).trim() !== nickname) return { success: false, error: '본인 평가만 조회할 수 있습니다.' };
+
+  // Lazy reveal flip: revealAt 도달한 evaluation_pending → completed
+  maybeFlipReveal_(sh, row, rowIdx);
 
   var status = String(row[20]).trim();
   var resp = {
     success: true,
     evalId: evalId,
     status: status,
+    revealAt: Number(row[23]) || 0,
     project: {
       projectName: String(row[6]),
       oneLiner: String(row[7]),
