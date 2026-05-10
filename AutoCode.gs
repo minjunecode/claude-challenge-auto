@@ -2340,6 +2340,17 @@ function clampStr_(v, max) {
   return s;
 }
 
+// "X는? Y는?"처럼 LLM이 한 entry에 여러 질문 우겨넣은 경우, 첫 물음표까지만 보존.
+// 물음표가 없으면 원문 유지.
+function normalizeSingleQuestion_(s) {
+  s = String(s || '').trim();
+  var firstQ = s.indexOf('?');
+  if (firstQ >= 0 && firstQ < s.length - 1) {
+    s = s.substring(0, firstQ + 1).trim();
+  }
+  return s;
+}
+
 // ── Phase 0: 특성 추출 (앵커 매칭용 5차원 분류) ──
 // LLM에게 프로젝트의 본질을 정해진 라벨로만 분류하게 함 (deterministic, temp=0).
 // 실패 시 null 반환 → 평가는 부트스트랩 앵커만으로 계속 진행 (gracefully degrade).
@@ -2591,10 +2602,13 @@ function handleEvalStart(params) {
     '1. VC Vault (보수 엔터프라이즈): 매출 모델, 유료 전환, 운영 비용 중시. 토이 프로젝트는 박하게.\n' +
     '2. VC Rocket (얼리 그로스): 시장 잠재력, 바이럴, UX 중시. PMF 보이면 후하게.\n' +
     '3. VC Forge (기술 시드): 코드 품질, 엔지니어링 깊이, 기술 해자 중시. 클론은 박하게.\n\n' +
-    '각 VC가 IR 후속 질문 1개씩(총 3개)을 작성합니다.\n' +
-    '- 질문은 평가에 결정적인 정보를 끌어낼 것\n' +
-    '- 각 VC의 시각이 명확히 드러나야 함\n' +
-    '- 한 질문당 30자 이내 (간결하게)\n\n' +
+    '각 VC가 IR 후속 질문을 1개씩(총 3개) 작성합니다.\n\n' +
+    '★ 절대 규칙 ★\n' +
+    '- 각 VC당 정확히 1개의 질문 — 물음표("?")는 정확히 1번만 사용.\n' +
+    '- "X는? Y는?"처럼 한 항목에 여러 궁금증을 몰아넣는 것은 금지.\n' +
+    '- 한 질문당 30자 이내, 한 문장으로 끝낼 것.\n' +
+    '- 각 VC의 시각이 명확히 드러나도록.\n' +
+    '- 평가에 결정적인 단 하나의 정보를 끌어내는 질문일 것.\n\n' +
     '반드시 JSON으로만 응답 (다른 텍스트 금지):\n' +
     '{"questions":[{"vc":"VC Vault","q":"..."},{"vc":"VC Rocket","q":"..."},{"vc":"VC Forge","q":"..."}]}';
 
@@ -2625,12 +2639,14 @@ function handleEvalStart(params) {
   }
 
   // 질문 정규화 (vc 이름 정확하지 않으면 순서대로 매핑)
+  // + 첫 물음표 이후는 잘라내서 단일 질문 강제 (LLM이 규칙 어겨도 안전)
   var questions = [];
   for (var i = 0; i < parsed.questions.length && questions.length < 3; i++) {
     var q = parsed.questions[i] || {};
     var vc = String(q.vc || '').trim();
     if (VC_NAMES_.indexOf(vc) < 0) vc = VC_NAMES_[questions.length];
     var qText = clampStr_(q.q || q.question || '', 80);
+    qText = normalizeSingleQuestion_(qText);
     if (!qText) continue;
     questions.push({ vc: vc, question: qText });
   }
