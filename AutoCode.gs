@@ -520,6 +520,7 @@ function handleRequest(e) {
     case 'evalSubmit':   result = handleEvalSubmit(params); break;
     case 'evalFeed':     result = handleEvalFeed(params); break;
     case 'evalStatus':   result = handleEvalStatus(params); break;
+    case 'evalDiscard':  result = handleEvalDiscard(params); break;
     default: result = { success: false, error: '알 수 없는 action: ' + action };
   }
 
@@ -2244,19 +2245,25 @@ function getIsoWeek_(date) {
   return { week: weekNum, year: d.getUTCFullYear() };
 }
 
-function countCompletedEvalsThisWeek_(nickname) {
+// 주 1회 제한 카운트.
+// 'abandoned'(폐기됨) 외에는 모두 슬롯 점유로 간주:
+//   questions_pending → answering → evaluation_pending → completed
+// reveal 지연(5~10분) 동안에도 슬롯이 점유되어 중복 제출 차단.
+// 'abandoned' 또는 unknown status는 카운트 제외 (폐기 시 슬롯 회수).
+function countActiveEvalsThisWeek_(nickname) {
   var sh = getEvalSheet_();
   var last = sh.getLastRow();
   if (last < 2) return 0;
   var iso = getIsoWeek_(new Date());
   var values = sh.getRange(2, 1, last - 1, EVAL_HEADERS_.length).getValues();
+  var ACTIVE = { 'questions_pending': 1, 'answering': 1, 'evaluation_pending': 1, 'completed': 1 };
   var count = 0;
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
     if (String(row[1]).trim() === nickname &&
         Number(row[2]) === iso.week &&
         Number(row[3]) === iso.year &&
-        String(row[20]).trim() === 'completed') {
+        ACTIVE[String(row[20]).trim()]) {
       count++;
     }
   }
@@ -2580,7 +2587,7 @@ function handleEvalStart(params) {
     return { success: false, error: 'GitHub URL · 데모 URL · 파일 첨부 중 최소 한 가지는 제출해야 합니다.' };
   }
 
-  var weekCount = countCompletedEvalsThisWeek_(nickname);
+  var weekCount = countActiveEvalsThisWeek_(nickname);
   if (weekCount >= EVAL_WEEKLY_LIMIT_) {
     return { success: false, error: '이번 주 평가 횟수(' + EVAL_WEEKLY_LIMIT_ + '회)를 모두 사용했습니다.' };
   }
@@ -3057,4 +3064,39 @@ function handleEvalStatus(params) {
   }
 
   return resp;
+}
+
+// ── evalDiscard ────────────────────────────────────
+// 진행 중(또는 답변 단계)의 IR을 'abandoned'로 마킹하여 주간 카운트에서 제외.
+// 이미 'completed'된 평가는 폐기 불가 (audit 일관성).
+function handleEvalDiscard(params) {
+  var auth = authenticateMember_(params.nickname, params.password);
+  if (!auth.ok) return { success: false, error: auth.error };
+  var nickname = auth.nickname;
+
+  var evalId = String(params.evalId || '').trim();
+  if (!evalId) return { success: false, error: 'evalId가 필요합니다.' };
+
+  var sh = getEvalSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) return { success: false, error: '평가를 찾을 수 없습니다.' };
+  var values = sh.getRange(2, 1, last - 1, EVAL_HEADERS_.length).getValues();
+  var rowIdx = -1;
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0]) === evalId) { rowIdx = i; break; }
+  }
+  if (rowIdx < 0) return { success: false, error: '평가를 찾을 수 없습니다.' };
+  if (String(values[rowIdx][1]).trim() !== nickname) {
+    return { success: false, error: '본인 평가만 폐기할 수 있습니다.' };
+  }
+  var curStatus = String(values[rowIdx][20]).trim();
+  if (curStatus === 'completed') {
+    return { success: false, error: '이미 완료된 평가는 폐기할 수 없습니다.' };
+  }
+  if (curStatus === 'abandoned') {
+    return { success: true };  // idempotent
+  }
+
+  sh.getRange(rowIdx + 2, 21).setValue('abandoned');
+  return { success: true };
 }

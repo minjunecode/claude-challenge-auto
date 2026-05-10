@@ -2331,12 +2331,29 @@ function renderEvalProgressPanel(ip) {
       if (a === 'continue-answer') { evalShowStep('questions'); }
       else if (a === 'show-result') { evalShowStep('result'); }
       else if (a === 'discard') {
-        if (!confirm('진행 중인 IR을 폐기합니다. (주 2회 제한엔 카운트되지 않습니다)')) return;
+        if (!confirm('진행 중인 IR을 폐기합니다. (주 1회 제한엔 카운트되지 않습니다)')) return;
+        const cur = evalGetInProgress();
+        if (cur && cur.evalId) discardEvalOnServer(cur.evalId);
         evalSetInProgress(null);
         evalRenderFromState();
       }
     });
   });
+}
+
+// 진행 중인 IR을 백엔드에 'abandoned' 마킹하여 주간 카운트에서 제외시킴.
+// 임시 evalId('temp-…')는 서버에 row가 없으니 호출 생략.
+async function discardEvalOnServer(evalId) {
+  if (!evalId || String(evalId).startsWith('temp-')) return;
+  try {
+    await apiCall('evalDiscard', {
+      nickname: currentUser.nickname,
+      password: currentUser.password,
+      evalId: evalId
+    });
+  } catch (err) {
+    console.warn('evalDiscard 호출 실패 (서버 row는 그대로 남음):', err);
+  }
 }
 
 let evalHandlersBound = false;
@@ -2346,7 +2363,9 @@ function bindEvalHandlersOnce() {
   document.getElementById('eval-start-btn').addEventListener('click', submitEvalStep1);
   document.getElementById('eval-submit-btn').addEventListener('click', submitEvalStep2);
   document.getElementById('eval-restart-btn').addEventListener('click', () => {
-    if (!confirm('진행 중인 IR을 폐기하고 처음부터 다시 시작합니다. (주 2회 제한엔 카운트되지 않습니다)')) return;
+    if (!confirm('진행 중인 IR을 폐기하고 처음부터 다시 시작합니다. (주 1회 제한엔 카운트되지 않습니다)')) return;
+    const cur = evalGetInProgress();
+    if (cur && cur.evalId) discardEvalOnServer(cur.evalId);
     evalSetInProgress(null);
     evalRenderFromState();
   });
