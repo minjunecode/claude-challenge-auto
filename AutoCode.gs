@@ -2066,8 +2066,8 @@ function runBackupV1() {
 // ════════════════════════════════════════════════════════
 //
 // 흐름:
-//   1) evalStart  - 사용자가 1차 IR 자료 제출 → LLM 호출 1 → VC 6개 질문 반환
-//   2) evalSubmit - 사용자가 6개 답변 제출      → LLM 호출 2 → 3 VC 평가 + 평균 + 종합
+//   1) evalStart  - 사용자가 1차 IR 자료 제출 → LLM 호출 1 → VC 3개 질문 반환 (각 VC 1개씩)
+//   2) evalSubmit - 사용자가 3개 답변 제출      → LLM 호출 2 → 3 VC 평가 + 평균 + 종합
 //   3) evalFeed   - 완료된 평가 피드 조회
 //
 // 시트: 평가 (21열, lazy 생성)
@@ -2591,12 +2591,12 @@ function handleEvalStart(params) {
     '1. VC Vault (보수 엔터프라이즈): 매출 모델, 유료 전환, 운영 비용 중시. 토이 프로젝트는 박하게.\n' +
     '2. VC Rocket (얼리 그로스): 시장 잠재력, 바이럴, UX 중시. PMF 보이면 후하게.\n' +
     '3. VC Forge (기술 시드): 코드 품질, 엔지니어링 깊이, 기술 해자 중시. 클론은 박하게.\n\n' +
-    '각 VC가 IR 후속 질문 2개씩(총 6개)을 작성합니다.\n' +
+    '각 VC가 IR 후속 질문 1개씩(총 3개)을 작성합니다.\n' +
     '- 질문은 평가에 결정적인 정보를 끌어낼 것\n' +
     '- 각 VC의 시각이 명확히 드러나야 함\n' +
     '- 한 질문당 30자 이내 (간결하게)\n\n' +
     '반드시 JSON으로만 응답 (다른 텍스트 금지):\n' +
-    '{"questions":[{"vc":"VC Vault","q":"..."},{"vc":"VC Vault","q":"..."},{"vc":"VC Rocket","q":"..."},{"vc":"VC Rocket","q":"..."},{"vc":"VC Forge","q":"..."},{"vc":"VC Forge","q":"..."}]}';
+    '{"questions":[{"vc":"VC Vault","q":"..."},{"vc":"VC Rocket","q":"..."},{"vc":"VC Forge","q":"..."}]}';
 
   var userText =
     '프로젝트명: ' + projectName + '\n' +
@@ -2624,17 +2624,17 @@ function handleEvalStart(params) {
     return { success: false, error: 'VC 질문 생성에 실패했습니다. 다시 시도해주세요.' };
   }
 
-  // 질문 정규화 (vc 이름 정확하지 않으면 라운드로빈)
+  // 질문 정규화 (vc 이름 정확하지 않으면 순서대로 매핑)
   var questions = [];
-  for (var i = 0; i < parsed.questions.length && questions.length < 6; i++) {
+  for (var i = 0; i < parsed.questions.length && questions.length < 3; i++) {
     var q = parsed.questions[i] || {};
     var vc = String(q.vc || '').trim();
-    if (VC_NAMES_.indexOf(vc) < 0) vc = VC_NAMES_[Math.floor(questions.length / 2)];
+    if (VC_NAMES_.indexOf(vc) < 0) vc = VC_NAMES_[questions.length];
     var qText = clampStr_(q.q || q.question || '', 80);
     if (!qText) continue;
     questions.push({ vc: vc, question: qText });
   }
-  if (questions.length < 6) {
+  if (questions.length < 3) {
     sh.getRange(insertedRowNum, 21).setValue('abandoned');
     return { success: false, error: 'VC 질문이 부족합니다. 다시 시도해주세요.' };
   }
@@ -2670,7 +2670,7 @@ function handleEvalSubmit(params) {
   if (!evalId) return { success: false, error: 'evalId가 필요합니다.' };
 
   var answers = Array.isArray(params.answers) ? params.answers : [];
-  if (answers.length < 6) return { success: false, error: '6개 답변이 모두 필요합니다.' };
+  if (answers.length < 3) return { success: false, error: '3개 답변이 모두 필요합니다.' };
 
   // 시트에서 row 찾기
   var sh = getEvalSheet_();
@@ -2698,9 +2698,9 @@ function handleEvalSubmit(params) {
 
   // Q&A 정규화
   var qa = [];
-  for (var j = 0; j < Math.min(answers.length, 6); j++) {
+  for (var j = 0; j < Math.min(answers.length, 3); j++) {
     var a = answers[j] || {};
-    var vc = VC_NAMES_.indexOf(String(a.vc || '')) >= 0 ? a.vc : VC_NAMES_[Math.floor(j / 2)];
+    var vc = VC_NAMES_.indexOf(String(a.vc || '')) >= 0 ? a.vc : VC_NAMES_[j];
     qa.push({
       vc: vc,
       question: clampStr_(a.question, 80),

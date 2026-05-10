@@ -156,7 +156,7 @@ localStorage에 `dashboardCache`, `personalStatsCache` 저장. 이슈 디버깅 
 1. **Phase 0** — `extractFeatures_`: LLM이 프로젝트를 5차원 enum으로 분류 (temp 0.0)
    - service_type / monetization / target_market / tech_complexity / validation_stage
    - `평가` 시트의 `featuresJson` 컬럼(W, index 22)에 저장
-2. **Phase 1** — VC 6개 후속 질문 생성 (temp 0.7, 창의성)
+2. **Phase 1** — VC 3개 후속 질문 생성 (각 VC 1개씩, temp 0.7)
 3. **Phase 2** — 앵커 기반 평가 (temp 0.3, 일관성)
    - `BOOTSTRAP_ANCHORS_` (6개 정밀 캘리브레이션, 1만원~2억원 스펙트럼)
    - 챌린지 내 같은 service_type 완료 평가 상위 3개 (자가 강화)
