@@ -2362,6 +2362,80 @@ function normalizeSingleQuestion_(s) {
   return s;
 }
 
+// GitHub URL에서 README 본문을 추출 (사용자 설명의 과장 검증용).
+// raw.githubusercontent.com 호출 — auth 없음, 60req/hour 제한이지만 IR당 1회라 충분.
+// main → master 순으로 시도. 모두 실패하면 빈 문자열.
+function fetchGithubReadme_(url) {
+  if (!url) return '';
+  var m = String(url).match(/github\.com\/([\w.-]+)\/([\w.-]+)/i);
+  if (!m) return '';
+  var owner = m[1];
+  var repo = m[2].replace(/\.git$/i, '').replace(/\/.*$/, '');
+  var branches = ['main', 'master'];
+  for (var bi = 0; bi < branches.length; bi++) {
+    var rawUrl = 'https://raw.githubusercontent.com/' + owner + '/' + repo + '/' + branches[bi] + '/README.md';
+    try {
+      var resp = UrlFetchApp.fetch(rawUrl, { muteHttpExceptions: true, followRedirects: true });
+      if (resp.getResponseCode() === 200) {
+        var body = resp.getContentText();
+        // 4000자로 컷 (앞부분이 보통 가장 중요)
+        return body.length > 4000 ? body.substring(0, 4000) + '\n…[truncated]' : body;
+      }
+    } catch (e) {
+      Logger.log('fetchGithubReadme_ branch ' + branches[bi] + ' failed: ' + e.message);
+    }
+  }
+  return '';
+}
+
+// 데모 URL의 실제 페이지를 fetch해서 title + meta description + 본문 텍스트 발췌.
+// SPA의 경우 초기 HTML만 잡혀 빈약할 수 있으나, 적어도 사이트 존재성·기본 마케팅 카피는 확인됨.
+function fetchDemoSnapshot_(url) {
+  if (!url) return '';
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
+      followRedirects: true,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ClaudeChallenge/1.0)' }
+    });
+    if (resp.getResponseCode() !== 200) return '';
+    var html = resp.getContentText();
+    var parts = [];
+
+    // <title>
+    var titleM = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    if (titleM) parts.push('TITLE: ' + titleM[1].trim());
+    // meta description
+    var metaM = html.match(/<meta\s+[^>]*name\s*=\s*["']description["'][^>]*content\s*=\s*["']([^"']+)["']/i);
+    if (metaM) parts.push('META: ' + metaM[1].trim());
+    // og:description
+    var ogM = html.match(/<meta\s+[^>]*property\s*=\s*["']og:description["'][^>]*content\s*=\s*["']([^"']+)["']/i);
+    if (ogM) parts.push('OG: ' + ogM[1].trim());
+
+    // 본문 텍스트: script/style 제거 후 태그 strip
+    var text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<!--([\s\S]*?)-->/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text) {
+      parts.push('BODY: ' + (text.length > 2000 ? text.substring(0, 2000) + '…[truncated]' : text));
+    }
+    return parts.join('\n');
+  } catch (e) {
+    Logger.log('fetchDemoSnapshot_ failed: ' + e.message);
+    return '';
+  }
+}
+
 // 사용자에게 보여지는 note/summary에서 내부 메커니즘(앵커) 언급 제거.
 // LLM이 프롬프트 어겨도 안전망 — "앵커 #1 대비 -24%" 같은 패턴을 자동 strip.
 function stripAnchorMentions_(text) {
@@ -2782,6 +2856,16 @@ function handleEvalSubmit(params) {
     '아래 앵커들은 이 챌린지의 평가 기준점입니다. 새 프로젝트는 반드시 이 앵커들과 비교하여 정량적 위치를 결정하세요.\n\n' +
     anchorsText + '\n\n' +
     '═══════════════════════════════════════\n' +
+    '★ 가장 중요한 원칙 — 실제 콘텐츠 우선 신뢰 ★\n' +
+    '═══════════════════════════════════════\n' +
+    '사용자가 작성한 설명은 과장될 수 있습니다. user prompt 후반부에 GitHub README 발췌나 데모 페이지 스냅샷이 첨부되어 있다면, 그것이 가장 신뢰할 수 있는 평가 근거입니다.\n\n' +
+    '판단 규칙:\n' +
+    '- 설명과 실제 콘텐츠가 일치 → 정상 평가\n' +
+    '- 설명은 화려한데 실제 콘텐츠 빈약·미완성 → 명확히 박하게 (과장 페널티)\n' +
+    '- 설명은 겸손한데 실제 콘텐츠 완성도 높음 → 가산점\n' +
+    '- 첨부 스냅샷이 비어있거나 fetch 실패 표시 → URL 제출만으로 가치 인정하되, 검증 부족 → 보수적 평가\n' +
+    '- "PMF/유료 사용자" 주장 vs 실제 코드/페이지가 토이 수준이면 → 가차없이 박하게.\n\n' +
+    '═══════════════════════════════════════\n' +
     '★ 내부 사고 규칙 (사용자에게 공개 금지) ★\n' +
     '═══════════════════════════════════════\n' +
     '1. 내부적으로: 새 프로젝트의 특성과 가장 유사한 앵커를 1~2개 식별.\n' +
@@ -2817,15 +2901,32 @@ function handleEvalSubmit(params) {
     ' "summary":"<3 VC의 결론과 차이를 자연스럽게 종합. 앵커 언급 금지.>"\n' +
     '}';
 
-  var userText = '[1차 자료]\n' +
+  // 실제 URL 콘텐츠 fetch — 사용자 설명의 과장 검증용
+  var githubSnapshot = githubUrl ? fetchGithubReadme_(githubUrl) : '';
+  var demoSnapshot = demoUrl ? fetchDemoSnapshot_(demoUrl) : '';
+
+  var userText = '[사용자가 작성한 1차 자료 — 과장 가능성 있음, 실제 콘텐츠로 검증할 것]\n' +
     '프로젝트명: ' + projectName + '\n' +
     '한줄 설명: ' + oneLiner + '\n' +
     '상세 설명: ' + description + '\n' +
     'GitHub: ' + (githubUrl || '(미제출)') + '\n' +
     '데모: ' + (demoUrl || '(미제출)') + '\n' +
     (fileId ? '첨부 파일: 있음 (image면 직접 확인)\n' : '첨부 파일: 없음\n') +
-    '\n[추출된 특성]\n' + featuresInline_(features) + '\n' +
-    '\n[Q&A]\n';
+    '\n[추출된 특성]\n' + featuresInline_(features) + '\n';
+
+  // ── 실제 URL 콘텐츠 (가장 신뢰할 수 있는 근거) ──
+  if (githubSnapshot) {
+    userText += '\n[★ GitHub README 실제 내용 — 가장 신뢰할 만한 근거 ★]\n' + githubSnapshot + '\n';
+  } else if (githubUrl) {
+    userText += '\n[GitHub README fetch 실패 또는 비공개/없음 — 검증 부족으로 보수적 평가]\n';
+  }
+  if (demoSnapshot) {
+    userText += '\n[★ 데모 페이지 실제 스냅샷 — 가장 신뢰할 만한 근거 ★]\n' + demoSnapshot + '\n';
+  } else if (demoUrl) {
+    userText += '\n[데모 URL fetch 실패 또는 빈 페이지 — 검증 부족으로 보수적 평가]\n';
+  }
+
+  userText += '\n[Q&A]\n';
   for (var q = 0; q < qa.length; q++) {
     userText += qa[q].vc + ' Q: ' + qa[q].question + '\nA: ' + qa[q].answer + '\n';
   }
