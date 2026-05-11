@@ -3041,17 +3041,22 @@ function handleEvalFeed(params) {
 
   var total = completed.length;
   var slice = completed.slice(offset, offset + limit);
+  // 본인 row에만 GitHub/데모/파일 정보 노출. 타인 row는 소스 보호 차원에서 제외.
+  // ("내 평가 피드" sub-tab에서는 본인만 필터링되므로 정상 표시됨)
+  var requesterNick = auth.nickname;
   var items = slice.map(function(r) {
+    var rowNick = String(r[1]);
+    var isOwn = (rowNick === requesterNick);
     return {
       evalId:      String(r[0]),
-      nickname:    String(r[1]),
+      nickname:    rowNick,
       completedAt: String(r[5]),
       projectName: String(r[6]),
       oneLiner:    String(r[7]),
       description: String(r[8]),
-      githubUrl:   String(r[9]),
-      demoUrl:     String(r[10]),
-      hasFile:     !!String(r[21] || ''),
+      githubUrl:   isOwn ? String(r[9])  : '',
+      demoUrl:     isOwn ? String(r[10]) : '',
+      hasFile:     isOwn ? !!String(r[21] || '') : false,
       evaluations: [
         { vc: 'VC Vault',  krw: Number(r[12]) || 0, note: String(r[13]) },
         { vc: 'VC Rocket', krw: Number(r[14]) || 0, note: String(r[15]) },

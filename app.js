@@ -2822,14 +2822,13 @@ function renderEvalRankings(rankings) {
 }
 
 // 컴팩트 카드 (멤버 피드용): 닉네임·날짜·링크·VC 3 카드만. 제목/한줄/요약 없음.
+// 멤버 평가 피드용 컴팩트 카드.
+// 본인 외 다른 멤버의 GitHub/데모/파일 첨부 링크는 노출하지 않음 (소스 보호 + 사칭 방지).
+// 내 평가 피드(renderEvalDetailFeedCard)에서는 본인 자료라 그대로 노출.
 function renderEvalCompactFeedCard(item) {
   const card = document.createElement('div');
   card.className = 'feed-card feed-card-compact';
   const dateStr = (item.completedAt || '').slice(0, 10);
-  const githubLink = item.githubUrl ? `<a href="${escapeHtml(item.githubUrl)}" target="_blank" rel="noopener" class="feed-link">GitHub</a>` : '';
-  const demoLink = item.demoUrl ? `<a href="${escapeHtml(item.demoUrl)}" target="_blank" rel="noopener" class="feed-link">데모</a>` : '';
-  const fileTag = item.hasFile ? `<span class="feed-link feed-link-file">📎 첨부</span>` : '';
-  const links = [githubLink, demoLink, fileTag].filter(Boolean).join(' · ');
   const evalsHtml = (item.evaluations || []).map(ev => `
     <div class="vc-card-mini vc-card-${(ev.vc || '').replace(/\s+/g, '-').toLowerCase()}">
       <div class="vc-mini-name">${escapeHtml(ev.vc)}</div>
@@ -2842,7 +2841,6 @@ function renderEvalCompactFeedCard(item) {
       <span class="feed-card-nick">${escapeHtml(item.nickname)}</span>
       <span class="feed-card-date">${dateStr}</span>
     </div>
-    ${links ? `<div class="feed-card-links">${links}</div>` : ''}
     <div class="vc-card-grid vc-card-grid-mini">${evalsHtml}</div>
     <div class="feed-card-avg-mini">평균 ${formatAvgKRW(item.avgKrw)}</div>
   `;
