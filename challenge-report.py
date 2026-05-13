@@ -1,9 +1,14 @@
 """
-Claude Max 챌린지 — 자동 사용량 리포트 (v2.0)
+Claude Max 챌린지 — 자동 사용량 리포트 (v2.1)
 ~/.claude/ + ~/.codex/ JSONL에서 오늘의 토큰 사용량을 집계해 챌린지 서버에 전송합니다.
 OAuth 토큰 불필요. 로컬 파일만 읽습니다.
 
-v2.0 변경사항:
+v2.1 (실행 시간 단축):
+  - 3일치 HTTP POST를 병렬로 전송 (순차 → 동시) — 약 3배 빠름
+  - JSONL 파일 mtime 사전 필터: 4일 이전 마지막 수정 파일 스킵
+  - HTTP timeout 45→20초, 재시도 2→1회 — 최악 시나리오 시간 절반
+
+v2.0:
   - Codex CLI 사용량도 함께 수집 (~/.codex/sessions/**/*.jsonl)
   - Claude/Codex 분리 필드로 전송: claude_*, codex_*
   - 하위 호환: Codex 디렉토리가 없으면 Claude만 보고 (기존 동작 유지)
@@ -11,6 +16,7 @@ v2.0 변경사항:
 """
 
 import json, glob, os, sys, io, time, uuid, platform, urllib.request, urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 
 # Windows UTF-8
@@ -25,8 +31,9 @@ CONFIG_PATH     = os.path.join(os.path.expanduser("~"), ".claude", "challenge-co
 LOG_PATH        = os.path.join(os.path.expanduser("~"), ".claude", "challenge-report.log")
 MACHINE_ID_PATH = os.path.join(os.path.expanduser("~"), ".claude", "challenge-machine-id")
 KST = timezone(timedelta(hours=9))
-HTTP_TIMEOUT = 45
-HTTP_RETRIES = 2  # 실패 시 추가 시도 횟수 (총 3회까지)
+HTTP_TIMEOUT = 20  # Apps Script 평소 1~5초. 20초면 정상 케이스 충분, 최악 한도는 짧게.
+HTTP_RETRIES = 1   # 실패 시 추가 시도 횟수 (총 2회까지)
+SCAN_FRESHNESS_DAYS = 4  # 마지막 수정이 N일 이전인 JSONL은 윈도우(어제·오늘)와 무관 → 스킵
 
 
 def get_machine_id():
@@ -138,12 +145,24 @@ def _blank_day():
     }
 
 
+def _is_stale_file(fpath):
+    """파일 mtime이 SCAN_FRESHNESS_DAYS 이전이면 True. 윈도우 외 데이터라 스킵 가능.
+    JSONL은 append-only가 일반적이라 마지막 수정 시각이 곧 마지막 쓰기 시각."""
+    try:
+        cutoff = time.time() - SCAN_FRESHNESS_DAYS * 86400
+        return os.path.getmtime(fpath) < cutoff
+    except Exception:
+        return False  # mtime 못 읽으면 안전하게 스캔
+
+
 def _scan_claude(target_dates_set, by_date):
     """~/.claude/projects/**/*.jsonl을 1회 스캔하여 target_dates 모두의 버킷에 쌓는다."""
     home = os.path.expanduser("~")
     jsonl_files = glob.glob(os.path.join(home, ".claude", "projects", "**", "*.jsonl"), recursive=True)
 
     for fpath in jsonl_files:
+        if _is_stale_file(fpath):
+            continue
         try:
             with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
@@ -197,6 +216,8 @@ def _scan_codex(target_dates_set, by_date):
     jsonl_files = glob.glob(os.path.join(codex_dir, "**", "*.jsonl"), recursive=True)
 
     for fpath in jsonl_files:
+        if _is_stale_file(fpath):
+            continue
         session_id = None
         had_usage_for = set()  # 이 파일에서 사용량이 잡힌 날짜들
         try:
@@ -388,8 +409,10 @@ def main():
         multi = collect_usage_multi(dates)
         log(f"scan: {len(dates)} days in {int((time.time()-t_scan)*1000)}ms")
 
-        for usage in multi:
-            _report_one(cfg, usage)
+        # 3일치를 병렬로 POST (순차 → 동시) — 가장 큰 wall-time 단축 포인트.
+        # _report_one은 내부에서 log() 호출 — 로그는 시간 순으로 인터리브될 수 있음 (의도된 동작).
+        with ThreadPoolExecutor(max_workers=len(multi) or 1) as executor:
+            list(executor.map(lambda u: _report_one(cfg, u), multi))
 
         log("=== tick end ===")
     except Exception as e:
