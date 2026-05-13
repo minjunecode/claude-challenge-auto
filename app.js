@@ -813,6 +813,15 @@ function getStreak(nickname, submissions, currentWeek, currentYear) {
 
 function renderDashboard() {
   if (!dashboardData) return;
+
+  // 평가 랭킹 (대시보드 상단) — 백엔드 응답에서 받은 데이터로 즉시 렌더
+  // 프리뷰는 데모 데이터로 fallback
+  if (EVAL_IS_PREVIEW && typeof computeDemoRankings === 'function') {
+    renderEvalRankings(computeDemoRankings(EVAL_DEMO_FEED));
+  } else if (dashboardData.evalRankings) {
+    renderEvalRankings(dashboardData.evalRankings);
+  }
+
   const { members: allMembers, submissions } = dashboardData;
   // 리그 필터 적용 (주간뷰/TOP3/주간토큰만 영향, 1:1 비교는 전체 유지)
   const members = filterMembersByLeague(allMembers);
@@ -2809,15 +2818,18 @@ function computeDemoRankings(items) {
 function renderEvalRankings(rankings) {
   rankings = rankings || {};
   ['week', 'month', 'all'].forEach(p => {
-    const card = document.querySelector(`.eval-ranking-card[data-period="${p}"]`);
-    if (!card) return;
-    const body = card.querySelector('.eval-ranking-body');
-    const r = rankings[p];
-    if (r && r.nickname) {
-      body.innerHTML = `<div class="eval-ranking-nick">${escapeHtml(r.nickname)}</div><div class="eval-ranking-krw">${formatAvgKRW(r.krw)}</div>`;
-    } else {
-      body.innerHTML = '<span class="eval-ranking-empty">기록 없음</span>';
-    }
+    // 대시보드 + 평가 sub-tab 양쪽 패널을 모두 갱신
+    const cards = document.querySelectorAll(`.eval-ranking-card[data-period="${p}"]`);
+    cards.forEach(card => {
+      const body = card.querySelector('.eval-ranking-body');
+      if (!body) return;
+      const r = rankings[p];
+      if (r && r.nickname) {
+        body.innerHTML = `<div class="eval-ranking-nick">${escapeHtml(r.nickname)}</div><div class="eval-ranking-krw">${formatAvgKRW(r.krw)}</div>`;
+      } else {
+        body.innerHTML = '<span class="eval-ranking-empty">기록 없음</span>';
+      }
+    });
   });
 }
 

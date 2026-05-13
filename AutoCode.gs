@@ -1133,6 +1133,9 @@ function handleDashboard(params) {
     }
   }
 
+  // ── 평가 랭킹 (대시보드에서 노출용; 평가 sub-tab과 동일 데이터) ──
+  var evalRankings = computeEvalRankings_();
+
   return {
     success: true,
     members: members,
@@ -1143,8 +1146,49 @@ function handleDashboard(params) {
     topUser: topUser,
     memberHourly: memberAllHourly,
     memberColors: memberColors,
-    settlements: settlements
+    settlements: settlements,
+    evalRankings: evalRankings
   };
+}
+
+// 평가 시트에서 주간/월간/누적 평가금액 1위를 계산 (handleEvalFeed의 로직과 동일).
+// 평가 시트가 없거나 비어있으면 null 반환.
+function computeEvalRankings_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var evalSh = ss.getSheetByName(EVAL_SHEET_NAME_);
+  if (!evalSh || evalSh.getLastRow() < 2) return null;
+
+  var values = evalSh.getRange(2, 1, evalSh.getLastRow() - 1, EVAL_HEADERS_.length).getValues();
+  // Lazy reveal flip (시트 무결성 유지)
+  for (var fi = 0; fi < values.length; fi++) {
+    maybeFlipReveal_(evalSh, values[fi], fi);
+  }
+  var now = new Date();
+  var iso = getIsoWeek_(now);
+  var monthKey = now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2);
+  var sums = { week: {}, month: {}, all: {} };
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (String(row[20]).trim() !== 'completed') continue;
+    var nick = String(row[1]).trim();
+    var krw = Number(row[18]) || 0;
+    var compAt = String(row[5]);
+    sums.all[nick] = (sums.all[nick] || 0) + krw;
+    if (compAt.length >= 7 && compAt.substring(0, 7) === monthKey) {
+      sums.month[nick] = (sums.month[nick] || 0) + krw;
+    }
+    if (Number(row[2]) === iso.week && Number(row[3]) === iso.year) {
+      sums.week[nick] = (sums.week[nick] || 0) + krw;
+    }
+  }
+  function top_(map) {
+    var best = null;
+    Object.keys(map).forEach(function(nick) {
+      if (!best || map[nick] > best.krw) best = { nickname: nick, krw: map[nick] };
+    });
+    return best;
+  }
+  return { week: top_(sums.week), month: top_(sums.month), all: top_(sums.all) };
 }
 
 // ── 사용량 보고 (PC에서 Hook으로 전송) ──
