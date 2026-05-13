@@ -1136,6 +1136,35 @@ function handleDashboard(params) {
   // ── 평가 랭킹 (대시보드에서 노출용; 평가 sub-tab과 동일 데이터) ──
   var evalRankings = computeEvalRankings_();
 
+  // ── 요청자의 이번 주 활성 IR (주 1회 제한 UI 가드용) ──
+  // 가장 최근의 non-abandoned row 반환. 다른 브라우저/기기에서 시작한 경우에도
+  // 프런트가 localStorage 없이 상태 복원할 수 있도록.
+  var myEvalThisWeek = null;
+  var evalShDash = ss.getSheetByName(EVAL_SHEET_NAME_);
+  if (evalShDash && evalShDash.getLastRow() >= 2) {
+    var dashIso = getIsoWeek_(new Date());
+    var dashCols = EVAL_HEADERS_.length;
+    var evalDashVals = evalShDash.getRange(2, 1, evalShDash.getLastRow() - 1, dashCols).getValues();
+    // 역순(최근 행 우선)으로 검색 + lazy reveal flip 적용
+    for (var ei = evalDashVals.length - 1; ei >= 0; ei--) {
+      var er = evalDashVals[ei];
+      if (String(er[1]).trim() !== nickname) continue;
+      if (Number(er[2]) !== dashIso.week) continue;
+      if (Number(er[3]) !== dashIso.year) continue;
+      // 검색 도중에도 reveal flip 적용해 정확한 status 반영
+      maybeFlipReveal_(evalShDash, er, ei);
+      var est = String(er[20]).trim();
+      if (est === 'abandoned' || est === '') continue;
+      myEvalThisWeek = {
+        evalId: String(er[0]),
+        status: est,
+        projectName: String(er[6]),
+        revealAt: Number(er[23]) || 0
+      };
+      break;
+    }
+  }
+
   return {
     success: true,
     members: members,
@@ -1147,7 +1176,8 @@ function handleDashboard(params) {
     memberHourly: memberAllHourly,
     memberColors: memberColors,
     settlements: settlements,
-    evalRankings: evalRankings
+    evalRankings: evalRankings,
+    myEvalThisWeek: myEvalThisWeek
   };
 }
 

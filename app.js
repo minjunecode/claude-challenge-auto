@@ -2238,6 +2238,32 @@ function evalShowStep(name) {
 function renderEval() {
   if (!currentUser) return;
   bindEvalHandlersOnce();
+
+  // 다른 브라우저/기기/캐시 클리어 등으로 localStorage가 비어있어도
+  // 백엔드의 이번 주 활성 IR이 있으면 localStorage 복원 (주 1회 가드).
+  const backendActive = dashboardData && dashboardData.myEvalThisWeek;
+  const localInProgress = evalGetInProgress();
+  const needsRestore = backendActive && (
+    !localInProgress ||
+    localInProgress.evalId !== backendActive.evalId ||
+    localInProgress.nickname !== currentUser.nickname
+  );
+  if (needsRestore) {
+    evalSetInProgress({
+      evalId: backendActive.evalId,
+      nickname: currentUser.nickname,
+      status: backendActive.status,
+      project: { projectName: backendActive.projectName || '' },
+      questions: null,
+      answers: {},
+      result: null,
+      revealAt: backendActive.revealAt || 0,
+      startedAt: Date.now()
+    });
+    // 즉시 한 번 폴링 → questions/result 등 상세 데이터 가져오기
+    setTimeout(() => { try { evalPollOnce(); } catch (e) {} }, 50);
+  }
+
   evalRenderFromState();
   // 피드 로딩
   evalFeedOffset = 0;
@@ -2379,6 +2405,10 @@ function bindEvalHandlersOnce() {
     evalRenderFromState();
   });
   document.getElementById('eval-new-btn').addEventListener('click', () => {
+    if (isThisWeekSlotUsed()) {
+      alert('이번 주 평가는 이미 사용했습니다.\n다음 주 월요일부터 새 평가가 가능합니다.');
+      return;
+    }
     evalSetInProgress(null);
     ['eval-project-name', 'eval-one-liner', 'eval-description', 'eval-github-url', 'eval-demo-url'].forEach(id => {
       const el = document.getElementById(id);
@@ -2447,9 +2477,22 @@ function readFileBase64(file) {
   });
 }
 
+// 이번 주 슬롯이 사용 중이면 true. dashboardData.myEvalThisWeek는 'abandoned' 제외 활성 IR.
+function isThisWeekSlotUsed() {
+  return !!(dashboardData && dashboardData.myEvalThisWeek && dashboardData.myEvalThisWeek.evalId);
+}
+
 async function submitEvalStep1() {
   const errEl = document.getElementById('eval-form-error');
   errEl.style.display = 'none';
+
+  // 가드: 이번 주 평가 이미 사용
+  if (isThisWeekSlotUsed()) {
+    errEl.textContent = '이번 주 평가는 이미 사용했습니다. 다음 주 월요일부터 새 평가가 가능합니다.';
+    errEl.style.display = '';
+    return;
+  }
+
   const projectName = document.getElementById('eval-project-name').value.trim();
   const oneLiner    = document.getElementById('eval-one-liner').value.trim();
   const description = document.getElementById('eval-description').value.trim();
