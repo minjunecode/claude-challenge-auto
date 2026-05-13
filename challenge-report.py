@@ -1,7 +1,12 @@
 """
-Claude Max 챌린지 — 자동 사용량 리포트 (v2.1)
+Claude Max 챌린지 — 자동 사용량 리포트 (v2.2)
 ~/.claude/ + ~/.codex/ JSONL에서 오늘의 토큰 사용량을 집계해 챌린지 서버에 전송합니다.
 OAuth 토큰 불필요. 로컬 파일만 읽습니다.
+
+v2.2 (증분 스캔):
+  - 파일별 mtime+size 시그니처 캐시 (~/.claude/challenge-scan-cache.json)
+  - 시그니처 일치 → 캐시된 기여(contribution) 재사용, 파일 read 스킵
+  - 헤비 사용자 스캔 시간 90%+ 단축 (수 초 → 수백 ms)
 
 v2.1 (실행 시간 단축):
   - 3일치 HTTP POST를 병렬로 전송 (순차 → 동시) — 약 3배 빠름
@@ -30,10 +35,12 @@ APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbys_MSZz16yoH9065nSLt
 CONFIG_PATH     = os.path.join(os.path.expanduser("~"), ".claude", "challenge-config.json")
 LOG_PATH        = os.path.join(os.path.expanduser("~"), ".claude", "challenge-report.log")
 MACHINE_ID_PATH = os.path.join(os.path.expanduser("~"), ".claude", "challenge-machine-id")
+SCAN_CACHE_PATH = os.path.join(os.path.expanduser("~"), ".claude", "challenge-scan-cache.json")
 KST = timezone(timedelta(hours=9))
 HTTP_TIMEOUT = 20  # Apps Script 평소 1~5초. 20초면 정상 케이스 충분, 최악 한도는 짧게.
 HTTP_RETRIES = 1   # 실패 시 추가 시도 횟수 (총 2회까지)
 SCAN_FRESHNESS_DAYS = 4  # 마지막 수정이 N일 이전인 JSONL은 윈도우(어제·오늘)와 무관 → 스킵
+SCAN_CACHE_VERSION = 2   # 캐시 스키마 버전 (변경 시 강제 재계산)
 
 
 def get_machine_id():
@@ -155,59 +162,220 @@ def _is_stale_file(fpath):
         return False  # mtime 못 읽으면 안전하게 스캔
 
 
-def _scan_claude(target_dates_set, by_date):
-    """~/.claude/projects/**/*.jsonl을 1회 스캔하여 target_dates 모두의 버킷에 쌓는다."""
+# ── 스캔 캐시 (파일 시그니처 + 기여도) ────────────────────────────────────
+# 구조: { version, files: { fpath: { mtime, size, contrib: { date: {...} } } } }
+# 기여 구조 (claude):  { claude: {in,out,cc,cr}, hourly: { "14": {cl_in,...}, ... }, sessions: [...] }
+# 기여 구조 (codex):   { codex:  {in,out,cr},    hourly: { "14": {cx_in,...}, ... }, sessions: [...] }
+# 캐시 hit 조건: mtime + size가 정확히 일치 (append-only JSONL은 새 줄 시 size 변함).
+
+def _load_scan_cache():
+    try:
+        with open(SCAN_CACHE_PATH, "r", encoding="utf-8") as f:
+            c = json.load(f)
+        if c.get("version") != SCAN_CACHE_VERSION:
+            return {"version": SCAN_CACHE_VERSION, "claude": {}, "codex": {}}
+        # 누락 키 보강
+        c.setdefault("claude", {})
+        c.setdefault("codex", {})
+        return c
+    except Exception:
+        return {"version": SCAN_CACHE_VERSION, "claude": {}, "codex": {}}
+
+
+def _save_scan_cache(cache):
+    try:
+        os.makedirs(os.path.dirname(SCAN_CACHE_PATH), exist_ok=True)
+        with open(SCAN_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _file_sig(fpath):
+    """파일 시그니처: (mtime, size). 캐시 무효화 판정용."""
+    try:
+        st = os.stat(fpath)
+        return {"mtime": st.st_mtime, "size": st.st_size}
+    except Exception:
+        return None
+
+
+def _scan_claude_file_contrib(fpath):
+    """한 파일의 모든 날짜별 Claude 기여도를 계산. 캐시 저장용 (target_dates 무관).
+    이후 merge 시 현재 target_dates_set에 해당하는 날짜만 사용."""
+    contrib = {}
+    try:
+        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                ts = obj.get("timestamp", "")
+                if not ts or "T" not in ts:
+                    continue
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    kst_dt = dt.astimezone(KST)
+                    d = kst_dt.strftime("%Y-%m-%d")
+                    h = kst_dt.hour
+                except Exception:
+                    continue
+
+                msg = obj.get("message", {})
+                if not isinstance(msg, dict):
+                    continue
+                usage = msg.get("usage", {})
+                if not usage or usage.get("output_tokens", 0) <= 0:
+                    continue
+
+                inp = usage.get("input_tokens", 0) or 0
+                out = usage.get("output_tokens", 0) or 0
+                cc  = usage.get("cache_creation_input_tokens", 0) or 0
+                cr  = usage.get("cache_read_input_tokens", 0) or 0
+
+                if d not in contrib:
+                    contrib[d] = {"claude": {"in": 0, "out": 0, "cc": 0, "cr": 0},
+                                  "hourly": {}, "sessions": []}
+                day = contrib[d]
+                day["claude"]["in"]  += inp
+                day["claude"]["out"] += out
+                day["claude"]["cc"]  += cc
+                day["claude"]["cr"]  += cr
+
+                hkey = str(h)
+                if hkey not in day["hourly"]:
+                    day["hourly"][hkey] = {"cl_in": 0, "cl_out": 0, "cl_cc": 0, "cl_cr": 0}
+                hb = day["hourly"][hkey]
+                hb["cl_in"]  += inp
+                hb["cl_out"] += out
+                hb["cl_cc"]  += cc
+                hb["cl_cr"]  += cr
+
+                sid = obj.get("sessionId", "") or os.path.basename(fpath)
+                if sid and sid not in day["sessions"]:
+                    day["sessions"].append(sid)
+    except Exception:
+        return {}
+    return contrib
+
+
+def _scan_claude(target_dates_set, by_date, scan_cache):
+    """파일별 캐시를 활용해 Claude 기여도를 by_date에 누적."""
     home = os.path.expanduser("~")
     jsonl_files = glob.glob(os.path.join(home, ".claude", "projects", "**", "*.jsonl"), recursive=True)
+
+    file_cache = scan_cache.setdefault("claude", {})
+    new_cache = {}
 
     for fpath in jsonl_files:
         if _is_stale_file(fpath):
             continue
-        try:
-            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    try:
-                        obj = json.loads(line)
-                    except Exception:
-                        continue
-                    ts = obj.get("timestamp", "")
-                    d, h = _parse_kst_date_hour(ts, target_dates_set)
-                    if d is None:
-                        continue
-
-                    msg = obj.get("message", {})
-                    if not isinstance(msg, dict):
-                        continue
-                    usage = msg.get("usage", {})
-                    if not usage or usage.get("output_tokens", 0) <= 0:
-                        continue
-
-                    inp = usage.get("input_tokens", 0) or 0
-                    out = usage.get("output_tokens", 0) or 0
-                    cc  = usage.get("cache_creation_input_tokens", 0) or 0
-                    cr  = usage.get("cache_read_input_tokens", 0) or 0
-
-                    day = by_date[d]
-                    day["claude"]["in"]  += inp
-                    day["claude"]["out"] += out
-                    day["claude"]["cc"]  += cc
-                    day["claude"]["cr"]  += cr
-
-                    b = day["hourly"][h]
-                    b["cl_in"]  += inp
-                    b["cl_out"] += out
-                    b["cl_cc"]  += cc
-                    b["cl_cr"]  += cr
-
-                    sid = obj.get("sessionId", "") or os.path.basename(fpath)
-                    if sid:
-                        day["sessions"].add(sid)
-        except Exception:
+        sig = _file_sig(fpath)
+        if not sig:
             continue
 
+        cached = file_cache.get(fpath)
+        if cached and cached.get("mtime") == sig["mtime"] and cached.get("size") == sig["size"]:
+            contrib = cached.get("contrib") or {}
+        else:
+            contrib = _scan_claude_file_contrib(fpath)
 
-def _scan_codex(target_dates_set, by_date):
-    """~/.codex/sessions/**/*.jsonl을 1회 스캔하여 target_dates 모두의 버킷에 쌓는다."""
+        new_cache[fpath] = {"mtime": sig["mtime"], "size": sig["size"], "contrib": contrib}
+
+        for d, c in contrib.items():
+            if d not in target_dates_set:
+                continue
+            day = by_date[d]
+            day["claude"]["in"]  += c["claude"]["in"]
+            day["claude"]["out"] += c["claude"]["out"]
+            day["claude"]["cc"]  += c["claude"]["cc"]
+            day["claude"]["cr"]  += c["claude"]["cr"]
+            for hkey, hb in c.get("hourly", {}).items():
+                h = int(hkey)
+                b = day["hourly"][h]
+                b["cl_in"]  += hb["cl_in"]
+                b["cl_out"] += hb["cl_out"]
+                b["cl_cc"]  += hb["cl_cc"]
+                b["cl_cr"]  += hb["cl_cr"]
+            for sid in c.get("sessions", []):
+                day["sessions"].add(sid)
+
+    scan_cache["claude"] = new_cache
+
+
+def _scan_codex_file_contrib(fpath):
+    """한 파일의 모든 날짜별 Codex 기여도를 계산. 캐시 저장용."""
+    contrib = {}
+    session_id = None
+    fname_fallback = os.path.basename(fpath)
+    try:
+        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                payload = obj.get("payload", {})
+                if not isinstance(payload, dict):
+                    continue
+                if session_id is None:
+                    sid = payload.get("id") or payload.get("session_id")
+                    if sid:
+                        session_id = sid
+                if payload.get("type") != "token_count":
+                    continue
+
+                ts = obj.get("timestamp", "")
+                if not ts or "T" not in ts:
+                    continue
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    kst_dt = dt.astimezone(KST)
+                    d = kst_dt.strftime("%Y-%m-%d")
+                    h = kst_dt.hour
+                except Exception:
+                    continue
+
+                info = payload.get("info", {}) or {}
+                last = info.get("last_token_usage") or {}
+                if not last:
+                    continue
+
+                inp = last.get("input_tokens", 0) or 0
+                cr  = last.get("cached_input_tokens", 0) or 0
+                out = last.get("output_tokens", 0) or 0
+                if inp == 0 and out == 0 and cr == 0:
+                    continue
+
+                if d not in contrib:
+                    contrib[d] = {"codex": {"in": 0, "out": 0, "cr": 0},
+                                  "hourly": {}, "sessions": []}
+                day = contrib[d]
+                day["codex"]["in"]  += inp
+                day["codex"]["out"] += out
+                day["codex"]["cr"]  += cr
+
+                hkey = str(h)
+                if hkey not in day["hourly"]:
+                    day["hourly"][hkey] = {"cx_in": 0, "cx_out": 0, "cx_cr": 0}
+                hb = day["hourly"][hkey]
+                hb["cx_in"]  += inp
+                hb["cx_out"] += out
+                hb["cx_cr"]  += cr
+    except Exception:
+        return {}
+
+    # 세션 ID 후처리 — 파일당 1개 sid를 모든 날짜에 부여
+    if contrib:
+        sid_label = "codex:" + str(session_id or fname_fallback)
+        for d in contrib:
+            contrib[d]["sessions"] = [sid_label]
+    return contrib
+
+
+def _scan_codex(target_dates_set, by_date, scan_cache):
+    """파일별 캐시를 활용해 Codex 기여도를 by_date에 누적."""
     home = os.path.expanduser("~")
     codex_dir = os.path.join(home, ".codex", "sessions")
     if not os.path.isdir(codex_dir):
@@ -215,72 +383,54 @@ def _scan_codex(target_dates_set, by_date):
 
     jsonl_files = glob.glob(os.path.join(codex_dir, "**", "*.jsonl"), recursive=True)
 
+    file_cache = scan_cache.setdefault("codex", {})
+    new_cache = {}
+
     for fpath in jsonl_files:
         if _is_stale_file(fpath):
             continue
-        session_id = None
-        had_usage_for = set()  # 이 파일에서 사용량이 잡힌 날짜들
-        try:
-            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    try:
-                        obj = json.loads(line)
-                    except Exception:
-                        continue
-                    payload = obj.get("payload", {})
-                    if not isinstance(payload, dict):
-                        continue
-                    if session_id is None:
-                        sid = payload.get("id") or payload.get("session_id")
-                        if sid:
-                            session_id = sid
-                    if payload.get("type") != "token_count":
-                        continue
-
-                    ts = obj.get("timestamp", "")
-                    d, h = _parse_kst_date_hour(ts, target_dates_set)
-                    if d is None:
-                        continue
-
-                    info = payload.get("info", {}) or {}
-                    last = info.get("last_token_usage") or {}
-                    if not last:
-                        continue
-
-                    inp = last.get("input_tokens", 0) or 0
-                    cr  = last.get("cached_input_tokens", 0) or 0
-                    out = last.get("output_tokens", 0) or 0
-                    if inp == 0 and out == 0 and cr == 0:
-                        continue
-
-                    had_usage_for.add(d)
-
-                    day = by_date[d]
-                    day["codex"]["in"]  += inp
-                    day["codex"]["out"] += out
-                    day["codex"]["cr"]  += cr
-
-                    b = day["hourly"][h]
-                    b["cx_in"]  += inp
-                    b["cx_out"] += out
-                    b["cx_cr"]  += cr
-        except Exception:
+        sig = _file_sig(fpath)
+        if not sig:
             continue
 
-        if had_usage_for:
-            sid = session_id or os.path.basename(fpath)
-            for d in had_usage_for:
-                by_date[d]["sessions"].add("codex:" + str(sid))
+        cached = file_cache.get(fpath)
+        if cached and cached.get("mtime") == sig["mtime"] and cached.get("size") == sig["size"]:
+            contrib = cached.get("contrib") or {}
+        else:
+            contrib = _scan_codex_file_contrib(fpath)
+
+        new_cache[fpath] = {"mtime": sig["mtime"], "size": sig["size"], "contrib": contrib}
+
+        for d, c in contrib.items():
+            if d not in target_dates_set:
+                continue
+            day = by_date[d]
+            day["codex"]["in"]  += c["codex"]["in"]
+            day["codex"]["out"] += c["codex"]["out"]
+            day["codex"]["cr"]  += c["codex"]["cr"]
+            for hkey, hb in c.get("hourly", {}).items():
+                h = int(hkey)
+                b = day["hourly"][h]
+                b["cx_in"]  += hb["cx_in"]
+                b["cx_out"] += hb["cx_out"]
+                b["cx_cr"]  += hb["cx_cr"]
+            for sid in c.get("sessions", []):
+                day["sessions"].add(sid)
+
+    scan_cache["codex"] = new_cache
 
 
 def collect_usage_multi(date_list):
     """여러 날짜의 사용량을 한 번의 파일 스캔으로 집계.
+    파일별 캐시 (~/.claude/challenge-scan-cache.json)를 활용해 변경 없는 파일은 재스캔 스킵.
     반환: [{date, claude_input_tokens, ..., hourly}, ...] 입력 순서대로."""
     target_set = set(date_list)
     by_date = {d: _blank_day() for d in date_list}
 
-    _scan_claude(target_set, by_date)
-    _scan_codex(target_set, by_date)
+    scan_cache = _load_scan_cache()
+    _scan_claude(target_set, by_date, scan_cache)
+    _scan_codex(target_set, by_date, scan_cache)
+    _save_scan_cache(scan_cache)
 
     results = []
     for d in date_list:

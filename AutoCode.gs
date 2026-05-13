@@ -491,8 +491,34 @@ function safeInt(v) {
   return Math.round(n);
 }
 
+// 시트 셀(Date 객체 / 'YYYY-MM-DD' / ISO 문자열 / epoch ms)을 ms epoch로 정규화.
+// 시간 윈도우 비교용. 실패하면 0 반환 → 윈도우 필터를 skip.
+function _toEpochMs_(v) {
+  if (!v) return 0;
+  if (v instanceof Date) return v.getTime();
+  var s = String(v).trim();
+  if (!s) return 0;
+  // 순수 숫자 (epoch ms 또는 일련번호 — 일련번호는 일반적으로 < 60000)
+  var n = Number(s);
+  if (!isNaN(n) && n > 1e11) return n;  // 1973년 이후 epoch ms로 가정
+  // 'YYYY-MM-DD' 또는 ISO
+  if (s.length >= 10) {
+    var iso = s.length === 10 ? (s + 'T00:00:00') : s;
+    var d = new Date(iso);
+    if (!isNaN(d.getTime())) return d.getTime();
+  }
+  return 0;
+}
+
 function doGet(e) { return handleRequest(e); }
 function doPost(e) { return handleRequest(e); }
+
+// 데이터 쓰기 액션 — 성공 시 대시보드 캐시 무효화 대상.
+var MUTATION_ACTIONS_ = {
+  'reportUsage': 1, 'upload': 1, 'register': 1, 'init': 1,
+  'addMember': 1, 'deleteMember': 1, 'setColor': 1,
+  'evalStart': 1, 'evalSubmit': 1, 'evalDiscard': 1
+};
 
 function handleRequest(e) {
   var params;
@@ -524,9 +550,52 @@ function handleRequest(e) {
     default: result = { success: false, error: '알 수 없는 action: ' + action };
   }
 
+  // 쓰기 액션이 성공했으면 대시보드 캐시 무효화 (모든 사용자 대상)
+  if (MUTATION_ACTIONS_[action] && result && result.success) {
+    try { invalidateDashboardCache_(); } catch (e) {}
+  }
+
   return ContentService
     .createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── 대시보드 응답 캐시 (Apps Script CacheService, 30s TTL + 버전 기반 무효화) ──
+// 키는 사용자별 (myEvalThisWeek 등 user-specific 필드 포함).
+// 쓰기 액션 발생 시 'dashboard:version'을 갱신 → 모든 캐시된 응답이 stale 판정됨.
+var DASHBOARD_CACHE_TTL_SEC_ = 30;
+
+function _dashboardCacheKey_(nickname) {
+  return 'dashboard:' + (nickname || '_anon');
+}
+
+function getCachedDashboard_(nickname) {
+  try {
+    var cache = CacheService.getScriptCache();
+    var raw = cache.get(_dashboardCacheKey_(nickname));
+    if (!raw) return null;
+    var parsed = JSON.parse(raw);
+    var curVer = cache.get('dashboard:version') || '0';
+    if (String(parsed.version) !== String(curVer)) return null;
+    return parsed.data;
+  } catch (err) { return null; }
+}
+
+function putCachedDashboard_(nickname, data) {
+  try {
+    var cache = CacheService.getScriptCache();
+    var curVer = cache.get('dashboard:version') || '0';
+    var payload = JSON.stringify({ version: curVer, data: data });
+    // CacheService 한도: value 100KB. 초과 시 silently throw → 캐싱 포기.
+    if (payload.length > 95000) return;
+    cache.put(_dashboardCacheKey_(nickname), payload, DASHBOARD_CACHE_TTL_SEC_);
+  } catch (err) {}
+}
+
+function invalidateDashboardCache_() {
+  try {
+    CacheService.getScriptCache().put('dashboard:version', String(Date.now()), 3600);
+  } catch (err) {}
 }
 
 // 비밀번호를 멤버 시트에 안전하게 저장.
@@ -652,11 +721,15 @@ function handleInit(params) {
 
 // ── 대시보드 ──
 function handleDashboard(params) {
-  // 구형 시트 자동 마이그레이션 (1회성)
-  migrateSheetIfNeeded_();
-
   // 요청자 식별 (myEvalThisWeek 등 본인 전용 필드 계산용)
   var nickname = (params && params.nickname) ? String(params.nickname).trim() : '';
+
+  // 캐시 hit이면 즉시 반환 (30s TTL + 버전 무효화)
+  var cached = getCachedDashboard_(nickname);
+  if (cached) return cached;
+
+  // 구형 시트 자동 마이그레이션 (1회성)
+  migrateSheetIfNeeded_();
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
@@ -691,26 +764,31 @@ function handleDashboard(params) {
     }
   }
 
-  // 인증기록
+  // 인증기록 — 최근 8주만 반환 (대시보드 UI는 길어도 한 달치만 보여줌)
+  // 이전 데이터는 시트에 그대로 보존 (audit 일관성), API 응답만 슬림화.
+  var DASHBOARD_WINDOW_DAYS = 8 * 7;
+  var windowCutoffMs = Date.now() - DASHBOARD_WINDOW_DAYS * 86400 * 1000;
   var recordSheet = ss.getSheetByName('인증기록');
   var submissions = [];
   if (recordSheet && recordSheet.getLastRow() > 1) {
     var recordData = recordSheet.getDataRange().getValues();
     for (var j = 1; j < recordData.length; j++) {
-      if (recordData[j][0]) {
-        submissions.push({
-          nickname: String(recordData[j][0]),
-          week: Number(recordData[j][1]),
-          year: Number(recordData[j][2]),
-          type: recordData[j][3] || 'session',
-          points: Number(recordData[j][4]) || 1,
-          submittedAt: toDateTimeStr(recordData[j][5]),
-          source: recordData[j][6] || 'auto',
-          tokens: Number(recordData[j][7]) || 0,
-          resetsAt: recordData[j][8] || '',
-          league: String(recordData[j][9] || '').trim()  // 보고 시점의 리그 ('' = legacy)
-        });
-      }
+      if (!recordData[j][0]) continue;
+      // resetsAt(인덱스 8) 우선, 없으면 submittedAt(인덱스 5)로 윈도우 판정
+      var subMs = _toEpochMs_(recordData[j][8]) || _toEpochMs_(recordData[j][5]);
+      if (subMs && subMs < windowCutoffMs) continue;
+      submissions.push({
+        nickname: String(recordData[j][0]),
+        week: Number(recordData[j][1]),
+        year: Number(recordData[j][2]),
+        type: recordData[j][3] || 'session',
+        points: Number(recordData[j][4]) || 1,
+        submittedAt: toDateTimeStr(recordData[j][5]),
+        source: recordData[j][6] || 'auto',
+        tokens: Number(recordData[j][7]) || 0,
+        resetsAt: recordData[j][8] || '',
+        league: String(recordData[j][9] || '').trim()  // 보고 시점의 리그 ('' = legacy)
+      });
     }
   }
 
@@ -729,6 +807,9 @@ function handleDashboard(params) {
     var groupMap = {};  // key=nickname|date, value={ machines: [{mid, cl...}, ...], hasNonLegacy: bool }
     for (var k = 1; k < usageData.length; k++) {
       if (!usageData[k][0]) continue;
+      // 8주 윈도우 필터: 너무 옛 날짜 row는 응답에서 제외 (시트엔 보존)
+      var rowDateMs = _toEpochMs_(usageData[k][1]);
+      if (rowDateMs && rowDateMs < windowCutoffMs) continue;
       var row = usageData[k];
       var clIn, clOut, clCw, clCr, cxIn, cxOut, cxCr, uSess, uAt, mid;
       if (isUsageV2) {
@@ -1002,6 +1083,9 @@ function handleDashboard(params) {
     for (var rr = 1; rr < rawRows2.length; rr++) {
       var rNick = String(rawRows2[rr][0] || '').trim();
       if (!rNick) continue;
+      // 8주 윈도우 필터 (대시보드 응답에서 옛 hourly 제외)
+      var rawDateMs = _toEpochMs_(rawRows2[rr][1]);
+      if (rawDateMs && rawDateMs < windowCutoffMs) continue;
       var rDate = toDateStr(rawRows2[rr][1]);
       var rAt2 = rawRows2[rr][colAt];
       var rMid = colMid >= 0 ? (String(rawRows2[rr][colMid] || '').trim() || LEGACY_MACHINE_ID) : LEGACY_MACHINE_ID;
@@ -1168,7 +1252,7 @@ function handleDashboard(params) {
     }
   }
 
-  return {
+  var response = {
     success: true,
     members: members,
     submissions: submissions,
@@ -1182,6 +1266,9 @@ function handleDashboard(params) {
     evalRankings: evalRankings,
     myEvalThisWeek: myEvalThisWeek
   };
+  // 캐시에 저장 (다음 30s 내 동일 요청은 시트 read 없이 즉시 반환)
+  putCachedDashboard_(nickname, response);
+  return response;
 }
 
 // 평가 시트에서 주간/월간/누적 평가금액 1위를 계산 (handleEvalFeed의 로직과 동일).

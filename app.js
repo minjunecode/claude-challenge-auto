@@ -461,8 +461,16 @@ function normalizeDate(v) {
 }
 
 // ── 대시보드 ──
-async function loadDashboard() {
-  // 1) 캐시에서 즉시 렌더
+// Dashboard fetch dedupe + freshness:
+//   - 한 번에 하나의 fetch만 진행 (중복 호출 시 동일 Promise 공유)
+//   - 마지막 fetch가 15초 이내면 새 fetch 안 함 (네트워크 절약, 사용자 cache 보강)
+//   - force=true로 신선도 무시 강제 새로고침 가능
+let dashboardFetchPromise = null;
+let dashboardLastFetchAt = 0;
+const DASHBOARD_FRESH_MS = 15 * 1000;
+
+async function loadDashboard(force) {
+  // 1) 메모리/로컬 캐시에서 즉시 렌더 (SWR — stale 데이터 먼저 보여주고 백그라운드 fetch)
   if (!dashboardData) {
     const cached = localStorage.getItem('dashboardCache');
     if (cached) {
@@ -481,34 +489,48 @@ async function loadDashboard() {
     }
   }
 
-  // 2) 백그라운드에서 최신 데이터 가져오기
+  // 2) 백엔드 fetch — 신선도/dedupe 가드
+  const now = Date.now();
+  if (!force && dashboardData && (now - dashboardLastFetchAt) < DASHBOARD_FRESH_MS) {
+    return; // 데이터 충분히 신선함, fetch 스킵
+  }
+  if (dashboardFetchPromise) {
+    return dashboardFetchPromise; // 이미 진행 중인 fetch에 합류
+  }
+
   const params = {};
   if (currentUser && currentUser.nickname) params.nickname = currentUser.nickname;
   if (currentUser && currentUser.password) params.password = currentUser.password;
-  const result = await apiCall('dashboard', params);
-  if (result && result.success) {
-    // myStats가 포함되어 있으면 personalStats 캐시도 갱신
-    if (result.myStats) {
-      const ps = { success: true, raw: result.myStats.raw, daily: result.myStats.daily, points: result.myStats.points };
-      personalStatsData = ps;
-      personalStatsLoaded = true;
-      localStorage.setItem('personalStatsCache', JSON.stringify(ps));
-      // 현재 내 분석 탭이 열려있으면 즉시 렌더
-      if (document.getElementById('tab-stats').classList.contains('active')) {
-        renderPersonalStats();
+
+  dashboardFetchPromise = (async () => {
+    try {
+      const result = await apiCall('dashboard', params);
+      if (result && result.success) {
+        if (result.myStats) {
+          const ps = { success: true, raw: result.myStats.raw, daily: result.myStats.daily, points: result.myStats.points };
+          personalStatsData = ps;
+          personalStatsLoaded = true;
+          localStorage.setItem('personalStatsCache', JSON.stringify(ps));
+          if (document.getElementById('tab-stats').classList.contains('active')) {
+            renderPersonalStats();
+          }
+          delete result.myStats;
+        }
+        dashboardData = result;
+        localStorage.setItem('dashboardCache', JSON.stringify(result));
+        dashboardLastFetchAt = Date.now();
+        if (personalStatsLoaded && document.getElementById('tab-stats').classList.contains('active')) {
+          renderPersonalStats();
+        }
+      } else if (!dashboardData) {
+        dashboardData = getDemoData();
       }
-      delete result.myStats; // dashboardCache에는 저장 안 함 (용량 절약)
+      renderDashboard();
+    } finally {
+      dashboardFetchPromise = null;
     }
-    dashboardData = result;
-    localStorage.setItem('dashboardCache', JSON.stringify(result));
-    // dashboardData 갱신 후 stats 탭 활성 시 피어 비교 재렌더 (members/memberHourly 필요)
-    if (personalStatsLoaded && document.getElementById('tab-stats').classList.contains('active')) {
-      renderPersonalStats();
-    }
-  } else if (!dashboardData) {
-    dashboardData = getDemoData();
-  }
-  renderDashboard();
+  })();
+  return dashboardFetchPromise;
 }
 
 function getWeekDates(week, year) {
