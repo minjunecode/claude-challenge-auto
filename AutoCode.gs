@@ -655,6 +655,9 @@ function handleDashboard(params) {
   // 구형 시트 자동 마이그레이션 (1회성)
   migrateSheetIfNeeded_();
 
+  // 요청자 식별 (myEvalThisWeek 등 본인 전용 필드 계산용)
+  var nickname = (params && params.nickname) ? String(params.nickname).trim() : '';
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   var memberSheet = ss.getSheetByName('멤버');
@@ -1140,7 +1143,7 @@ function handleDashboard(params) {
   // 가장 최근의 non-abandoned row 반환. 다른 브라우저/기기에서 시작한 경우에도
   // 프런트가 localStorage 없이 상태 복원할 수 있도록.
   var myEvalThisWeek = null;
-  var evalShDash = ss.getSheetByName(EVAL_SHEET_NAME_);
+  var evalShDash = nickname ? ss.getSheetByName(EVAL_SHEET_NAME_) : null;
   if (evalShDash && evalShDash.getLastRow() >= 2) {
     var dashIso = getIsoWeek_(new Date());
     var dashCols = EVAL_HEADERS_.length;
