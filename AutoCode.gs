@@ -2241,15 +2241,17 @@ function runBackupV1() {
 // 주당 횟수 제한: 2회 (status='completed' 만 카운트)
 
 var EVAL_SHEET_NAME_ = '평가';
-// 24열. status=인덱스 20, fileId=21, featuresJson=22, revealAt=23.
+// 25열. status=20, fileId=21, featuresJson=22, revealAt=23, evidenceJson=24.
 // status 진행: questions_pending → answering → evaluation_pending → completed
 // revealAt(ms epoch): LLM은 빨리 끝나도 사용자에게 결과 노출은 5~10분 지연 (평가에 무게감 부여).
 //                    Date.now() >= revealAt 시점에 status가 'completed'로 lazy flip.
+// evidenceJson: evalStart 시 fetch한 실측 데이터 (GitHub README/메타 + 데모 HTML 발췌).
+//               양 phase 프롬프트에 주입 — 사용자 주장과 실증 데이터를 LLM이 교차 검증.
 var EVAL_HEADERS_ = [
   'id', 'nickname', 'week', 'year', 'submittedAt', 'completedAt',
   'projectName', 'oneLiner', 'description', 'githubUrl', 'demoUrl',
   'qaJson', 'vc1Krw', 'vc1Note', 'vc2Krw', 'vc2Note', 'vc3Krw', 'vc3Note',
-  'avgKrw', 'summary', 'status', 'fileId', 'featuresJson', 'revealAt'
+  'avgKrw', 'summary', 'status', 'fileId', 'featuresJson', 'revealAt', 'evidenceJson'
 ];
 
 var EVAL_REVEAL_DELAY_MIN_MS = 5 * 60 * 1000;   // 5분
@@ -2515,6 +2517,191 @@ function clampStr_(v, max) {
   return s;
 }
 
+// ── URL 실측 증거 수집 헬퍼 ─────────────────────────────────
+// 사용자 주장 vs 실제 데이터를 LLM에 함께 제시해 bias 제거.
+// 모든 fetch 실패는 graceful — null 반환, 평가는 계속 진행.
+
+function parseGithubUrl_(url) {
+  if (!url) return null;
+  try {
+    var m = String(url).match(/github\.com\/([^\/\s]+)\/([^\/\s#?]+)/i);
+    if (!m) return null;
+    return { owner: m[1], repo: m[2].replace(/\.git$/, '') };
+  } catch (e) { return null; }
+}
+
+function fetchGithubReadme_(url) {
+  var info = parseGithubUrl_(url);
+  if (!info) return null;
+  var branches = ['main', 'master'];
+  var paths = ['README.md', 'readme.md', 'README.MD'];
+  for (var b = 0; b < branches.length; b++) {
+    for (var p = 0; p < paths.length; p++) {
+      var raw = 'https://raw.githubusercontent.com/' + info.owner + '/' + info.repo + '/' + branches[b] + '/' + paths[p];
+      try {
+        var resp = UrlFetchApp.fetch(raw, { muteHttpExceptions: true, followRedirects: true });
+        if (resp.getResponseCode() === 200) {
+          return clampStr_(resp.getContentText(), 3000);
+        }
+      } catch (e) {}
+    }
+  }
+  return null;
+}
+
+function fetchGithubMetadata_(url) {
+  var info = parseGithubUrl_(url);
+  if (!info) return null;
+  try {
+    var apiUrl = 'https://api.github.com/repos/' + info.owner + '/' + info.repo;
+    var resp = UrlFetchApp.fetch(apiUrl, {
+      muteHttpExceptions: true,
+      headers: { 'Accept': 'application/vnd.github+json' }
+    });
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    return {
+      stars: data.stargazers_count || 0,
+      forks: data.forks_count || 0,
+      watchers: data.watchers_count || 0,
+      openIssues: data.open_issues_count || 0,
+      language: data.language || '',
+      sizeKB: data.size || 0,
+      createdAt: data.created_at || '',
+      pushedAt: data.pushed_at || '',
+      description: clampStr_(data.description || '', 200),
+      isPrivate: !!data.private,
+      isFork: !!data.fork,
+      isArchived: !!data.archived,
+      hasWiki: !!data.has_wiki,
+      defaultBranch: data.default_branch || ''
+    };
+  } catch (e) { return null; }
+}
+
+function stripHtml_(html) {
+  if (!html) return '';
+  var s = String(html);
+  // script/style 통째로 제거
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  s = s.replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ');
+  // 태그 제거
+  s = s.replace(/<[^>]+>/g, ' ');
+  // HTML entity 일부 디코드
+  s = s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  // 공백 정리
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
+function fetchDemoSnapshot_(url) {
+  if (!url) return null;
+  var u = String(url).trim();
+  if (!/^https?:\/\//i.test(u)) return null;
+  try {
+    var resp = UrlFetchApp.fetch(u, {
+      muteHttpExceptions: true,
+      followRedirects: true,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ChallengeBot/1.0)' }
+    });
+    var code = resp.getResponseCode();
+    if (code >= 400) return { status: code, alive: false };
+    var html = resp.getContentText() || '';
+    // 메타 정보 추출
+    var titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    var descMatch = html.match(/<meta\s+name=["']description["']\s+content=["']([^"']+)["']/i)
+                 || html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i);
+    var ogTitleMatch = html.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i);
+    var h1Matches = (html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/gi) || []).slice(0, 3).map(function(m){ return stripHtml_(m); });
+    var body = stripHtml_(html);
+    var htmlSizeKB = Math.round(html.length / 1024);
+    return {
+      status: code,
+      alive: true,
+      htmlSizeKB: htmlSizeKB,
+      title: clampStr_(titleMatch ? stripHtml_(titleMatch[1]) : '', 150),
+      ogTitle: clampStr_(ogTitleMatch ? ogTitleMatch[1] : '', 150),
+      description: clampStr_(descMatch ? descMatch[1] : '', 300),
+      h1: h1Matches,
+      textPreview: clampStr_(body, 1500),
+      isSpaShell: body.length < 200  // 텍스트가 거의 없으면 SPA 빈 shell로 의심
+    };
+  } catch (e) {
+    return { status: 0, alive: false, error: String(e).substring(0, 100) };
+  }
+}
+
+// 사용자 입력 URL을 실제 fetch해 LLM에 전달할 증거 문자열 생성.
+// 결과 객체는 시트 evidenceJson 컬럼에 저장하고 양 phase 프롬프트에 주입.
+function gatherEvidence_(githubUrl, demoUrl) {
+  var evidence = { fetchedAt: new Date().toISOString() };
+  if (githubUrl) {
+    evidence.githubMeta = fetchGithubMetadata_(githubUrl);
+    evidence.githubReadme = fetchGithubReadme_(githubUrl);
+  }
+  if (demoUrl) {
+    evidence.demoSnapshot = fetchDemoSnapshot_(demoUrl);
+  }
+  return evidence;
+}
+
+// 증거 객체 → LLM 프롬프트용 markdown 텍스트.
+function formatEvidenceForPrompt_(evidence) {
+  if (!evidence) return '(URL 검증 자료 없음)';
+  var lines = [];
+
+  if (evidence.githubMeta) {
+    var m = evidence.githubMeta;
+    lines.push('[GitHub 저장소 실측]');
+    lines.push('  ⭐ Stars: ' + m.stars + ' / 🍴 Forks: ' + m.forks + ' / 👁 Watchers: ' + m.watchers);
+    lines.push('  주 언어: ' + (m.language || '(미상)') + ' / 크기: ' + m.sizeKB + 'KB');
+    lines.push('  생성: ' + (m.createdAt || '?').substring(0, 10) + ' / 마지막 push: ' + (m.pushedAt || '?').substring(0, 10));
+    if (m.description) lines.push('  설명: ' + m.description);
+    if (m.isFork) lines.push('  ⚠️ Fork된 저장소');
+    if (m.isArchived) lines.push('  ⚠️ Archived (개발 중단)');
+    if (m.isPrivate) lines.push('  ⚠️ Private (외부 검증 불가)');
+    lines.push('');
+  } else if (evidence.githubReadme === undefined && evidence.githubMeta === undefined) {
+    // GitHub URL 자체가 없는 경우는 안 적음
+  } else {
+    lines.push('[GitHub] 메타데이터 가져오기 실패 (private/존재하지 않음)');
+    lines.push('');
+  }
+
+  if (evidence.githubReadme) {
+    lines.push('[GitHub README 발췌 (3000자 이내)]');
+    lines.push(evidence.githubReadme);
+    lines.push('');
+  } else if (evidence.githubMeta) {
+    lines.push('[GitHub README] 발견되지 않음 (저장소에 README 없음)');
+    lines.push('');
+  }
+
+  if (evidence.demoSnapshot) {
+    var d = evidence.demoSnapshot;
+    lines.push('[데모 URL 실측]');
+    if (!d.alive) {
+      lines.push('  ⚠️ 접속 불가 (HTTP ' + d.status + ') — 데드 링크일 가능성');
+    } else {
+      lines.push('  HTTP 상태: ' + d.status + ' / HTML 크기: ' + d.htmlSizeKB + 'KB');
+      if (d.title) lines.push('  <title>: ' + d.title);
+      if (d.ogTitle && d.ogTitle !== d.title) lines.push('  og:title: ' + d.ogTitle);
+      if (d.description) lines.push('  meta description: ' + d.description);
+      if (d.h1 && d.h1.length) lines.push('  H1 헤더: ' + d.h1.join(' / '));
+      if (d.isSpaShell) lines.push('  ⚠️ HTML 본문 텍스트 거의 없음 — SPA 빈 shell 또는 로그인 게이트 가능');
+      if (d.textPreview) {
+        lines.push('  본문 발췌:');
+        lines.push('  ' + d.textPreview);
+      }
+    }
+    lines.push('');
+  }
+
+  if (lines.length === 0) return '(URL 검증 자료 없음)';
+  return lines.join('\n');
+}
+
 // "X는? Y는?"처럼 LLM이 한 entry에 여러 질문 우겨넣은 경우, 첫 물음표까지만 보존.
 // 물음표가 없으면 원문 유지.
 function normalizeSingleQuestion_(s) {
@@ -2526,79 +2713,8 @@ function normalizeSingleQuestion_(s) {
   return s;
 }
 
-// GitHub URL에서 README 본문을 추출 (사용자 설명의 과장 검증용).
-// raw.githubusercontent.com 호출 — auth 없음, 60req/hour 제한이지만 IR당 1회라 충분.
-// main → master 순으로 시도. 모두 실패하면 빈 문자열.
-function fetchGithubReadme_(url) {
-  if (!url) return '';
-  var m = String(url).match(/github\.com\/([\w.-]+)\/([\w.-]+)/i);
-  if (!m) return '';
-  var owner = m[1];
-  var repo = m[2].replace(/\.git$/i, '').replace(/\/.*$/, '');
-  var branches = ['main', 'master'];
-  for (var bi = 0; bi < branches.length; bi++) {
-    var rawUrl = 'https://raw.githubusercontent.com/' + owner + '/' + repo + '/' + branches[bi] + '/README.md';
-    try {
-      var resp = UrlFetchApp.fetch(rawUrl, { muteHttpExceptions: true, followRedirects: true });
-      if (resp.getResponseCode() === 200) {
-        var body = resp.getContentText();
-        // 4000자로 컷 (앞부분이 보통 가장 중요)
-        return body.length > 4000 ? body.substring(0, 4000) + '\n…[truncated]' : body;
-      }
-    } catch (e) {
-      Logger.log('fetchGithubReadme_ branch ' + branches[bi] + ' failed: ' + e.message);
-    }
-  }
-  return '';
-}
-
-// 데모 URL의 실제 페이지를 fetch해서 title + meta description + 본문 텍스트 발췌.
-// SPA의 경우 초기 HTML만 잡혀 빈약할 수 있으나, 적어도 사이트 존재성·기본 마케팅 카피는 확인됨.
-function fetchDemoSnapshot_(url) {
-  if (!url) return '';
-  try {
-    var resp = UrlFetchApp.fetch(url, {
-      muteHttpExceptions: true,
-      followRedirects: true,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ClaudeChallenge/1.0)' }
-    });
-    if (resp.getResponseCode() !== 200) return '';
-    var html = resp.getContentText();
-    var parts = [];
-
-    // <title>
-    var titleM = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    if (titleM) parts.push('TITLE: ' + titleM[1].trim());
-    // meta description
-    var metaM = html.match(/<meta\s+[^>]*name\s*=\s*["']description["'][^>]*content\s*=\s*["']([^"']+)["']/i);
-    if (metaM) parts.push('META: ' + metaM[1].trim());
-    // og:description
-    var ogM = html.match(/<meta\s+[^>]*property\s*=\s*["']og:description["'][^>]*content\s*=\s*["']([^"']+)["']/i);
-    if (ogM) parts.push('OG: ' + ogM[1].trim());
-
-    // 본문 텍스트: script/style 제거 후 태그 strip
-    var text = html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
-      .replace(/<!--([\s\S]*?)-->/g, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (text) {
-      parts.push('BODY: ' + (text.length > 2000 ? text.substring(0, 2000) + '…[truncated]' : text));
-    }
-    return parts.join('\n');
-  } catch (e) {
-    Logger.log('fetchDemoSnapshot_ failed: ' + e.message);
-    return '';
-  }
-}
+// (옛 fetchGithubReadme_/fetchDemoSnapshot_ 중복 정의 제거됨 —
+//  새 버전이 parseGithubUrl_ + 메타데이터 + 구조화 데모 snapshot을 함께 반환.)
 
 // 사용자에게 보여지는 note/summary에서 내부 메커니즘(앵커) 언급 제거.
 // LLM이 프롬프트 어겨도 안전망 — "앵커 #1 대비 -24%" 같은 패턴을 자동 strip.
@@ -2865,6 +2981,17 @@ function handleEvalStart(params) {
     sh.getRange(insertedRowNum, 23).setValue(JSON.stringify(features));  // featuresJson (column W = 23, 1-indexed)
   }
 
+  // 1.7단계: URL 실측 증거 수집 (사용자 주장 vs 실제 데이터 교차 검증용)
+  // GitHub README/메타 + 데모 HTML snapshot. 실패해도 graceful — 빈 evidence로 진행.
+  // 시트 evidenceJson 컬럼(25)에 저장 → evalSubmit에서 재사용 (재fetch 없음).
+  var evidence = gatherEvidence_(githubUrl, demoUrl);
+  try {
+    sh.getRange(insertedRowNum, 25).setValue(JSON.stringify(evidence));
+  } catch (e) {
+    // 사이즈 초과 등 — 평가는 계속 진행
+  }
+  var evidenceText = formatEvidenceForPrompt_(evidence);
+
   // 2단계: LLM 호출 (vision 가능)
   var fileLabel = hasFile ? ('첨부: ' + fileName + ' (' + fileType + (/^image\//i.test(fileType) ? ', VC가 직접 확인합니다' : '') + ')') : '(첨부 없음)';
 
@@ -2873,23 +3000,28 @@ function handleEvalStart(params) {
     '1. VC Vault (보수 엔터프라이즈): 매출 모델, 유료 전환, 운영 비용 중시. 토이 프로젝트는 박하게.\n' +
     '2. VC Rocket (얼리 그로스): 시장 잠재력, 바이럴, UX 중시. PMF 보이면 후하게.\n' +
     '3. VC Forge (기술 시드): 코드 품질, 엔지니어링 깊이, 기술 해자 중시. 클론은 박하게.\n\n' +
+    '★ 핵심 ★ — 사용자가 작성한 설명은 과장 가능성이 큽니다. 실제 URL 검증 자료(GitHub stats / README / 데모 HTML)를 ' +
+    '교차 참조해 "주장과 실제가 일치하는지" 검증하는 질문을 우선하세요.\n\n' +
     '각 VC가 IR 후속 질문을 1개씩(총 3개) 작성합니다.\n\n' +
     '★ 절대 규칙 ★\n' +
     '- 각 VC당 정확히 1개의 질문 — 물음표("?")는 정확히 1번만 사용.\n' +
     '- "X는? Y는?"처럼 한 항목에 여러 궁금증을 몰아넣는 것은 금지.\n' +
     '- 한 질문당 30자 이내, 한 문장으로 끝낼 것.\n' +
     '- 각 VC의 시각이 명확히 드러나도록.\n' +
-    '- 평가에 결정적인 단 하나의 정보를 끌어내는 질문일 것.\n\n' +
+    '- 사용자 설명과 실측 데이터가 어긋나는 부분이 있으면 그것을 파고드는 질문 우선.\n\n' +
     '반드시 JSON으로만 응답 (다른 텍스트 금지):\n' +
     '{"questions":[{"vc":"VC Vault","q":"..."},{"vc":"VC Rocket","q":"..."},{"vc":"VC Forge","q":"..."}]}';
 
   var userText =
+    '[사용자 주장 — 과장 가능성 있음]\n' +
     '프로젝트명: ' + projectName + '\n' +
     '한줄 설명: ' + oneLiner + '\n' +
     '상세 설명: ' + description + '\n' +
     'GitHub: ' + (githubUrl || '(미제출)') + '\n' +
     '데모: ' + (demoUrl || '(미제출)') + '\n' +
-    fileLabel;
+    fileLabel + '\n\n' +
+    '[★ URL 실측 검증 자료 — 가장 신뢰할 수 있는 근거 ★]\n' +
+    evidenceText;
 
   var imageData = fileId ? getEvalFileBase64_(fileId) : null;
   var userContent = buildLLMUserContent_(userText, imageData);
@@ -3015,9 +3147,25 @@ function handleEvalSubmit(params) {
     '- VC Rocket (얼리 그로스): 시장 잠재력·바이럴·UX 중시. PMF 보이면 가장 후하게 평가.\n' +
     '- VC Forge (기술 시드): 코드 품질·엔지니어링 깊이·기술 해자 중시. 클론은 박하게, 진짜 기술은 후하게.\n\n' +
     '═══════════════════════════════════════\n' +
-    '★ 평가 핵심 원칙 — 앵커 기반 비교 평가 ★\n' +
+    '★ 1순위 원칙 — 실측 자료 우선, 사용자 주장은 검증 대상 ★\n' +
+    '═══════════════════════════════════════\n' +
+    '사용자 설명(상세 설명, Q&A 답변)은 IR 시장에서 흔히 그렇듯 과장될 수 있습니다.\n' +
+    '실측 자료(GitHub stars/commit/README, 데모 HTML)와 사용자 주장이 어긋날 때:\n' +
+    '  ✓ 실측 자료를 신뢰하고 주장은 평가절하\n' +
+    '  ✓ 과장된 주장이 클수록 더 박하게 평가 (신뢰성 디스카운트)\n\n' +
+    '구체적 검증 체크리스트:\n' +
+    '- "유료 사용자 N명" 주장 vs GitHub: 결제 페이지/Stripe·Toss 코드/구독 모델 흔적이 있나?\n' +
+    '- "PMF 신호" 주장 vs GitHub stars / 데모 본문 텍스트의 실제 콘텐츠 양\n' +
+    '- "기술적 차별화" 주장 vs README의 실제 구현 깊이 / 단순 boilerplate인가?\n' +
+    '- "활발한 개발" 주장 vs 마지막 push 날짜 / 저장소 크기 / commit 빈도\n' +
+    '- "수십명 사용 중" 주장 vs 데모가 SPA 빈 shell이거나 로그인 게이트만 보임\n' +
+    '- 데모 URL이 죽었거나(HTTP 4xx/5xx), GitHub가 fork/archived/private → 강한 디스카운트\n\n' +
+    '주장과 실측의 괴리가 크면 "5천원~10만원" 영역으로 떨어뜨려도 됩니다. 정직한 평가.\n' +
+    '주장이 실측 자료로 뒷받침되면 그만큼 정상가 또는 후한 평가.\n\n' +
+    '═══════════════════════════════════════\n' +
+    '★ 2순위 원칙 — 앵커 기반 비교 평가 ★\n' +
     '═══════════════════════════════════════\n\n' +
-    '아래 앵커들은 이 챌린지의 평가 기준점입니다. 새 프로젝트는 반드시 이 앵커들과 비교하여 정량적 위치를 결정하세요.\n\n' +
+    '아래 앵커들은 이 챌린지의 평가 기준점입니다. 실측 자료로 검증한 후, 새 프로젝트의 진짜 가치를 이 앵커들과 비교하여 정량적 위치를 결정하세요.\n\n' +
     anchorsText + '\n\n' +
     '═══════════════════════════════════════\n' +
     '★ 가장 중요한 원칙 — 실제 콘텐츠 우선 신뢰 ★\n' +
@@ -3065,32 +3213,27 @@ function handleEvalSubmit(params) {
     ' "summary":"<3 VC의 결론과 차이를 자연스럽게 종합. 앵커 언급 금지.>"\n' +
     '}';
 
-  // 실제 URL 콘텐츠 fetch — 사용자 설명의 과장 검증용
-  var githubSnapshot = githubUrl ? fetchGithubReadme_(githubUrl) : '';
-  var demoSnapshot = demoUrl ? fetchDemoSnapshot_(demoUrl) : '';
+  // evalStart 시점에 fetch해 시트에 저장한 evidence 재사용 (재fetch 없음).
+  // 시트에 없으면(옛 row) 즉시 fetch 후 저장. 두 경우 모두 graceful.
+  var evidenceRaw = String(row[24] || '');
+  var evidence = null;
+  try { evidence = evidenceRaw ? JSON.parse(evidenceRaw) : null; } catch (e) { evidence = null; }
+  if (!evidence) {
+    evidence = gatherEvidence_(githubUrl, demoUrl);
+    try { sh.getRange(sheetRow, 25).setValue(JSON.stringify(evidence)); } catch (e2) {}
+  }
+  var evidenceText = formatEvidenceForPrompt_(evidence);
 
-  var userText = '[사용자가 작성한 1차 자료 — 과장 가능성 있음, 실제 콘텐츠로 검증할 것]\n' +
+  var userText = '[사용자가 작성한 1차 자료 — 과장 가능성 있음, 실측 자료로 교차 검증]\n' +
     '프로젝트명: ' + projectName + '\n' +
     '한줄 설명: ' + oneLiner + '\n' +
     '상세 설명: ' + description + '\n' +
     'GitHub: ' + (githubUrl || '(미제출)') + '\n' +
     '데모: ' + (demoUrl || '(미제출)') + '\n' +
     (fileId ? '첨부 파일: 있음 (image면 직접 확인)\n' : '첨부 파일: 없음\n') +
-    '\n[추출된 특성]\n' + featuresInline_(features) + '\n';
-
-  // ── 실제 URL 콘텐츠 (가장 신뢰할 수 있는 근거) ──
-  if (githubSnapshot) {
-    userText += '\n[★ GitHub README 실제 내용 — 가장 신뢰할 만한 근거 ★]\n' + githubSnapshot + '\n';
-  } else if (githubUrl) {
-    userText += '\n[GitHub README fetch 실패 또는 비공개/없음 — 검증 부족으로 보수적 평가]\n';
-  }
-  if (demoSnapshot) {
-    userText += '\n[★ 데모 페이지 실제 스냅샷 — 가장 신뢰할 만한 근거 ★]\n' + demoSnapshot + '\n';
-  } else if (demoUrl) {
-    userText += '\n[데모 URL fetch 실패 또는 빈 페이지 — 검증 부족으로 보수적 평가]\n';
-  }
-
-  userText += '\n[Q&A]\n';
+    '\n[추출된 특성]\n' + featuresInline_(features) + '\n' +
+    '\n[★ URL 실측 검증 자료 — 가장 신뢰할 수 있는 근거 ★]\n' + evidenceText + '\n' +
+    '\n[Q&A]\n';
   for (var q = 0; q < qa.length; q++) {
     userText += qa[q].vc + ' Q: ' + qa[q].question + '\nA: ' + qa[q].answer + '\n';
   }
