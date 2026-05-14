@@ -447,6 +447,25 @@
         </div>
       </div>
 
+      <!-- ⚠️ python.org Python 사용 시 사전 조치 (SSL 인증서) -->
+      <div class="alert alert-yellow" style="margin-bottom:20px;">
+        <strong>⚠️ macOS python.org Python 사용자 — 사전 1회 조치 필요</strong><br>
+        <span style="color:#a1a1aa;">
+          <a href="https://www.python.org" target="_blank" style="color:#fbbf24;">python.org</a>에서 설치한 Python은 SSL 인증서가 함께 등록되지 않아,
+          그대로 실행하면 모든 HTTPS 요청이 <code>CERTIFICATE_VERIFY_FAILED</code>로 실패합니다.
+          <strong>다음 명령을 터미널에 한 번 실행</strong>해 해결한 뒤 Step 2로 넘어가세요.
+        </span>
+        <div class="code" style="margin-top:8px;">
+          <button class="copy-btn" onclick="copyText('/Applications/Python\\ 3.13/Install\\ Certificates.command')">복사</button>
+          /Applications/Python\ 3.13/Install\ Certificates.command
+        </div>
+        <div style="color:#a1a1aa;font-size:12px;margin-top:8px;line-height:1.6;">
+          ▸ Python 버전이 다르면 <code>3.13</code> 부분만 본인 버전으로 변경 (예: <code>3.12</code>)<br>
+          ▸ 또는 Finder에서 <strong>응용 프로그램 &rarr; Python 3.x &rarr; Install Certificates.command</strong> 더블클릭<br>
+          ▸ Homebrew Python (<code>brew install python</code>) 사용자는 시스템 인증서를 자동 사용하므로 <strong>이 단계 불필요</strong>
+        </div>
+      </div>
+
       <!-- Step 2: 최초 실행 -->
       <div class="step">
         <div class="step-num">2</div>

@@ -20,24 +20,9 @@ v2.0:
   - 가격 가중치는 서버 측에서 계산 (이 스크립트는 순수 토큰만 수집)
 """
 
-import json, glob, os, sys, io, time, uuid, ssl, platform, urllib.request, urllib.error
+import json, glob, os, sys, io, time, uuid, platform, urllib.request, urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
-
-
-def _create_ssl_context():
-    """SSL 컨텍스트 생성. macOS python.org Python은 시스템 keychain을 사용하지 않아
-    인증서 검증 실패가 자주 발생함. certifi가 설치돼 있으면 그 번들을 명시적으로 사용해
-    'Install Certificates.command' 미실행 환경도 자동 우회한다.
-    certifi 없으면 시스템 기본 (Linux/Windows/Homebrew Python은 보통 정상 작동)."""
-    try:
-        import certifi  # pip 설치 Python에는 보통 포함됨
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        return ssl.create_default_context()
-
-
-SSL_CONTEXT = _create_ssl_context()
 
 # Windows UTF-8
 if sys.platform == "win32":
@@ -490,24 +475,18 @@ def _post_once(payload):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT, context=SSL_CONTEXT) as resp:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         if e.code in (301, 302, 303, 307, 308):
             redirect_url = e.headers.get("Location", "")
             if redirect_url:
                 req2 = urllib.request.Request(redirect_url)
-                with urllib.request.urlopen(req2, timeout=HTTP_TIMEOUT, context=SSL_CONTEXT) as resp2:
+                with urllib.request.urlopen(req2, timeout=HTTP_TIMEOUT) as resp2:
                     return json.loads(resp2.read().decode("utf-8"))
         return {"success": False, "error": f"HTTP {e.code}"}
     except Exception as e:
-        msg = str(e)
-        # macOS python.org Python의 흔한 SSL 인증서 문제 — 친절한 안내 메시지 추가
-        if "CERTIFICATE_VERIFY_FAILED" in msg:
-            msg = ("SSL 인증서 검증 실패. macOS python.org Python 사용자라면 터미널에서 "
-                   "'pip3 install --upgrade certifi' 실행 후 다시 시도하세요. "
-                   "(원본 오류: " + msg + ")")
-        return {"success": False, "error": msg}
+        return {"success": False, "error": str(e)}
 
 
 def report_usage(cfg, usage):
