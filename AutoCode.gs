@@ -1513,11 +1513,17 @@ function handleReportUsage(params) {
   };
 }
 
-// ── 손상 스케일 정밀 진단 (read-only, 절대 쓰지 않음) ──
-// "리그 전환일 T의 T-1·T-2 행이 전환 후 리그(to)로 stamp됐는가"라는
-// 명확한 시그니처만 검사. 초기 리그 추정 안 함 → false positive 없음.
-// 반환: 손상 의심 행 목록 + 총계. 아무것도 수정하지 않음.
+// ── 리그 손상 진단 & 복원 (단일 코드 경로) ──
+// 시그니처: 전환일 T의 판정 3일(T-1·T-2·T-3)은 멤버가 명백히 tr.from 리그였던 날.
+// 그 행 저장 league가 from이 아니면 = 손상 → from으로 복원 + 포인트 재계산.
+// 초기 리그 추정 없음 → false positive 0.
+//   applyLeagueCorruptionFix(false) = dry-run (읽기만, 로그/반환만)
+//   applyLeagueCorruptionFix(true)  = 실제 시트 반영
+// diagnoseLeagueCorruption()는 (false) 호출 thin wrapper.
 function diagnoseLeagueCorruption() {
+  return applyLeagueCorruptionFix(false);
+}
+function applyLeagueCorruptionFix(applyChanges) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var recordSheet = ss.getSheetByName('인증기록');
   var logSheet = ss.getSheetByName('리그이동기록');
@@ -1610,101 +1616,37 @@ function diagnoseLeagueCorruption() {
   });
   var perMember = Object.keys(byMember).sort().map(function(n) { return n + ':' + byMember[n]; }).join(' / ');
 
+  // ── 실제 복원 (applyChanges=true일 때만) ──
+  // 진단과 100% 동일한 uniq 목록만 수정 → 진단=적용 보장.
+  // league 칸(10) = correctLeague(=tr.from), points 칸(5) = fixedPts.
+  // forward-freeze(commit 2f47210) 덕에 이후 48h 재보고가 다시 안 덮어씀.
+  if (applyChanges) {
+    uniq.forEach(function(h) {
+      recordSheet.getRange(h.row, 10).setNumberFormat('@').setValue(h.correctLeague);
+      recordSheet.getRange(h.row, 5).setValue(h.fixedPts);
+    });
+  }
+
   var diag = '[진단 메타] 전환로그 ' + txParsed + '/' + txTotal + '건 파싱 (멤버 ' +
              Object.keys(tl).length + '명), 샘플전환=' + (sampleTx || '없음') +
              ' | 인증기록 idx ' + idxCount + '건, 샘플키=' + sampleIdx;
-  var out = '[손상 진단] 총 ' + uniq.length + '건 (멤버 ' + Object.keys(byMember).length + '명)\n' +
-            diag + '\n멤버별: ' + perMember + '\n\n' + lines.join('\n');
+  var head = applyChanges
+    ? '[복원 적용 완료] ' + uniq.length + '건 수정 (멤버 ' + Object.keys(byMember).length + '명)'
+    : '[손상 진단 — DRY RUN] 총 ' + uniq.length + '건 (멤버 ' + Object.keys(byMember).length + '명)';
+  var out = head + '\n' + diag + '\n멤버별: ' + perMember + '\n\n' + lines.join('\n');
   Logger.log(out);
   return out;
 }
 
-// ── 과거 인증기록 리그 복원 (admin 1회용) ──
-// 48h 재보고 버그로 league 칸이 현재 리그로 덮어써진 행들을, 리그이동기록 로그
-// 타임라인을 기준으로 "그 날짜에 실제로 속했던 리그"로 재계산해 복원한다.
-// 포인트도 복원된 리그 기준으로 재계산.
-//
-// 사용: 먼저 repairRecordLeagues(false) 로 dry-run(로그만) → 검토 후
-//       repairRecordLeagues(true) 로 실제 반영.
-function repairRecordLeagues(applyChanges) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var recordSheet = ss.getSheetByName('인증기록');
-  var logSheet = ss.getSheetByName('리그이동기록');
-  var memberSheet = ss.getSheetByName('멤버');
-  if (!recordSheet || !memberSheet) return 'no sheet';
-
-  // 멤버별 현재(기본) 리그 — 전환 기록이 전혀 없을 때 fallback
-  var memberLeague = {};
-  var mVals = memberSheet.getDataRange().getValues();
-  for (var i = 1; i < mVals.length; i++) {
-    var mn = String(mVals[i][0] || '').trim();
-    if (mn) memberLeague[mn] = String(mVals[i][4] || LEAGUE_1M).trim();
-  }
-
-  // 멤버별 리그 전환 타임라인 [{date:'YYYY-MM-DD', from, to}] (timestamp asc)
-  var timeline = {};
-  if (logSheet && logSheet.getLastRow() >= 2) {
-    var lVals = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, 5).getValues();
-    lVals.forEach(function(r) {
-      var ts = String(r[0] || '');
-      var nk = String(r[1] || '').trim();
-      if (!nk || ts.length < 10) return;
-      if (!timeline[nk]) timeline[nk] = [];
-      timeline[nk].push({
-        date: ts.substring(0, 10),
-        from: String(r[2] || '').trim(),
-        to: String(r[3] || '').trim()
-      });
-    });
-    Object.keys(timeline).forEach(function(nk) {
-      timeline[nk].sort(function(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
-    });
-  }
-
-  function leagueOnDate(nick, dStr) {
-    var tl = timeline[nick];
-    if (!tl || !tl.length) return memberLeague[nick] || LEAGUE_1M;
-    var league = tl[0].from || memberLeague[nick] || LEAGUE_1M;  // 첫 전환 이전 상태
-    for (var t = 0; t < tl.length; t++) {
-      if (tl[t].date <= dStr) league = tl[t].to;  // 전환일 당일부터 적용
-      else break;
-    }
-    return (league === LEAGUE_10M || league === LEAGUE_1M) ? league : LEAGUE_1M;
-  }
-
-  var rec = recordSheet.getDataRange().getValues();
-  var changes = [];
-  for (var k = 1; k < rec.length; k++) {
-    if (String(rec[k][3]).trim() !== 'session') continue;
-    var nick = String(rec[k][0] || '').trim();
-    if (!nick) continue;
-    var dStr = toDateStr(rec[k][8]) || toDateStr(rec[k][5]);
-    if (!dStr || dStr < LEAGUE_ERA_START) continue;  // legacy 기간은 건드리지 않음
-    var curLg = String(rec[k][9] || '').trim();
-    var correctLg = leagueOnDate(nick, dStr);
-    if (curLg === correctLg) continue;
-    var score = safeInt(rec[k][7]);
-    var newPts = calcPointsForLeague_(score, correctLg);
-    changes.push({ row: k + 1, nick: nick, date: dStr,
-      fromLg: curLg, toLg: correctLg,
-      fromPts: safeInt(rec[k][4]), toPts: newPts });
-  }
-
-  var summary = changes.map(function(c) {
-    return c.nick + ' ' + c.date + ': ' + c.fromLg + '→' + c.toLg +
-           ' (pts ' + c.fromPts + '→' + c.toPts + ')';
-  }).join('\n');
-  Logger.log('[repairRecordLeagues] ' + (applyChanges ? 'APPLY' : 'DRY-RUN') +
-             ' — ' + changes.length + '건\n' + summary);
-
-  if (applyChanges) {
-    changes.forEach(function(c) {
-      recordSheet.getRange(c.row, 10).setValue(c.toLg);
-      recordSheet.getRange(c.row, 5).setValue(c.toPts);
-    });
-  }
-
-  return (applyChanges ? '복원 적용 ' : 'DRY-RUN ') + changes.length + '건\n' + summary;
+// ⚠️ DEPRECATED & 비활성화 ──────────────────────────────
+// 이 함수는 전체 history를 타임라인 재구성으로 비교해 215건 false positive를
+// 만들어내는 치명적 버그가 있었습니다 (초기 리그 추정 불가 + timestamp Date
+// 파싱 깨짐). 절대 사용 금지. 정확한 복원은 applyLeagueCorruptionFix(true).
+function repairRecordLeagues() {
+  throw new Error(
+    'repairRecordLeagues는 폐기되었습니다 (215건 오복원 버그). ' +
+    '진단: diagnoseLeagueCorruption() / 복원: applyLeagueCorruptionFix(true) 사용'
+  );
 }
 
 // ── 수동 스크린샷 업로드 ──
