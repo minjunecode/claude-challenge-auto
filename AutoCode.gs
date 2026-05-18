@@ -1513,6 +1513,93 @@ function handleReportUsage(params) {
   };
 }
 
+// ── 손상 스케일 정밀 진단 (read-only, 절대 쓰지 않음) ──
+// "리그 전환일 T의 T-1·T-2 행이 전환 후 리그(to)로 stamp됐는가"라는
+// 명확한 시그니처만 검사. 초기 리그 추정 안 함 → false positive 없음.
+// 반환: 손상 의심 행 목록 + 총계. 아무것도 수정하지 않음.
+function diagnoseLeagueCorruption() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var recordSheet = ss.getSheetByName('인증기록');
+  var logSheet = ss.getSheetByName('리그이동기록');
+  if (!recordSheet || !logSheet) return 'no sheet';
+  if (logSheet.getLastRow() < 2) return '전환 기록 없음 → 손상 0건';
+
+  // 멤버별 전환 [{date, from, to}] (timestamp asc)
+  var tl = {};
+  var lVals = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, 5).getValues();
+  lVals.forEach(function(r) {
+    var ts = String(r[0] || ''); var nk = String(r[1] || '').trim();
+    if (!nk || ts.length < 10) return;
+    if (!tl[nk]) tl[nk] = [];
+    tl[nk].push({ date: ts.substring(0, 10), from: String(r[2] || '').trim(), to: String(r[3] || '').trim() });
+  });
+  Object.keys(tl).forEach(function(nk) {
+    tl[nk].sort(function(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+  });
+
+  // 인증기록 인덱스: (nick|date) → {row, league, pts, score}
+  var rec = recordSheet.getDataRange().getValues();
+  var idx = {};
+  for (var k = 1; k < rec.length; k++) {
+    if (String(rec[k][3]).trim() !== 'session') continue;
+    var nk = String(rec[k][0] || '').trim();
+    var ds = toDateStr(rec[k][8]) || toDateStr(rec[k][5]);
+    if (!nk || !ds) continue;
+    idx[nk + '|' + ds] = { row: k + 1, league: String(rec[k][9] || '').trim(),
+                           pts: safeInt(rec[k][4]), score: safeInt(rec[k][7]) };
+  }
+
+  function addDays(ds, n) {
+    var p = ds.split('-');
+    var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2);
+  }
+
+  var hits = [];
+  Object.keys(tl).forEach(function(nk) {
+    tl[nk].forEach(function(tr) {
+      if (tr.date < LEAGUE_ERA_START) return;
+      [1, 2].forEach(function(off) {            // T-1, T-2 만 검사
+        var vd = addDays(tr.date, -off);
+        if (vd < LEAGUE_ERA_START) return;
+        var cell = idx[nk + '|' + vd];
+        if (!cell) return;
+        // 시그니처: 그 행 league가 '전환 후 리그(to)'면 = 재보고가 덮어쓴 손상.
+        // (정상이라면 그날은 from 리그여야 함)
+        if (cell.league === tr.to && tr.to !== tr.from) {
+          var fixedPts = calcPointsForLeague_(cell.score, tr.from);
+          hits.push({ nick: nk, date: vd, txDate: tr.date,
+            badLeague: cell.league, correctLeague: tr.from,
+            curPts: cell.pts, fixedPts: fixedPts, row: cell.row });
+        }
+      });
+    });
+  });
+
+  // 중복 제거 (전환이 가까우면 같은 행이 2번 잡힐 수 있음)
+  var seen = {}; var uniq = [];
+  hits.forEach(function(h) {
+    var key = h.nick + '|' + h.date;
+    if (seen[key]) return;
+    seen[key] = 1; uniq.push(h);
+  });
+
+  var byMember = {};
+  uniq.forEach(function(h) { byMember[h.nick] = (byMember[h.nick] || 0) + 1; });
+
+  var lines = uniq.map(function(h) {
+    return h.nick + ' ' + h.date + ' (전환 ' + h.txDate + '): ' +
+           h.badLeague + '→' + h.correctLeague + ' / pts ' + h.curPts + '→' + h.fixedPts;
+  });
+  var perMember = Object.keys(byMember).sort().map(function(n) { return n + ':' + byMember[n]; }).join(' / ');
+
+  var out = '[손상 진단] 총 ' + uniq.length + '건 (멤버 ' + Object.keys(byMember).length + '명)\n' +
+            '멤버별: ' + perMember + '\n\n' + lines.join('\n');
+  Logger.log(out);
+  return out;
+}
+
 // ── 과거 인증기록 리그 복원 (admin 1회용) ──
 // 48h 재보고 버그로 league 칸이 현재 리그로 덮어써진 행들을, 리그이동기록 로그
 // 타임라인을 기준으로 "그 날짜에 실제로 속했던 리그"로 재계산해 복원한다.
