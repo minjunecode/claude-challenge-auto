@@ -1472,11 +1472,23 @@ function handleReportUsage(params) {
       for (var k = 1; k < records.length; k++) {
         var storedDate = toDateStr(records[k][8]) || toDateStr(records[k][5]);
         if (String(records[k][0]) === nickname && String(records[k][6]) === 'auto' && storedDate === date) {
-          recordSheet.getRange(k + 1, 5).setValue(earnedPts);
+          // ── 보고 시점 리그 freeze ──
+          // 48h 윈도우 재보고 시, 이미 기록된 리그를 현재 리그로 덮어쓰면
+          // 강등/승급 후 과거 O/X·포인트가 소급 변경됨. 최초 기록 리그를 고정.
+          var existingLeague = String(records[k][9] || '').trim();
+          var frozenLeague = existingLeague || recordLeague;  // 빈 값이면 최초 stamp
+          var frozenPts = isLegacy
+            ? calcPointsLegacy_(totalScore)
+            : (frozenLeague ? calcPointsForLeague_(totalScore, frozenLeague)
+                            : calcPointsForLeague_(totalScore, userLeague));
+          recordSheet.getRange(k + 1, 5).setValue(frozenPts);
           recordSheet.getRange(k + 1, 6).setValue(now);
           recordSheet.getRange(k + 1, 8).setValue(totalScore);
           recordSheet.getRange(k + 1, 9).setNumberFormat('@').setValue(date);
-          recordSheet.getRange(k + 1, 10).setValue(recordLeague);
+          // 리그 칸은 비어있을 때만 최초 1회 기록. 이후 재보고는 절대 덮어쓰지 않음.
+          if (!existingLeague && recordLeague) {
+            recordSheet.getRange(k + 1, 10).setValue(recordLeague);
+          }
           alreadyExists = true;
           break;
         }
@@ -1499,6 +1511,94 @@ function handleReportUsage(params) {
     success: true, message: '사용량 보고 완료',
     date: date, score: score, totalScore: totalScore, machine_id: machineId
   };
+}
+
+// ── 과거 인증기록 리그 복원 (admin 1회용) ──
+// 48h 재보고 버그로 league 칸이 현재 리그로 덮어써진 행들을, 리그이동기록 로그
+// 타임라인을 기준으로 "그 날짜에 실제로 속했던 리그"로 재계산해 복원한다.
+// 포인트도 복원된 리그 기준으로 재계산.
+//
+// 사용: 먼저 repairRecordLeagues(false) 로 dry-run(로그만) → 검토 후
+//       repairRecordLeagues(true) 로 실제 반영.
+function repairRecordLeagues(applyChanges) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var recordSheet = ss.getSheetByName('인증기록');
+  var logSheet = ss.getSheetByName('리그이동기록');
+  var memberSheet = ss.getSheetByName('멤버');
+  if (!recordSheet || !memberSheet) return 'no sheet';
+
+  // 멤버별 현재(기본) 리그 — 전환 기록이 전혀 없을 때 fallback
+  var memberLeague = {};
+  var mVals = memberSheet.getDataRange().getValues();
+  for (var i = 1; i < mVals.length; i++) {
+    var mn = String(mVals[i][0] || '').trim();
+    if (mn) memberLeague[mn] = String(mVals[i][4] || LEAGUE_1M).trim();
+  }
+
+  // 멤버별 리그 전환 타임라인 [{date:'YYYY-MM-DD', from, to}] (timestamp asc)
+  var timeline = {};
+  if (logSheet && logSheet.getLastRow() >= 2) {
+    var lVals = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, 5).getValues();
+    lVals.forEach(function(r) {
+      var ts = String(r[0] || '');
+      var nk = String(r[1] || '').trim();
+      if (!nk || ts.length < 10) return;
+      if (!timeline[nk]) timeline[nk] = [];
+      timeline[nk].push({
+        date: ts.substring(0, 10),
+        from: String(r[2] || '').trim(),
+        to: String(r[3] || '').trim()
+      });
+    });
+    Object.keys(timeline).forEach(function(nk) {
+      timeline[nk].sort(function(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+    });
+  }
+
+  function leagueOnDate(nick, dStr) {
+    var tl = timeline[nick];
+    if (!tl || !tl.length) return memberLeague[nick] || LEAGUE_1M;
+    var league = tl[0].from || memberLeague[nick] || LEAGUE_1M;  // 첫 전환 이전 상태
+    for (var t = 0; t < tl.length; t++) {
+      if (tl[t].date <= dStr) league = tl[t].to;  // 전환일 당일부터 적용
+      else break;
+    }
+    return (league === LEAGUE_10M || league === LEAGUE_1M) ? league : LEAGUE_1M;
+  }
+
+  var rec = recordSheet.getDataRange().getValues();
+  var changes = [];
+  for (var k = 1; k < rec.length; k++) {
+    if (String(rec[k][3]).trim() !== 'session') continue;
+    var nick = String(rec[k][0] || '').trim();
+    if (!nick) continue;
+    var dStr = toDateStr(rec[k][8]) || toDateStr(rec[k][5]);
+    if (!dStr || dStr < LEAGUE_ERA_START) continue;  // legacy 기간은 건드리지 않음
+    var curLg = String(rec[k][9] || '').trim();
+    var correctLg = leagueOnDate(nick, dStr);
+    if (curLg === correctLg) continue;
+    var score = safeInt(rec[k][7]);
+    var newPts = calcPointsForLeague_(score, correctLg);
+    changes.push({ row: k + 1, nick: nick, date: dStr,
+      fromLg: curLg, toLg: correctLg,
+      fromPts: safeInt(rec[k][4]), toPts: newPts });
+  }
+
+  var summary = changes.map(function(c) {
+    return c.nick + ' ' + c.date + ': ' + c.fromLg + '→' + c.toLg +
+           ' (pts ' + c.fromPts + '→' + c.toPts + ')';
+  }).join('\n');
+  Logger.log('[repairRecordLeagues] ' + (applyChanges ? 'APPLY' : 'DRY-RUN') +
+             ' — ' + changes.length + '건\n' + summary);
+
+  if (applyChanges) {
+    changes.forEach(function(c) {
+      recordSheet.getRange(c.row, 10).setValue(c.toLg);
+      recordSheet.getRange(c.row, 5).setValue(c.toPts);
+    });
+  }
+
+  return (applyChanges ? '복원 적용 ' : 'DRY-RUN ') + changes.length + '건\n' + summary;
 }
 
 // ── 수동 스크린샷 업로드 ──
