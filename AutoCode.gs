@@ -1560,30 +1560,33 @@ function diagnoseLeagueCorruption() {
   Object.keys(tl).forEach(function(nk) {
     tl[nk].forEach(function(tr) {
       if (tr.date < LEAGUE_ERA_START) return;
-      [1, 2].forEach(function(off) {            // T-1, T-2 만 검사
+      if (tr.to === tr.from) return;
+      // 배치가 판정한 3일(T-1·T-2·T-3) = 멤버가 명백히 from 리그였던 날.
+      // 이 날들의 저장 league가 from이 아니면(빈 값/to/기타) = 손상.
+      [1, 2, 3].forEach(function(off) {
         var vd = addDays(tr.date, -off);
         if (vd < LEAGUE_ERA_START) return;
         var cell = idx[nk + '|' + vd];
         if (!cell) return;
-        // 시그니처: 그 행 league가 '전환 후 리그(to)'면 = 재보고가 덮어쓴 손상.
-        // (정상이라면 그날은 from 리그여야 함)
-        if (cell.league === tr.to && tr.to !== tr.from) {
-          var fixedPts = calcPointsForLeague_(cell.score, tr.from);
-          hits.push({ nick: nk, date: vd, txDate: tr.date,
-            badLeague: cell.league, correctLeague: tr.from,
-            curPts: cell.pts, fixedPts: fixedPts, row: cell.row });
-        }
+        if (cell.league === tr.from) return;  // 정상
+        var fixedPts = calcPointsForLeague_(cell.score, tr.from);
+        hits.push({ nick: nk, date: vd, txDate: tr.date,
+          badLeague: cell.league === '' ? '(빈값)' : cell.league,
+          correctLeague: tr.from,
+          curPts: cell.pts, fixedPts: fixedPts,
+          row: cell.row, dist: off });
       });
     });
   });
 
-  // 중복 제거 (전환이 가까우면 같은 행이 2번 잡힐 수 있음)
-  var seen = {}; var uniq = [];
+  // 중복 제거: 같은 (nick,date)가 여러 전환에 잡히면 전환일과 가장 가까운 것만
+  var best = {};
   hits.forEach(function(h) {
     var key = h.nick + '|' + h.date;
-    if (seen[key]) return;
-    seen[key] = 1; uniq.push(h);
+    if (!best[key] || h.dist < best[key].dist) best[key] = h;
   });
+  var uniq = Object.keys(best).map(function(k) { return best[k]; });
+  uniq.sort(function(a, b) { return (a.nick + a.date) < (b.nick + b.date) ? -1 : 1; });
 
   var byMember = {};
   uniq.forEach(function(h) { byMember[h.nick] = (byMember[h.nick] || 0) + 1; });
