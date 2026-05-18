@@ -2480,6 +2480,140 @@ function resettleWeek(week, year) {
   return '재정산 완료: ' + y + '-W' + w + ' / ' + count + '건 (기존 row 삭제 후 재계산)';
 }
 
+// ── 벌금 정산 전수 검수 (read-only, 절대 안 씀) ──
+// 모든 정산된 주차 × 모든 멤버에 대해, 저장된 frozen 값(missCount/fineAmount/
+// daysJson)을 "현재 올바른 로직(leagueOnDate 타임라인 + 안정화 사용량 +
+// free-days)"으로 재산출한 값과 대조. 불일치 전부 보고.
+// resettleAllSettledWeeks를 돌리면 이 불일치들이 정정됨.
+function auditFineSettlements() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var settlementSheet = getWeeklySettlementSheet_();
+  var memberSheet = ss.getSheetByName('멤버');
+  var usageSheet = ss.getSheetByName('사용량');
+  if (!settlementSheet || !memberSheet) return 'no sheet';
+  var last = settlementSheet.getLastRow();
+  if (last < 2) return '정산 기록 없음';
+
+  // 멤버 현재 status/league/deposit
+  var mV = memberSheet.getDataRange().getValues();
+  var mInfo = {};
+  for (var i = 1; i < mV.length; i++) {
+    var mn = String(mV[i][0] || '').trim();
+    if (!mn) continue;
+    mInfo[mn] = {
+      status: String(mV[i][5] || '참여 중').trim(),
+      league: String(mV[i][4] || LEAGUE_1M).trim()
+    };
+  }
+
+  // 리그 타임라인 (leagueOnDate)
+  var ltSheet = ss.getSheetByName('리그이동기록');
+  var ltMap = {};
+  if (ltSheet && ltSheet.getLastRow() >= 2) {
+    var ltV = ltSheet.getRange(2, 1, ltSheet.getLastRow() - 1, 5).getValues();
+    ltV.forEach(function(r) {
+      var nk = String(r[1] || '').trim();
+      var dd = toDateStr(r[0]);
+      if (!nk || !/^\d{4}-\d{2}-\d{2}$/.test(dd)) return;
+      if (!ltMap[nk]) ltMap[nk] = [];
+      ltMap[nk].push({ date: dd, from: String(r[2] || '').trim(), to: String(r[3] || '').trim() });
+    });
+    Object.keys(ltMap).forEach(function(nk) {
+      ltMap[nk].sort(function(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+    });
+  }
+  function lod_(nick, dStr, fb) {
+    var f = (fb === LEAGUE_10M || fb === LEAGUE_1M) ? fb : LEAGUE_1M;
+    var t = ltMap[nick];
+    if (!t || !t.length) return f;
+    var lg = (t[0].from === LEAGUE_10M || t[0].from === LEAGUE_1M) ? t[0].from : f;
+    for (var i = 0; i < t.length; i++) {
+      if (t[i].date <= dStr) { lg = (t[i].to === LEAGUE_10M || t[i].to === LEAGUE_1M) ? t[i].to : lg; }
+      else break;
+    }
+    return lg;
+  }
+
+  // 사용량 전체 → nick → {date → score}
+  var usageMap = {};
+  if (usageSheet && usageSheet.getLastRow() >= 2) {
+    var uV = usageSheet.getRange(2, 1, usageSheet.getLastRow() - 1, USAGE_V2_HEADERS_.length).getValues();
+    uV.forEach(function(r) {
+      var nk = String(r[0]).trim();
+      var dt = formatDateStr_(r[1]);
+      if (!nk || !dt) return;
+      if (!usageMap[nk]) usageMap[nk] = {};
+      usageMap[nk][dt] = computeWeightedScoreFromRow_(r);
+    });
+  }
+
+  // 안정화 기준
+  var nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+
+  var sCols = WEEKLY_SETTLEMENT_HEADERS_.length;
+  var sVals = settlementSheet.getRange(2, 1, last - 1, sCols).getValues();
+  var mismatches = [];
+  var stableSkipped = {};
+  var checked = 0;
+
+  sVals.forEach(function(r) {
+    var nick = String(r[0] || '').trim();
+    var w = Number(r[1]), y = Number(r[2]);
+    if (!nick || !w || !y) return;
+
+    var weekDates = isoWeekDates_(w, y);
+    // 안정화 안 된 주는 audit 제외 (정상적으로 frozen이면 안 되는 주)
+    var sunday = new Date(weekDates[6] + 'T00:00:00+09:00');
+    if (nowKst.getTime() < sunday.getTime() + SETTLEMENT_STABILITY_DAYS_ * 86400000) {
+      stableSkipped[y + '-W' + w] = true;
+      return;
+    }
+
+    var info = mInfo[nick] || { status: '참여 중', league: LEAGUE_1M };
+    var curLeague = (info.league === LEAGUE_10M || info.league === LEAGUE_1M) ? info.league : LEAGUE_1M;
+    var statusRaw = info.status;
+    var isActive = (statusRaw === '참여 중' || statusRaw === '');
+    var isExempt = (statusRaw === '주간 면제');
+
+    var missCount = 0;
+    var days = weekDates.map(function(dStr) {
+      var tokens = (usageMap[nick] && usageMap[nick][dStr]) || 0;
+      var league = lod_(nick, dStr, curLeague);
+      var threshold = (league === LEAGUE_10M) ? 10000000 : 1000000;
+      if (!isActive && !isExempt) return { date: dStr, label: '-' };
+      if (tokens >= threshold) return { date: dStr, label: 'O' };
+      missCount++;
+      if (isExempt) return { date: dStr, label: '면제' };
+      if (missCount <= FINE_FREE_DAYS_) return { date: dStr, label: '면제' };
+      return { date: dStr, label: 'X' };
+    });
+    var chargedDays = isActive ? Math.max(0, missCount - FINE_FREE_DAYS_) : 0;
+    var correctFine = chargedDays * FINE_PER_DAY_;
+
+    checked++;
+    var storedMiss = safeInt(r[4]);
+    var storedFine = safeInt(r[6]);
+    var storedDays = '';
+    try { storedDays = JSON.stringify(JSON.parse(String(r[10] || '[]')).map(function(d){return d.label;})); }
+    catch (e) { storedDays = '(없음/깨짐)'; }
+    var correctDays = JSON.stringify(days.map(function(d){return d.label;}));
+
+    if (storedMiss !== missCount || storedFine !== correctFine || storedDays !== correctDays) {
+      mismatches.push(nick + ' ' + y + '-W' + w +
+        ': 미달 ' + storedMiss + '→' + missCount +
+        ' / 벌금 ' + storedFine + '→' + correctFine +
+        (storedDays !== correctDays ? ' / 일별 ' + storedDays + '→' + correctDays : ''));
+    }
+  });
+
+  var skipList = Object.keys(stableSkipped);
+  var out = '[정산 전수 검수] 대상 ' + checked + '건 검사, 불일치 ' + mismatches.length + '건\n' +
+    (skipList.length ? '안정화 전(검사 제외): ' + skipList.join(', ') + '\n' : '') +
+    '\n' + (mismatches.length ? mismatches.join('\n') : '✅ 모든 정산이 현재 로직과 일치');
+  Logger.log(out);
+  return out;
+}
+
 function isoWeekFromDate_(date) {
   var d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   var dayNum = d.getUTCDay() || 7;
