@@ -157,10 +157,11 @@ localStorage에 `dashboardCache`, `personalStatsCache` 저장. 이슈 디버깅 
    - service_type / monetization / target_market / tech_complexity / validation_stage
    - `평가` 시트의 `featuresJson` 컬럼(W, index 22)에 저장
 2. **Phase 1** — VC 3개 후속 질문 생성 (각 VC 1개씩, temp 0.7)
-3. **Phase 2** — 앵커 기반 평가 (temp 0.3, 일관성)
-   - `BOOTSTRAP_ANCHORS_` (6개 정밀 캘리브레이션, 1만원~2억원 스펙트럼)
+3. **Phase 2** — 실측 검증 우선 평가 (temp 0.3, 일관성)
+   - **1순위(핵심)**: 데모/GitHub URL을 evalStart에서 fetch(`gatherEvidence_`)해 시트 `evidenceJson`(idx 24)에 저장. 실제 동작 기능·결제 흔적·복제 비용을 직접 검증. "복제 비용 테스트" = 며칠~2주 재현 가능하면 코드값 ≈ 인건비, 그 이상은 검증된 반복매출/해자/도메인관계로만 정당화
+   - **2순위(보조)**: `BOOTSTRAP_ANCHORS_` (6개, 1만원~1.5억). 매출 검증 없으면 1만~100만 칸, 복수 무관계 고객 반복결제부터 1,000만+ 절벽. 앵커는 sanity-check 밴드일 뿐 정밀 ±% 비교 안 함
    - 챌린지 내 같은 service_type 완료 평가 상위 3개 (자가 강화)
-   - 프롬프트가 "앵커 대비 ±X% 위치 결정" 강제, 동일 KRW 부여 금지
+   - note/summary에 앵커 언급 금지, 동일 KRW 부여 금지
 
 **주요 함수**:
 - `extractFeatures_`, `getRelevantAnchors_`, `scoreFeatureSimilarity_`, `formatAnchorsForPrompt_`
