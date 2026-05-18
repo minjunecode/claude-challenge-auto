@@ -2177,6 +2177,10 @@ var WEEKLY_SETTLEMENT_HEADERS_ = [
 ];
 var FINE_PER_DAY_ = 10000;
 var FINE_FREE_DAYS_ = 2;
+// 보증금 baseline. 멤버 생성 시 항상 50000으로 시작(재충전 로직 없음).
+// 보증금은 "상태값"이 아니라 fineAmount 이력의 순수 함수로 도출 →
+// 멱등·순서무관. (이전: G열을 차감/롤백하는 상태 누적기 → 재정산 시 깨짐)
+var INITIAL_DEPOSIT_ = 50000;
 // 주간 데이터 안정화 버퍼: 일요일 종료 + 48h 리포트창 + 1일 = 3일.
 // 정산은 "마지막 일요일이 today-3 이하"인 가장 최근 주만 (idempotent).
 var SETTLEMENT_STABILITY_DAYS_ = 3;
@@ -2206,6 +2210,95 @@ function isAlreadySettled_(settlementRows, nickname, week, year) {
         Number(settlementRows[i][2]) === year) return true;
   }
   return false;
+}
+
+/**
+ * 보증금 단일 진실 재도출.
+ *
+ * 보증금은 더 이상 "G열을 차감/롤백하는 상태값"이 아니다.
+ * 각 멤버의 정산 이력(fineAmount)을 (year, week) 오름차순으로 정렬해
+ *   running = INITIAL_DEPOSIT_
+ *   각 주: depositBefore = running
+ *          depositAfter  = max(0, running - fineAmount)
+ *          running       = depositAfter
+ * 으로 순수 도출한다. 이력이 같으면 몇 번을 돌려도 결과가 동일(멱등).
+ *
+ * - 정산 시트의 depositBefore(idx7)/depositAfter(idx8)를 일괄 갱신.
+ * - 멤버 G열 = 그 멤버의 "가장 최근 정산 주의 depositAfter"
+ *   (정산 이력 없으면 INITIAL_DEPOSIT_).
+ *
+ * 모든 정산/재정산 경로의 마지막에 호출 → 크로스위크 보증금이 항상 일관.
+ */
+function recomputeAllDeposits_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var settlementSheet = getWeeklySettlementSheet_();
+  var memberSheet = ss.getSheetByName('멤버');
+  if (!memberSheet) return 0;
+
+  var cols = WEEKLY_SETTLEMENT_HEADERS_.length;
+  var last = settlementSheet.getLastRow();
+  var rows = (last >= 2)
+    ? settlementSheet.getRange(2, 1, last - 1, cols).getValues()
+    : [];
+
+  // 멤버별 정산 row 인덱스 수집
+  var byMember = {};  // nick → [{ri, w, y, fine}]
+  for (var i = 0; i < rows.length; i++) {
+    var nk = String(rows[i][0] || '').trim();
+    if (!nk) continue;
+    var w = Number(rows[i][1]), y = Number(rows[i][2]);
+    if (!w || !y) continue;
+    if (!byMember[nk]) byMember[nk] = [];
+    byMember[nk].push({ ri: i, w: w, y: y, fine: safeInt(rows[i][6]) });
+  }
+
+  // 멤버별 시간순 도출
+  var finalDeposit = {};  // nick → 최근 정산 후 잔여
+  Object.keys(byMember).forEach(function(nk) {
+    var list = byMember[nk];
+    list.sort(function(a, b) {
+      if (a.y !== b.y) return a.y - b.y;
+      return a.w - b.w;
+    });
+    var running = INITIAL_DEPOSIT_;
+    list.forEach(function(item) {
+      var before = running;
+      var after = Math.max(0, before - item.fine);
+      rows[item.ri][7] = before;  // depositBefore
+      rows[item.ri][8] = after;   // depositAfter
+      running = after;
+    });
+    finalDeposit[nk] = running;
+  });
+
+  // 정산 시트 일괄 write-back
+  if (rows.length > 0) {
+    settlementSheet.getRange(2, 1, rows.length, cols).setValues(rows);
+  }
+
+  // 멤버 G열 = 최근 정산 후 잔여 (정산 이력 없으면 INITIAL_DEPOSIT_)
+  var mVals = memberSheet.getDataRange().getValues();
+  var depCol = mVals.map(function(r, idx) {
+    if (idx === 0) return [r[6]];  // header 보존
+    var nick = String(r[0] || '').trim();
+    if (!nick) return [r[6]];
+    return [ finalDeposit.hasOwnProperty(nick) ? finalDeposit[nick] : INITIAL_DEPOSIT_ ];
+  });
+  memberSheet.getRange(1, 7, depCol.length, 1).setValues(depCol);
+
+  return rows.length;
+}
+
+/**
+ * [관리자] 보증금만 재도출 (정산/벌금 이력은 그대로, 보증금 숫자만 정정).
+ * Apps Script 에디터 → 함수 드롭다운 → repairAllDeposits → ▶ 실행.
+ * 상태 누적기 버그로 깨진 G열·정산 row의 보증금을 fine 이력 기준으로 복원.
+ */
+function repairAllDeposits() {
+  var n = recomputeAllDeposits_();
+  var msg = '보증금 재도출 완료 — 정산 row ' + n + '건 + 멤버 G열 정정 (fine 이력 기준).';
+  Logger.log(msg);
+  return msg;
 }
 
 // 특정 주차(targetWeek, targetYear)의 모든 멤버를 정산.
@@ -2263,11 +2356,11 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
   var members = memberSheet.getDataRange().getValues();
   var nowStr = new Date().toISOString();
 
-  // 원자적 batch: 정산 row들 / G열 deposit 변경을 메모리에 모았다가 한 번에 write.
+  // 원자적 batch: 정산 row들을 메모리에 모았다가 한 번에 write.
   // (멤버별 setValue 반복 → 6분 한도 부분실패 방지)
+  // ※ 보증금은 여기서 차감하지 않는다 — 마지막에 recomputeAllDeposits_가
+  //   fine 이력으로 순수 도출(멱등). depositBefore/After는 placeholder.
   var newRows = [];                 // 정산 시트에 추가할 행들
-  var depositCol = members.map(function(r){ return [r[6]]; });  // G열 스냅샷 (0=header)
-  var depositDirty = false;
   var settledCount = 0;
 
   for (var mi = 1; mi < members.length; mi++) {
@@ -2276,9 +2369,6 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
     if (isAlreadySettled_(settled, nick, targetWeek, targetYear)) continue;
 
     var statusRaw = String(members[mi][5] || '참여 중').trim();
-    var depositRaw = members[mi][6];
-    var depositBefore = (depositRaw === '' || depositRaw === null || depositRaw === undefined)
-      ? 50000 : safeInt(depositRaw);
     var curLeague = String(members[mi][4] || LEAGUE_1M).trim();
     if (curLeague !== LEAGUE_10M && curLeague !== LEAGUE_1M) curLeague = LEAGUE_1M;
 
@@ -2302,17 +2392,14 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
 
     var chargedDays = isActive ? Math.max(0, missCount - FINE_FREE_DAYS_) : 0;
     var fineAmount = chargedDays * FINE_PER_DAY_;
-    var depositAfter = Math.max(0, depositBefore - fineAmount);
 
+    // depositBefore/After는 placeholder(0). recomputeAllDeposits_가
+    // fine 이력으로 순수 도출하며 덮어씀.
     newRows.push([
       nick, targetWeek, targetYear, statusRaw, missCount, chargedDays,
-      fineAmount, depositBefore, depositAfter, nowStr, JSON.stringify(days)
+      fineAmount, 0, 0, nowStr, JSON.stringify(days)
     ]);
 
-    if (fineAmount > 0) {
-      depositCol[mi][0] = depositAfter;
-      depositDirty = true;
-    }
     settledCount++;
   }
 
@@ -2322,10 +2409,9 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
     settlementSheet.getRange(startRow, 1, newRows.length, WEEKLY_SETTLEMENT_HEADERS_.length)
       .setValues(newRows);
   }
-  if (depositDirty) {
-    // G열(7) 전체를 한 번에 덮어씀 (header 포함 원본 유지)
-    memberSheet.getRange(1, 7, depositCol.length, 1).setValues(depositCol);
-  }
+
+  // 보증금 단일 진실 재도출 (멱등). 이번 정산이 추가한 row 포함 전체 재계산.
+  recomputeAllDeposits_();
 
   return settledCount;
 }
@@ -2502,44 +2588,22 @@ function resettleWeek(week, year) {
   var memberSheet = ss.getSheetByName('멤버');
   if (!memberSheet) return '멤버 시트 없음';
 
-  // 1) 해당 주차 기존 정산 row 수집 + deposit 롤백 (depositAfter→depositBefore 차이 환원)
+  // 1) 해당 주차 기존 정산 row만 제거 (deposit 롤백 불필요 —
+  //    보증금은 상태값이 아니라 fine 이력의 순수 함수. 재정산 후
+  //    recomputeAllDeposits_가 전체를 다시 도출하므로 멱등.)
   var last = settlementSheet.getLastRow();
   if (last >= 2) {
     var cols = WEEKLY_SETTLEMENT_HEADERS_.length;
     var vals = settlementSheet.getRange(2, 1, last - 1, cols).getValues();
-    // 멤버 nickname → 시트 행 인덱스
-    var mVals = memberSheet.getDataRange().getValues();
-    var rowOf = {};
-    for (var i = 1; i < mVals.length; i++) {
-      var mn = String(mVals[i][0] || '').trim();
-      if (mn) rowOf[mn] = i;
-    }
-    var depCol = mVals.map(function(r){ return [r[6]]; });
-    var depDirty = false;
     var keepRows = [];  // 해당 주차 아닌 행은 보존
     for (var k = 0; k < vals.length; k++) {
-      var rNick = String(vals[k][0]).trim();
       var rW = Number(vals[k][1]), rY = Number(vals[k][2]);
-      if (rW === w && rY === y) {
-        // deposit 롤백: 이번 주 fineAmount만큼 되돌림
-        var fine = safeInt(vals[k][6]);
-        if (fine > 0 && rowOf[rNick] != null) {
-          var idxR = rowOf[rNick];
-          depCol[idxR][0] = safeInt(depCol[idxR][0]) + fine;
-          depDirty = true;
-        }
-      } else {
-        keepRows.push(vals[k]);
-      }
+      if (rW === w && rY === y) continue;  // 해당 주차 → 삭제
+      keepRows.push(vals[k]);
     }
-    // 정산 시트 재작성 (헤더 + keepRows)
-    settlementSheet.getRange(2, 1, last - 1, cols)
-      .clearContent();
+    settlementSheet.getRange(2, 1, last - 1, cols).clearContent();
     if (keepRows.length > 0) {
       settlementSheet.getRange(2, 1, keepRows.length, cols).setValues(keepRows);
-    }
-    if (depDirty) {
-      memberSheet.getRange(1, 7, depCol.length, 1).setValues(depCol);
     }
   }
 
@@ -2727,11 +2791,17 @@ function resettleAllSettledWeeks() {
     var w = Number(r[1]), y = Number(r[2]);
     if (w && y) weeks[y + '-' + w] = { w: w, y: y };
   });
-  var keys = Object.keys(weeks).sort();
+  // (year, week) 숫자 오름차순 — 문자열 정렬은 단자릿수 주차에서 깨짐
+  var keys = Object.keys(weeks).sort(function(a, b) {
+    if (weeks[a].y !== weeks[b].y) return weeks[a].y - weeks[b].y;
+    return weeks[a].w - weeks[b].w;
+  });
   var out = [];
   keys.forEach(function(k) {
     out.push(resettleWeek(weeks[k].w, weeks[k].y));
   });
+  // 방어적 최종 재도출 (resettleWeek가 SKIP된 주가 있어도 보증금 일관 보장)
+  recomputeAllDeposits_();
   return '전면 재정산 ' + keys.length + '개 주차:\n' + out.join('\n');
 }
 
