@@ -2876,6 +2876,29 @@ function getEvalSheet_() {
   return sh;
 }
 
+/**
+ * [관리자] 베타 종료 → 평가 시트의 모든 평가 기록 초기화 (헤더만 유지).
+ * Apps Script 에디터 → 함수 드롭다운 → clearAllEvalRecords → ▶ 실행.
+ * 주간/월간/누적 랭킹·내 피드·주 1회 한도 모두 새 기록 기준으로 리셋됨.
+ * 첨부 파일(Drive)은 그대로 둠 — 시트 행만 삭제.
+ */
+function clearAllEvalRecords() {
+  var sh = getEvalSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) {
+    Logger.log('평가 기록 없음 — 초기화할 데이터 행이 없습니다.');
+    return '0건';
+  }
+  var deleted = last - 1;
+  sh.getRange(2, 1, deleted, sh.getLastColumn()).clearContent();
+  // 잔여 빈 행 정리 (헤더 1행만 남김)
+  if (sh.getMaxRows() > 1) {
+    sh.deleteRows(2, sh.getMaxRows() - 1);
+  }
+  Logger.log('평가 기록 ' + deleted + '건 초기화 완료. 헤더만 유지.');
+  return deleted + '건 초기화 완료';
+}
+
 // 첨부 파일을 저장할 Drive 폴더 (lazy 생성).
 function getEvalFilesFolder_() {
   var folders = DriveApp.getFoldersByName(EVAL_FILES_FOLDER_NAME_);
