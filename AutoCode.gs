@@ -1525,29 +1525,42 @@ function diagnoseLeagueCorruption() {
   if (logSheet.getLastRow() < 2) return '전환 기록 없음 → 손상 0건';
 
   // 멤버별 전환 [{date, from, to}] (timestamp asc)
+  // ★ timestamp는 Sheets가 Date 객체로 자동 변환 → toDateStr로 정규화 필수
   var tl = {};
+  var txTotal = 0, txParsed = 0;
   var lVals = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, 5).getValues();
   lVals.forEach(function(r) {
-    var ts = String(r[0] || ''); var nk = String(r[1] || '').trim();
-    if (!nk || ts.length < 10) return;
+    txTotal++;
+    var nk = String(r[1] || '').trim();
+    var d = toDateStr(r[0]);  // Date 객체/문자열 모두 'YYYY-MM-DD'로
+    if (!nk || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+    txParsed++;
     if (!tl[nk]) tl[nk] = [];
-    tl[nk].push({ date: ts.substring(0, 10), from: String(r[2] || '').trim(), to: String(r[3] || '').trim() });
+    tl[nk].push({ date: d, from: String(r[2] || '').trim(), to: String(r[3] || '').trim() });
   });
   Object.keys(tl).forEach(function(nk) {
     tl[nk].sort(function(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
   });
+  var sampleTx = '';
+  var firstNk = Object.keys(tl)[0];
+  if (firstNk && tl[firstNk][0]) {
+    sampleTx = firstNk + ' ' + tl[firstNk][0].date + ' ' + tl[firstNk][0].from + '→' + tl[firstNk][0].to;
+  }
 
   // 인증기록 인덱스: (nick|date) → {row, league, pts, score}
   var rec = recordSheet.getDataRange().getValues();
   var idx = {};
+  var idxCount = 0;
   for (var k = 1; k < rec.length; k++) {
     if (String(rec[k][3]).trim() !== 'session') continue;
     var nk = String(rec[k][0] || '').trim();
     var ds = toDateStr(rec[k][8]) || toDateStr(rec[k][5]);
-    if (!nk || !ds) continue;
+    if (!nk || !/^\d{4}-\d{2}-\d{2}$/.test(ds)) continue;
     idx[nk + '|' + ds] = { row: k + 1, league: String(rec[k][9] || '').trim(),
                            pts: safeInt(rec[k][4]), score: safeInt(rec[k][7]) };
+    idxCount++;
   }
+  var sampleIdx = Object.keys(idx)[0] || '(없음)';
 
   function addDays(ds, n) {
     var p = ds.split('-');
@@ -1597,8 +1610,11 @@ function diagnoseLeagueCorruption() {
   });
   var perMember = Object.keys(byMember).sort().map(function(n) { return n + ':' + byMember[n]; }).join(' / ');
 
+  var diag = '[진단 메타] 전환로그 ' + txParsed + '/' + txTotal + '건 파싱 (멤버 ' +
+             Object.keys(tl).length + '명), 샘플전환=' + (sampleTx || '없음') +
+             ' | 인증기록 idx ' + idxCount + '건, 샘플키=' + sampleIdx;
   var out = '[손상 진단] 총 ' + uniq.length + '건 (멤버 ' + Object.keys(byMember).length + '명)\n' +
-            '멤버별: ' + perMember + '\n\n' + lines.join('\n');
+            diag + '\n멤버별: ' + perMember + '\n\n' + lines.join('\n');
   Logger.log(out);
   return out;
 }
