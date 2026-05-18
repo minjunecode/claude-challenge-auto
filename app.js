@@ -1256,9 +1256,13 @@ function renderFineTab() {
     nameTd.appendChild(document.createTextNode(' ' + m.nickname));
     tr.appendChild(nameTd);
 
-    // 과거 주차에 대해서는 정산 시트의 freeze된 status를 우선 사용 (소급 변경 차단).
+    // 과거 주차 정산값 사용 조건: 정산 row가 있고 + daysJson(7일 freeze)이 유효할 때만.
+    // 옛 정산 row(daysJson 없음/불완전)는 신뢰 불가 → 요약·셀 모두 실시간으로 일관 처리.
+    // (요약은 옛 freeze, 셀은 실시간 → 모순되던 문제 차단)
     const settlement = getSettlement(m.nickname);
-    const statusForWeek = (isPastWeek && settlement) ? settlement.status : m.participating;
+    const hasFrozen = !!(settlement && Array.isArray(settlement.days) && settlement.days.length === 7);
+    const useFrozen = isPastWeek && hasFrozen;
+    const statusForWeek = useFrozen ? settlement.status : m.participating;
     const state = getFineState(statusForWeek);
 
     const partTd = document.createElement('td');
@@ -1278,9 +1282,8 @@ function renderFineTab() {
     const currLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
     let missCount = 0;
 
-    // 과거 주차 + 정산에 frozen된 일별 라벨이 있으면 그대로 렌더.
-    // → 셀(O/X/면제)과 요약(미달/벌금)이 절대 불일치하지 않음.
-    const frozenDays = (isPastWeek && settlement && Array.isArray(settlement.days)) ? settlement.days : null;
+    // useFrozen일 때만 frozen 일별 라벨 사용 → 셀과 요약이 항상 같은 출처.
+    const frozenDays = useFrozen ? settlement.days : null;
     const frozenByDate = {};
     if (frozenDays) frozenDays.forEach(fd => { frozenByDate[fd.date] = fd.label; });
 
@@ -1331,10 +1334,9 @@ function renderFineTab() {
       tr.appendChild(td);
     });
 
-    // 과거 주차 + 정산 row 존재 시: 정산 시트의 freeze된 값 사용 (소급 변경 차단)
-    // 그 외: 실시간 계산
+    // useFrozen일 때만 정산 freeze 값 사용. 옛/불완전 정산은 실시간 계산.
     let fineAmount, chargedDays, remaining;
-    if (isPastWeek && settlement) {
+    if (useFrozen) {
       fineAmount = settlement.fineAmount;
       chargedDays = settlement.chargedDays;
       missCount = settlement.missCount;

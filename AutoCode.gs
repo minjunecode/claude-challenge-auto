@@ -2362,6 +2362,19 @@ function runWeeklyFineSettlementCron_() {
 function resettleWeek(week, year) {
   var w = Number(week), y = Number(year);
   if (!w || !y) return 'week, year 인자 필요. 예: resettleWeek(20, 2026)';
+
+  // ── 안정화 가드 ── 해당 주 일요일 + 3일이 지나야 재정산 허용.
+  // 아직 48h 리포트창이 안 닫힌 주를 재freeze하면 또 잘못 고정됨.
+  var wkDates = isoWeekDates_(w, y);
+  var sundayStr = wkDates[6];                       // 그 주 일요일 'YYYY-MM-DD'
+  var sunday = new Date(sundayStr + 'T00:00:00+09:00');
+  var stableAfter = new Date(sunday.getTime() + SETTLEMENT_STABILITY_DAYS_ * 86400000);
+  var nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+  if (nowKst.getTime() < stableAfter.getTime()) {
+    return 'SKIP ' + y + '-W' + w + ' — 아직 안정화 전 (일요일 ' + sundayStr +
+           ' + ' + SETTLEMENT_STABILITY_DAYS_ + '일 경과 후 가능). 데이터 도착 대기.';
+  }
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var settlementSheet = getWeeklySettlementSheet_();
   var memberSheet = ss.getSheetByName('멤버');
