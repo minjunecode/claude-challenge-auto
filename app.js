@@ -443,6 +443,27 @@ function getThresholdsFor(date, league) {
   return LEAGUE_THRESHOLDS[league] || LEAGUE_THRESHOLDS[LEAGUE_1M];
 }
 
+// 특정 날짜에 멤버가 실제로 속했던 리그를, 리그이동기록 타임라인으로 결정.
+// per-row league stamp(빈행/0점일/48h clobber로 신뢰 불가)와 무관하게
+// "그날의 리그"를 deterministic 하게 계산 → 강등/승급 후에도 과거 O/X 불변.
+//   - 전환 타임라인: dashboardData.leagueTimeline[nick] = [{date,from,to}] asc
+//   - dateStr ≥ 어떤 전환일 → 그 전환의 to. 첫 전환 이전 → 첫 전환의 from.
+//   - 타임라인 없으면 fallbackLeague (보통 멤버 현재 리그) 사용.
+function leagueOnDate(nick, dateStr, fallbackLeague) {
+  const fb = (fallbackLeague === LEAGUE_10M || fallbackLeague === LEAGUE_1M)
+    ? fallbackLeague : LEAGUE_1M;
+  const tl = dashboardData && dashboardData.leagueTimeline && dashboardData.leagueTimeline[nick];
+  if (!tl || !tl.length) return fb;
+  let league = (tl[0].from === LEAGUE_10M || tl[0].from === LEAGUE_1M) ? tl[0].from : fb;
+  for (let i = 0; i < tl.length; i++) {
+    if (tl[i].date <= dateStr) {
+      const to = tl[i].to;
+      league = (to === LEAGUE_10M || to === LEAGUE_1M) ? to : league;
+    } else break;
+  }
+  return league;
+}
+
 // 현재 선택된 리그 탭 (ALL = 전체)
 let selectedLeagueTab = LEAGUE_ALL;
 
@@ -655,10 +676,9 @@ function renderDailyTable(members, submissions) {
       const td = document.createElement('td');
       const info = dailyMap[m.nickname][d.date];
       const tokens = info ? info.tokens : 0;
-      // 보고 시점 리그 우선 (없으면 현재 리그로 fallback)
-      const recordedLeague = (info && info.league === LEAGUE_10M) ? LEAGUE_10M :
-                             (info && info.league === LEAGUE_1M) ? LEAGUE_1M :
-                             currLeague;
+      // 그날 실제 소속 리그 = 리그이동기록 타임라인 기준 (단일 진실).
+      // per-row stamp/현재리그 fallback 안 씀 → 강등/승급해도 과거 O/X 불변.
+      const recordedLeague = leagueOnDate(m.nickname, d.date, currLeague);
       // 날짜+리그에 맞는 임계값 (legacy 기간엔 1M/10M/50M)
       const t = getThresholdsFor(d.date, recordedLeague);
       if (d.date > today) {
@@ -1305,7 +1325,8 @@ function renderFineTab() {
 
       const info = dailyMap[m.nickname][d.date];
       const tokens = info ? info.tokens : 0;
-      const recordedLeague = (info && (info.league === LEAGUE_10M || info.league === LEAGUE_1M)) ? info.league : currLeague;
+      // 그날 실제 소속 리그 = 타임라인 기준 (per-row stamp/현재리그 fallback 안 씀)
+      const recordedLeague = leagueOnDate(m.nickname, d.date, currLeague);
       const t = getThresholdsFor(d.date, recordedLeague);
 
       if (state === 'inactive' || state === 'unknown') {

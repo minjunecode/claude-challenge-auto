@@ -1223,6 +1223,30 @@ function handleDashboard(params) {
     }
   }
 
+  // ── 리그 타임라인 (일별 O/X를 "그날 실제 소속 리그" 기준으로 계산) ──
+  // per-row league stamp는 빈 행/0점일/48h clobber로 신뢰 불가.
+  // 리그이동기록(append-only)이 "멤버 X가 날짜 D에 어느 리그였나"의 단일 진실.
+  // 프론트가 leagueOnDate(nick, date)로 deterministic 계산 → 소급 변경 불가.
+  var leagueTimeline = {};
+  var ltSheet = ss.getSheetByName('리그이동기록');
+  if (ltSheet && ltSheet.getLastRow() >= 2) {
+    var ltVals = ltSheet.getRange(2, 1, ltSheet.getLastRow() - 1, 5).getValues();
+    ltVals.forEach(function(r) {
+      var nk = String(r[1] || '').trim();
+      var d = toDateStr(r[0]);  // ★ Date 객체/문자열 모두 정규화
+      if (!nk || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+      if (!leagueTimeline[nk]) leagueTimeline[nk] = [];
+      leagueTimeline[nk].push({
+        date: d,
+        from: String(r[2] || '').trim(),
+        to: String(r[3] || '').trim()
+      });
+    });
+    Object.keys(leagueTimeline).forEach(function(nk) {
+      leagueTimeline[nk].sort(function(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+    });
+  }
+
   // ── 평가 랭킹 (대시보드에서 노출용; 평가 sub-tab과 동일 데이터) ──
   var evalRankings = computeEvalRankings_();
 
@@ -1267,7 +1291,8 @@ function handleDashboard(params) {
     memberColors: memberColors,
     settlements: settlements,
     evalRankings: evalRankings,
-    myEvalThisWeek: myEvalThisWeek
+    myEvalThisWeek: myEvalThisWeek,
+    leagueTimeline: leagueTimeline
   };
   // 캐시에 저장 (다음 30s 내 동일 요청은 시트 read 없이 즉시 반환)
   putCachedDashboard_(nickname, response);
@@ -2199,21 +2224,35 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
     });
   }
 
-  // 인증기록 시트 (리그 정보 추출용)
-  var recordSheet = ss.getSheetByName('인증기록');
-  var leagueMap = {};  // nickname → { date → league }
-  if (recordSheet && recordSheet.getLastRow() >= 2) {
-    var rVals = recordSheet.getRange(2, 1, recordSheet.getLastRow() - 1, 10).getValues();
-    rVals.forEach(function(r) {
-      if (String(r[3]).trim() !== 'session') return;
-      var nick = String(r[0]).trim();
-      var resetsAt = formatDateStr_(r[8]);
-      if (!nick || !resetsAt) return;
-      var league = String(r[9] || '').trim();
-      if (!league) return;
-      if (!leagueMap[nick]) leagueMap[nick] = {};
-      leagueMap[nick][resetsAt] = league;
+  // 리그이동기록 타임라인 (프론트 leagueOnDate와 동일 단일 진실).
+  // per-row league stamp 대신 이걸로 "그날 실제 리그" deterministic 계산
+  // → frozen 정산이 프론트 실시간 표시와 항상 일치.
+  var ltSheet = ss.getSheetByName('리그이동기록');
+  var ltMap = {};  // nick → [{date,from,to}] asc
+  if (ltSheet && ltSheet.getLastRow() >= 2) {
+    var ltV = ltSheet.getRange(2, 1, ltSheet.getLastRow() - 1, 5).getValues();
+    ltV.forEach(function(r) {
+      var nk = String(r[1] || '').trim();
+      var dd = toDateStr(r[0]);
+      if (!nk || !/^\d{4}-\d{2}-\d{2}$/.test(dd)) return;
+      if (!ltMap[nk]) ltMap[nk] = [];
+      ltMap[nk].push({ date: dd, from: String(r[2] || '').trim(), to: String(r[3] || '').trim() });
     });
+    Object.keys(ltMap).forEach(function(nk) {
+      ltMap[nk].sort(function(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+    });
+  }
+  function leagueOnDate_(nick, dStr, fb) {
+    var f = (fb === LEAGUE_10M || fb === LEAGUE_1M) ? fb : LEAGUE_1M;
+    var tl = ltMap[nick];
+    if (!tl || !tl.length) return f;
+    var lg = (tl[0].from === LEAGUE_10M || tl[0].from === LEAGUE_1M) ? tl[0].from : f;
+    for (var i = 0; i < tl.length; i++) {
+      if (tl[i].date <= dStr) {
+        lg = (tl[i].to === LEAGUE_10M || tl[i].to === LEAGUE_1M) ? tl[i].to : lg;
+      } else break;
+    }
+    return lg;
   }
 
   var members = memberSheet.getDataRange().getValues();
@@ -2246,8 +2285,7 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
     var missCount = 0;
     var days = weekDates.map(function(dStr) {
       var tokens = (usageMap[nick] && usageMap[nick][dStr]) || 0;
-      var recLg = (leagueMap[nick] && leagueMap[nick][dStr]) || curLeague;
-      var league = (recLg === LEAGUE_10M || recLg === LEAGUE_1M) ? recLg : curLeague;
+      var league = leagueOnDate_(nick, dStr, curLeague);
       var threshold = (league === LEAGUE_10M) ? 10000000 : 1000000;
       if (!isActive && !isExempt) return { date: dStr, label: '-' };  // 미참여/기타
       if (tokens >= threshold) return { date: dStr, label: 'O' };
