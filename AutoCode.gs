@@ -1542,9 +1542,10 @@ function handleReportUsage(params) {
 }
 
 // ── 리그 손상 진단 & 복원 (단일 코드 경로) ──
-// 시그니처: 전환일 T의 판정 3일(T-1·T-2·T-3)은 멤버가 명백히 tr.from 리그였던 날.
-// 그 행 저장 league가 from이 아니면 = 손상 → from으로 복원 + 포인트 재계산.
-// 초기 리그 추정 없음 → false positive 0.
+// 기준: 프론트/정산과 동일한 leagueOnDate(리그이동기록 타임라인) 단일 진실.
+// 인증기록 session 행의 stored league ≠ leagueOnDate(그날 실제 리그)면 손상
+// → 정답 리그로 복원 + 포인트 재계산. 한 날짜당 정답 1개라 모순/dedup 없음.
+// 첫 전환 이전(초기 리그 미상) 행은 건드리지 않아 대량 오변경 방지.
 //   applyLeagueCorruptionFix(false) = dry-run (읽기만, 로그/반환만)
 //   applyLeagueCorruptionFix(true)  = 실제 시트 반영
 // diagnoseLeagueCorruption()는 (false) 호출 thin wrapper.
@@ -1601,44 +1602,59 @@ function applyLeagueCorruptionFix(applyChanges) {
   }
   var sampleIdx = Object.keys(idx)[0] || '(없음)';
 
-  function addDays(ds, n) {
-    var p = ds.split('-');
-    var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2);
+  // 멤버 현재 리그 (타임라인 없을 때 fallback)
+  var memberSheetD = ss.getSheetByName('멤버');
+  var memberLeagueD = {};
+  if (memberSheetD) {
+    var mVD = memberSheetD.getDataRange().getValues();
+    for (var mdi = 1; mdi < mVD.length; mdi++) {
+      var mnD = String(mVD[mdi][0] || '').trim();
+      if (mnD) memberLeagueD[mnD] = String(mVD[mdi][4] || LEAGUE_1M).trim();
+    }
+  }
+  // 프론트/정산과 동일한 단일 진실: 타임라인으로 그날 실제 리그 결정.
+  // (per-transition T-1·T-2·T-3 휴리스틱은 전환이 4일내 붙으면 모순 → 폐기)
+  function leagueOnDateD_(nick, dStr) {
+    var fb = memberLeagueD[nick];
+    fb = (fb === LEAGUE_10M || fb === LEAGUE_1M) ? fb : LEAGUE_1M;
+    var t = tl[nick];
+    if (!t || !t.length) return fb;
+    var lg = (t[0].from === LEAGUE_10M || t[0].from === LEAGUE_1M) ? t[0].from : fb;
+    for (var i = 0; i < t.length; i++) {
+      if (t[i].date <= dStr) {
+        lg = (t[i].to === LEAGUE_10M || t[i].to === LEAGUE_1M) ? t[i].to : lg;
+      } else break;
+    }
+    return lg;
   }
 
+  // 인증기록 session 행을 순회하며 stored league ≠ leagueOnDate면 손상.
+  // 첫 전환 이전(초기 리그 미상) 행은 건드리지 않음 (대량 오변경 방지).
   var hits = [];
-  Object.keys(tl).forEach(function(nk) {
-    tl[nk].forEach(function(tr) {
-      if (tr.date < LEAGUE_ERA_START) return;
-      if (tr.to === tr.from) return;
-      // 배치가 판정한 3일(T-1·T-2·T-3) = 멤버가 명백히 from 리그였던 날.
-      // 이 날들의 저장 league가 from이 아니면(빈 값/to/기타) = 손상.
-      [1, 2, 3].forEach(function(off) {
-        var vd = addDays(tr.date, -off);
-        if (vd < LEAGUE_ERA_START) return;
-        var cell = idx[nk + '|' + vd];
-        if (!cell) return;
-        if (cell.league === tr.from) return;  // 정상
-        var fixedPts = calcPointsForLeague_(cell.score, tr.from);
-        hits.push({ nick: nk, date: vd, txDate: tr.date,
-          badLeague: cell.league === '' ? '(빈값)' : cell.league,
-          correctLeague: tr.from,
-          curPts: cell.pts, fixedPts: fixedPts,
-          row: cell.row, dist: off });
-      });
+  for (var rk = 1; rk < rec.length; rk++) {
+    if (String(rec[rk][3]).trim() !== 'session') continue;
+    var rnk = String(rec[rk][0] || '').trim();
+    var rds = toDateStr(rec[rk][8]) || toDateStr(rec[rk][5]);
+    if (!rnk || !/^\d{4}-\d{2}-\d{2}$/.test(rds)) continue;
+    if (rds < LEAGUE_ERA_START) continue;
+    var rtl = tl[rnk];
+    if (!rtl || !rtl.length) continue;        // 전환 없으면 현재리그=항상, 비교 불필요
+    if (rds < rtl[0].date) continue;          // 첫 전환 이전 = 초기 리그 미상 → skip
+    var rstored = String(rec[rk][9] || '').trim();
+    var rcorrect = leagueOnDateD_(rnk, rds);
+    if (rstored === rcorrect) continue;       // 정상
+    var rscore = safeInt(rec[rk][7]);
+    hits.push({
+      nick: rnk, date: rds, txDate: '(타임라인)',
+      badLeague: rstored === '' ? '(빈값)' : rstored,
+      correctLeague: rcorrect,
+      curPts: safeInt(rec[rk][4]),
+      fixedPts: calcPointsForLeague_(rscore, rcorrect),
+      row: rk + 1
     });
-  });
-
-  // 중복 제거: 같은 (nick,date)가 여러 전환에 잡히면 전환일과 가장 가까운 것만
-  var best = {};
-  hits.forEach(function(h) {
-    var key = h.nick + '|' + h.date;
-    if (!best[key] || h.dist < best[key].dist) best[key] = h;
-  });
-  var uniq = Object.keys(best).map(function(k) { return best[k]; });
-  uniq.sort(function(a, b) { return (a.nick + a.date) < (b.nick + b.date) ? -1 : 1; });
+  }
+  hits.sort(function(a, b) { return (a.nick + a.date) < (b.nick + b.date) ? -1 : 1; });
+  var uniq = hits;  // 한 행당 정답 1개라 dedup 불필요
 
   var byMember = {};
   uniq.forEach(function(h) { byMember[h.nick] = (byMember[h.nick] || 0) + 1; });
