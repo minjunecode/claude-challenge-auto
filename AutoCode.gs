@@ -1523,6 +1523,11 @@ function handleReportUsage(params) {
 function diagnoseLeagueCorruption() {
   return applyLeagueCorruptionFix(false);
 }
+// ★ 실제 복원 실행용 무인자 wrapper (드롭다운에서 바로 선택 가능).
+//   먼저 diagnoseLeagueCorruption()로 21건 확인 후 이걸 실행.
+function runLeagueCorruptionFix() {
+  return applyLeagueCorruptionFix(true);
+}
 function applyLeagueCorruptionFix(applyChanges) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var recordSheet = ss.getSheetByName('인증기록');
