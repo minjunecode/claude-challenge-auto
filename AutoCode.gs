@@ -1205,6 +1205,8 @@ function handleDashboard(params) {
     for (var si = 0; si < sVals.length; si++) {
       var sr = sVals[si];
       if (!sr[0]) continue;
+      var daysArr = null;
+      try { daysArr = sr[10] ? JSON.parse(String(sr[10])) : null; } catch (e) { daysArr = null; }
       settlements.push({
         nickname: String(sr[0]),
         week: Number(sr[1]) || 0,
@@ -1215,7 +1217,8 @@ function handleDashboard(params) {
         fineAmount: Number(sr[6]) || 0,
         depositBefore: Number(sr[7]) || 0,
         depositAfter: Number(sr[8]) || 0,
-        settledAt: toDateTimeStr(sr[9])
+        settledAt: toDateTimeStr(sr[9]),
+        days: daysArr   // [{date,label}] x7 — 과거 주차 셀 frozen 렌더용 (없으면 null)
       });
     }
   }
@@ -2125,12 +2128,17 @@ function manualRunDailyLeagueBatch() {
 //   depositBefore, depositAfter, settledAt
 
 var WEEKLY_SETTLEMENT_SHEET_ = '주간정산';
+// daysJson(11열): 그 주 7일의 frozen 셀 라벨 JSON. 과거 주차 UI가 이걸 그대로
+// 렌더 → 셀(O/X/면제)과 요약(미달/벌금)이 절대 불일치하지 않음.
 var WEEKLY_SETTLEMENT_HEADERS_ = [
   'nickname', 'week', 'year', 'status', 'missCount', 'chargedDays',
-  'fineAmount', 'depositBefore', 'depositAfter', 'settledAt'
+  'fineAmount', 'depositBefore', 'depositAfter', 'settledAt', 'daysJson'
 ];
 var FINE_PER_DAY_ = 10000;
 var FINE_FREE_DAYS_ = 2;
+// 주간 데이터 안정화 버퍼: 일요일 종료 + 48h 리포트창 + 1일 = 3일.
+// 정산은 "마지막 일요일이 today-3 이하"인 가장 최근 주만 (idempotent).
+var SETTLEMENT_STABILITY_DAYS_ = 3;
 
 function getWeeklySettlementSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -2138,6 +2146,13 @@ function getWeeklySettlementSheet_() {
   if (!sh) {
     sh = ss.insertSheet(WEEKLY_SETTLEMENT_SHEET_);
     sh.appendRow(WEEKLY_SETTLEMENT_HEADERS_);
+    return sh;
+  }
+  // 기존 시트 마이그레이션: 컬럼 부족 시 헤더 보강 (daysJson 등)
+  var lastCol = sh.getLastColumn();
+  if (lastCol < WEEKLY_SETTLEMENT_HEADERS_.length) {
+    var missing = WEEKLY_SETTLEMENT_HEADERS_.slice(lastCol);
+    sh.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
   }
   return sh;
 }
@@ -2203,53 +2218,70 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
 
   var members = memberSheet.getDataRange().getValues();
   var nowStr = new Date().toISOString();
+
+  // 원자적 batch: 정산 row들 / G열 deposit 변경을 메모리에 모았다가 한 번에 write.
+  // (멤버별 setValue 반복 → 6분 한도 부분실패 방지)
+  var newRows = [];                 // 정산 시트에 추가할 행들
+  var depositCol = members.map(function(r){ return [r[6]]; });  // G열 스냅샷 (0=header)
+  var depositDirty = false;
   var settledCount = 0;
 
   for (var mi = 1; mi < members.length; mi++) {
     var nick = String(members[mi][0] || '').trim();
     if (!nick) continue;
+    if (isAlreadySettled_(settled, nick, targetWeek, targetYear)) continue;
+
     var statusRaw = String(members[mi][5] || '참여 중').trim();
     var depositRaw = members[mi][6];
     var depositBefore = (depositRaw === '' || depositRaw === null || depositRaw === undefined)
       ? 50000 : safeInt(depositRaw);
-
-    if (isAlreadySettled_(settled, nick, targetWeek, targetYear)) continue;
-
     var curLeague = String(members[mi][4] || LEAGUE_1M).trim();
     if (curLeague !== LEAGUE_10M && curLeague !== LEAGUE_1M) curLeague = LEAGUE_1M;
 
-    // 미달 카운트
+    var isActive = (statusRaw === '참여 중' || statusRaw === '');
+    var isExempt = (statusRaw === '주간 면제');
+
+    // 7일 일별 라벨 산출 (프론트 로직과 동일 — free-days 누적 면제 포함).
+    // 라벨: 'O'(달성) / '면제'(주2회 면제 or 주간면제) / 'X'(벌금) / '-'(미참여)
     var missCount = 0;
-    weekDates.forEach(function(dStr) {
+    var days = weekDates.map(function(dStr) {
       var tokens = (usageMap[nick] && usageMap[nick][dStr]) || 0;
-      var rec = (leagueMap[nick] && leagueMap[nick][dStr]) || curLeague;
-      var league = (rec === LEAGUE_10M || rec === LEAGUE_1M) ? rec : curLeague;
-      var threshold = (league === LEAGUE_10M) ? 10000000 : 1000000;  // 1pt 임계값
-      if (tokens < threshold) missCount++;
+      var recLg = (leagueMap[nick] && leagueMap[nick][dStr]) || curLeague;
+      var league = (recLg === LEAGUE_10M || recLg === LEAGUE_1M) ? recLg : curLeague;
+      var threshold = (league === LEAGUE_10M) ? 10000000 : 1000000;
+      if (!isActive && !isExempt) return { date: dStr, label: '-' };  // 미참여/기타
+      if (tokens >= threshold) return { date: dStr, label: 'O' };
+      missCount++;
+      if (isExempt) return { date: dStr, label: '면제' };
+      if (missCount <= FINE_FREE_DAYS_) return { date: dStr, label: '면제' };
+      return { date: dStr, label: 'X' };
     });
 
-    // 상태에 따른 fineAmount
-    var chargedDays = 0;
-    var fineAmount = 0;
-    if (statusRaw === '참여 중' || statusRaw === '') {
-      chargedDays = Math.max(0, missCount - FINE_FREE_DAYS_);
-      fineAmount = chargedDays * FINE_PER_DAY_;
-    } // exempt / 참여 안 함 / 기타 → 0
-
+    var chargedDays = isActive ? Math.max(0, missCount - FINE_FREE_DAYS_) : 0;
+    var fineAmount = chargedDays * FINE_PER_DAY_;
     var depositAfter = Math.max(0, depositBefore - fineAmount);
 
-    // 정산 시트 row 추가 (status freeze)
-    settlementSheet.appendRow([
+    newRows.push([
       nick, targetWeek, targetYear, statusRaw, missCount, chargedDays,
-      fineAmount, depositBefore, depositAfter, nowStr
+      fineAmount, depositBefore, depositAfter, nowStr, JSON.stringify(days)
     ]);
 
-    // 멤버 G열 deposit 업데이트
     if (fineAmount > 0) {
-      memberSheet.getRange(mi + 1, 7).setValue(depositAfter);
+      depositCol[mi][0] = depositAfter;
+      depositDirty = true;
     }
-
     settledCount++;
+  }
+
+  // ── 원자적 일괄 write ──
+  if (newRows.length > 0) {
+    var startRow = settlementSheet.getLastRow() + 1;
+    settlementSheet.getRange(startRow, 1, newRows.length, WEEKLY_SETTLEMENT_HEADERS_.length)
+      .setValues(newRows);
+  }
+  if (depositDirty) {
+    // G열(7) 전체를 한 번에 덮어씀 (header 포함 원본 유지)
+    memberSheet.getRange(1, 7, depositCol.length, 1).setValues(depositCol);
   }
 
   return settledCount;
@@ -2306,16 +2338,79 @@ function isoWeekDates_(week, year) {
   return dates;
 }
 
-// Cron 진입점: 어제(=일요일) 기준 ISO 주차를 정산.
-// 매주 월요일 00:30 KST에 실행되도록 트리거 설치.
+// Cron 진입점 (매일 실행): 데이터가 안정화된 가장 최근 주를 정산.
+// "마지막 일요일이 today-3 이하"인 주만 → 48h 리포트창 + 1일 버퍼 확보.
+// 매일 돌면서 idempotent skip → 누락돼도 다음날 자동 catch-up.
 function runWeeklyFineSettlementCron_() {
-  // KST 기준 어제
   var nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  var yesterdayKst = new Date(nowKst);
-  yesterdayKst.setDate(nowKst.getDate() - 1);
-  var iso = isoWeekFromDate_(yesterdayKst);
+  // 안정화 기준점 = 오늘 - 3일
+  var anchor = new Date(nowKst);
+  anchor.setDate(anchor.getDate() - SETTLEMENT_STABILITY_DAYS_);
+  // anchor 이전(포함)의 가장 최근 '일요일' = 안정화된 마지막 주의 종료일
+  while (anchor.getDay() !== 0) {  // 0=일요일
+    anchor.setDate(anchor.getDate() - 1);
+  }
+  var iso = isoWeekFromDate_(anchor);  // 그 일요일이 속한 ISO 주차
   var count = runWeeklyFineSettlement_(iso.week, iso.year);
-  Logger.log('주간 정산 완료: ' + iso.year + '-W' + iso.week + ' / ' + count + '건');
+  Logger.log('주간 정산: ' + iso.year + '-W' + iso.week +
+             ' (안정화 종료일 ' + formatDateStr_(anchor) + ') / 신규 ' + count + '건');
+}
+
+// 잘못 freeze된 주를 강제 재정산 (admin).
+// 해당 주차의 기존 정산 row를 삭제 + 멤버 deposit 롤백 후 재계산.
+// 데이터가 안정화된 후에만 사용 (그 주 일요일 + 3일 경과 후).
+function resettleWeek(week, year) {
+  var w = Number(week), y = Number(year);
+  if (!w || !y) return 'week, year 인자 필요. 예: resettleWeek(20, 2026)';
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var settlementSheet = getWeeklySettlementSheet_();
+  var memberSheet = ss.getSheetByName('멤버');
+  if (!memberSheet) return '멤버 시트 없음';
+
+  // 1) 해당 주차 기존 정산 row 수집 + deposit 롤백 (depositAfter→depositBefore 차이 환원)
+  var last = settlementSheet.getLastRow();
+  if (last >= 2) {
+    var cols = WEEKLY_SETTLEMENT_HEADERS_.length;
+    var vals = settlementSheet.getRange(2, 1, last - 1, cols).getValues();
+    // 멤버 nickname → 시트 행 인덱스
+    var mVals = memberSheet.getDataRange().getValues();
+    var rowOf = {};
+    for (var i = 1; i < mVals.length; i++) {
+      var mn = String(mVals[i][0] || '').trim();
+      if (mn) rowOf[mn] = i;
+    }
+    var depCol = mVals.map(function(r){ return [r[6]]; });
+    var depDirty = false;
+    var keepRows = [];  // 해당 주차 아닌 행은 보존
+    for (var k = 0; k < vals.length; k++) {
+      var rNick = String(vals[k][0]).trim();
+      var rW = Number(vals[k][1]), rY = Number(vals[k][2]);
+      if (rW === w && rY === y) {
+        // deposit 롤백: 이번 주 fineAmount만큼 되돌림
+        var fine = safeInt(vals[k][6]);
+        if (fine > 0 && rowOf[rNick] != null) {
+          var idxR = rowOf[rNick];
+          depCol[idxR][0] = safeInt(depCol[idxR][0]) + fine;
+          depDirty = true;
+        }
+      } else {
+        keepRows.push(vals[k]);
+      }
+    }
+    // 정산 시트 재작성 (헤더 + keepRows)
+    settlementSheet.getRange(2, 1, last - 1, cols)
+      .clearContent();
+    if (keepRows.length > 0) {
+      settlementSheet.getRange(2, 1, keepRows.length, cols).setValues(keepRows);
+    }
+    if (depDirty) {
+      memberSheet.getRange(1, 7, depCol.length, 1).setValues(depCol);
+    }
+  }
+
+  // 2) 안정화된 데이터로 재정산
+  var count = runWeeklyFineSettlement_(w, y);
+  return '재정산 완료: ' + y + '-W' + w + ' / ' + count + '건 (기존 row 삭제 후 재계산)';
 }
 
 function isoWeekFromDate_(date) {
@@ -2335,14 +2430,16 @@ function installWeeklyFineSettlementTrigger() {
       ScriptApp.deleteTrigger(existing[i]);
     }
   }
+  // 매일 04:00 KST 실행. 안정화(일요일+3일)된 가장 최근 주만 정산하고
+  // 이미 정산된 주는 idempotent skip → 매일 돌아도 안전 + 누락 자동 catch-up.
   ScriptApp.newTrigger('runWeeklyFineSettlementCron_')
     .timeBased()
-    .onWeekDay(ScriptApp.WeekDay.MONDAY)
-    .atHour(0)
-    .nearMinute(30)
+    .everyDays(1)
+    .atHour(4)
+    .nearMinute(0)
     .inTimezone('Asia/Seoul')
     .create();
-  return '주간 정산 트리거 설치 완료 (매주 월요일 00:30 KST ±15분)';
+  return '주간 정산 트리거 설치 완료 (매일 04:00 KST, 안정화 3일 버퍼 + idempotent)';
 }
 
 // 수동 정산 (admin이 특정 주차를 강제 정산할 때).
@@ -2354,6 +2451,39 @@ function manualRunWeeklyFineSettlement(week, year) {
   }
   var count = runWeeklyFineSettlement_(w, y);
   return '정산 완료: ' + y + '-W' + w + ' / ' + count + '건';
+}
+
+// ★ 무인자 wrapper (드롭다운 실행용) ──────────────
+// 이미 정산된 모든 주를, 안정화된 현재 데이터로 전면 재정산.
+// 데이터 불완전 상태에서 잘못 freeze된 과거 주들을 한 번에 정정한다.
+// (각 주차 기존 row 삭제 + deposit 롤백 후 재계산. 멱등.)
+function resettleAllSettledWeeks() {
+  var settlementSheet = getWeeklySettlementSheet_();
+  var last = settlementSheet.getLastRow();
+  if (last < 2) return '정산 기록 없음';
+  var cols = WEEKLY_SETTLEMENT_HEADERS_.length;
+  var vals = settlementSheet.getRange(2, 1, last - 1, cols).getValues();
+  var weeks = {};
+  vals.forEach(function(r) {
+    var w = Number(r[1]), y = Number(r[2]);
+    if (w && y) weeks[y + '-' + w] = { w: w, y: y };
+  });
+  var keys = Object.keys(weeks).sort();
+  var out = [];
+  keys.forEach(function(k) {
+    out.push(resettleWeek(weeks[k].w, weeks[k].y));
+  });
+  return '전면 재정산 ' + keys.length + '개 주차:\n' + out.join('\n');
+}
+
+// 최근 안정화된 1개 주만 재정산 (가벼운 점검용).
+function resettleLatestStableWeek() {
+  var nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+  var anchor = new Date(nowKst);
+  anchor.setDate(anchor.getDate() - SETTLEMENT_STABILITY_DAYS_);
+  while (anchor.getDay() !== 0) anchor.setDate(anchor.getDate() - 1);
+  var iso = isoWeekFromDate_(anchor);
+  return resettleWeek(iso.week, iso.year);
 }
 
 // ──────────────────────────────────────────────

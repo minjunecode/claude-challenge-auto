@@ -1278,9 +1278,28 @@ function renderFineTab() {
     const currLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
     let missCount = 0;
 
+    // 과거 주차 + 정산에 frozen된 일별 라벨이 있으면 그대로 렌더.
+    // → 셀(O/X/면제)과 요약(미달/벌금)이 절대 불일치하지 않음.
+    const frozenDays = (isPastWeek && settlement && Array.isArray(settlement.days)) ? settlement.days : null;
+    const frozenByDate = {};
+    if (frozenDays) frozenDays.forEach(fd => { frozenByDate[fd.date] = fd.label; });
+
     days.forEach(d => {
       const td = document.createElement('td');
       td.className = 'fine-cell';
+
+      if (frozenByDate.hasOwnProperty(d.date)) {
+        // 정산 freeze 값 — 재계산 없이 그대로
+        const label = frozenByDate[d.date];
+        td.textContent = label;
+        if (label === 'O') td.classList.add('fine-cell-ok');
+        else if (label === '면제') td.classList.add('fine-cell-exempt');
+        else if (label === 'X') td.classList.add('fine-cell-fine');
+        else td.classList.add('fine-cell-pending');
+        tr.appendChild(td);
+        return;
+      }
+
       const info = dailyMap[m.nickname][d.date];
       const tokens = info ? info.tokens : 0;
       const recordedLeague = (info && (info.league === LEAGUE_10M || info.league === LEAGUE_1M)) ? info.league : currLeague;
