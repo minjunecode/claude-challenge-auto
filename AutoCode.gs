@@ -2225,20 +2225,9 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
   // 그 주차의 7일 날짜 문자열
   var weekDates = isoWeekDates_(targetWeek, targetYear);  // ['YYYY-MM-DD' x 7]
 
-  // 사용량 시트 로드 (전체 — 작은 시트라 OK)
-  var usageSheet = ss.getSheetByName('사용량');
-  var usageMap = {};  // nickname → { date → score }
-  if (usageSheet && usageSheet.getLastRow() >= 2) {
-    var uVals = usageSheet.getRange(2, 1, usageSheet.getLastRow() - 1, USAGE_V2_HEADERS_.length).getValues();
-    uVals.forEach(function(r) {
-      var nick = String(r[0]).trim();
-      var dateStr = formatDateStr_(r[1]);
-      if (!nick || !dateStr) return;
-      var score = computeWeightedScoreFromRow_(r);
-      if (!usageMap[nick]) usageMap[nick] = {};
-      usageMap[nick][dateStr] = score;
-    });
-  }
+  // 사용량 집계: 대시보드/내 분석과 동일한 단일 진실 (pickActiveRows_ + calcScoreV2_).
+  // → 멀티 PC 사용자도 정산 score == 대시보드 score 보장.
+  var usageMap = buildDashboardUsageScoreMap_();  // nickname → { date → score }
 
   // 리그이동기록 타임라인 (프론트 leagueOnDate와 동일 단일 진실).
   // per-row league stamp 대신 이걸로 "그날 실제 리그" deterministic 계산
@@ -2341,8 +2330,87 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
   return settledCount;
 }
 
+/**
+ * 정산/감사 전용: 사용량 시트를 handleDashboard와 "완전히 동일한" 방식으로 집계.
+ * → (nickname|date) 그룹핑 → pickActiveRows_ 필터 → 선택된 행 토큰 합산 → calcScoreV2_.
+ * 반환: { nick: { 'YYYY-MM-DD': score } }
+ *
+ * 이전엔 정산/감사가 사용량 시트를 단순 순회하며 마지막 행만 취하고
+ * (pickActiveRows_ 미적용) computeWeightedScoreFromRow_(Codex 가중치 상이)로
+ * 계산해 멀티 PC 사용자에서 대시보드 score와 불일치 → O/X·벌금 어긋남.
+ * 단일 진실로 통일.
+ */
+function buildDashboardUsageScoreMap_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var usageSheet = ss.getSheetByName('사용량');
+  var map = {};
+  if (!usageSheet || usageSheet.getLastRow() < 2) return map;
+
+  var usageData = usageSheet.getDataRange().getValues();
+  var usageHdr0 = usageData[0];
+  var isUsageV2 = String(usageHdr0[2] || '').indexOf('claude_') === 0;
+  var usageHasV1 = usageHdr0.length >= 9;
+
+  var groupMap = {};  // key=nick|date → { nickname, date, machines: [] }
+  for (var k = 1; k < usageData.length; k++) {
+    if (!usageData[k][0]) continue;
+    var row = usageData[k];
+    var clIn, clOut, clCw, clCr, cxIn, cxOut, cxCr, mid;
+    if (isUsageV2) {
+      clIn = safeInt(row[2]); clOut = safeInt(row[3]);
+      clCw = safeInt(row[4]); clCr = safeInt(row[5]);
+      cxIn = safeInt(row[6]); cxOut = safeInt(row[7]); cxCr = safeInt(row[8]);
+      mid  = String(row[12] || '').trim() || LEGACY_MACHINE_ID;
+    } else if (usageHasV1) {
+      clIn = safeInt(row[2]); clOut = safeInt(row[3]);
+      clCw = safeInt(row[4]); clCr = safeInt(row[5]);
+      cxIn = 0; cxOut = 0; cxCr = 0; mid = LEGACY_MACHINE_ID;
+    } else {
+      clIn = safeInt(row[2]); clOut = safeInt(row[3]);
+      clCw = 0; clCr = 0; cxIn = 0; cxOut = 0; cxCr = 0; mid = LEGACY_MACHINE_ID;
+    }
+    var nk = String(row[0]).trim();
+    var ds = toDateStr(row[1]);
+    if (!nk || !ds) continue;
+    var key = nk + '|' + ds;
+    if (!groupMap[key]) groupMap[key] = { nickname: nk, date: ds, machines: [] };
+    var rowScore = calcScoreV2_({
+      claude_input_tokens: clIn, claude_output_tokens: clOut,
+      claude_cache_creation_tokens: clCw, claude_cache_read_tokens: clCr,
+      codex_input_tokens: cxIn, codex_output_tokens: cxOut,
+      codex_cache_read_tokens: cxCr
+    });
+    groupMap[key].machines.push({
+      mid: mid, score: rowScore,
+      clIn: clIn, clOut: clOut, clCw: clCw, clCr: clCr,
+      cxIn: cxIn, cxOut: cxOut, cxCr: cxCr
+    });
+  }
+
+  Object.keys(groupMap).forEach(function(key) {
+    var g = groupMap[key];
+    var rows = pickActiveRows_(g.machines);
+    if (!rows.length) return;
+    var sClIn=0,sClOut=0,sClCw=0,sClCr=0,sCxIn=0,sCxOut=0,sCxCr=0;
+    rows.forEach(function(m) {
+      sClIn += m.clIn; sClOut += m.clOut; sClCw += m.clCw; sClCr += m.clCr;
+      sCxIn += m.cxIn; sCxOut += m.cxOut; sCxCr += m.cxCr;
+    });
+    var uScore = calcScoreV2_({
+      claude_input_tokens: sClIn, claude_output_tokens: sClOut,
+      claude_cache_creation_tokens: sClCw, claude_cache_read_tokens: sClCr,
+      codex_input_tokens: sCxIn, codex_output_tokens: sCxOut,
+      codex_cache_read_tokens: sCxCr
+    });
+    if (!map[g.nickname]) map[g.nickname] = {};
+    map[g.nickname][g.date] = uScore;
+  });
+  return map;
+}
+
 // 사용량 시트 row(13열, USAGE_V2_HEADERS_)에서 가중 스코어 계산.
 // inp×1 + out×5 + cc×1.25 + cr×0.1 (Codex 컴포넌트 포함).
+// [DEPRECATED] 단일 행 계산용. 정산/감사는 buildDashboardUsageScoreMap_ 사용.
 function computeWeightedScoreFromRow_(r) {
   var inp = safeInt(r[2]);
   var out = safeInt(r[3]);
@@ -2534,18 +2602,8 @@ function auditFineSettlements() {
     return lg;
   }
 
-  // 사용량 전체 → nick → {date → score}
-  var usageMap = {};
-  if (usageSheet && usageSheet.getLastRow() >= 2) {
-    var uV = usageSheet.getRange(2, 1, usageSheet.getLastRow() - 1, USAGE_V2_HEADERS_.length).getValues();
-    uV.forEach(function(r) {
-      var nk = String(r[0]).trim();
-      var dt = formatDateStr_(r[1]);
-      if (!nk || !dt) return;
-      if (!usageMap[nk]) usageMap[nk] = {};
-      usageMap[nk][dt] = computeWeightedScoreFromRow_(r);
-    });
-  }
+  // 사용량 집계: 대시보드/내 분석/정산과 동일한 단일 진실.
+  var usageMap = buildDashboardUsageScoreMap_();  // nick → {date → score}
 
   // 안정화 기준
   var nowKst = new Date(Date.now() + 9 * 3600 * 1000);
