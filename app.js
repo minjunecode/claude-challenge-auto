@@ -1200,6 +1200,19 @@ function renderFineTab() {
   const isPastWeek = (displayedIso.year < currentIso.year) ||
                      (displayedIso.year === currentIso.year && displayedIso.week < currentIso.week);
 
+  // ★ 안정화 가드: 표시 주의 일요일 + 3일이 안 지났으면, 정산 row가 있어도
+  //   신뢰하지 않고 실시간으로 표시. (옛 버그 cron이 데이터 도착 전 일찍
+  //   freeze한 stale 정산이 주간뷰와 모순되는 것 차단. 백엔드 resettle도
+  //   같은 3일 가드라 그때까지는 realtime이 단일 진실.)
+  const SETTLE_STABILITY_DAYS = 3;
+  const weekSunday = new Date(monday);
+  weekSunday.setDate(monday.getDate() + 6);
+  const weekSundayD = new Date(weekSunday.getFullYear(), weekSunday.getMonth(), weekSunday.getDate());
+  const stableCutoff = new Date(now);
+  stableCutoff.setDate(now.getDate() - SETTLE_STABILITY_DAYS);
+  const stableCutoffD = new Date(stableCutoff.getFullYear(), stableCutoff.getMonth(), stableCutoff.getDate());
+  const weekIsStable = weekSundayD.getTime() <= stableCutoffD.getTime();
+
   // 정산 시트의 (nickname, week, year) 매칭용 인덱스
   const settlements = dashboardData.settlements || [];
   const settlementByKey = {};
@@ -1281,7 +1294,9 @@ function renderFineTab() {
     // (요약은 옛 freeze, 셀은 실시간 → 모순되던 문제 차단)
     const settlement = getSettlement(m.nickname);
     const hasFrozen = !!(settlement && Array.isArray(settlement.days) && settlement.days.length === 7);
-    const useFrozen = isPastWeek && hasFrozen;
+    // 안정화(일요일+3일) 지난 과거 주 + 유효 frozen일 때만 freeze 신뢰.
+    // 안 지난 주는 stale 정산 무시 → 실시간(주간뷰와 동일 단일 진실).
+    const useFrozen = isPastWeek && weekIsStable && hasFrozen;
     const statusForWeek = useFrozen ? settlement.status : m.participating;
     const state = getFineState(statusForWeek);
 
