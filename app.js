@@ -1285,6 +1285,21 @@ function renderFineTab() {
   const ledgerAvailable = !!(dashboardData && dashboardData.depositLedger &&
                              Object.keys(dashboardData.depositLedger).length > 0);
 
+  // 주차별 status 단일 진실 { nick: { 'year-week': status } }.
+  // 미수신(백엔드 미배포)이면 폴백: 기존처럼 현재 m.participating 사용.
+  const weeklyStatusMap = (dashboardData && dashboardData.weeklyStatus) || {};
+  const weeklyStatusAvailable = !!(dashboardData && dashboardData.weeklyStatus);
+  // (nick, iso)의 그 주차 status. 우선순위:
+  //   frozen 정산 status > 주간상태 시트 > (현재주면 m.participating) > '참여 중'
+  function statusForWeekFE(m, iso) {
+    if (!weeklyStatusAvailable) return m.participating;  // 폴백(레거시)
+    const wm = weeklyStatusMap[m.nickname];
+    const key = `${iso.year}-${iso.week}`;
+    if (wm && wm[key]) return wm[key];
+    if (iso.year === currentIso.year && iso.week === currentIso.week) return m.participating;
+    return '참여 중';
+  }
+
   // ── 한 주차의 일별 라벨 + 벌금 산출 (frozen 우선, 아니면 실시간) ──
   // renderFineTab의 기존 로직과 동일하되, 임의 주차에 대해 호출 가능하게 분리.
   // 보증금은 여기서 계산하지 않음 — 호출부에서 주차순으로 누적 도출.
@@ -1312,7 +1327,7 @@ function renderFineTab() {
     const st = settlementByKey[`${m.nickname}__${iso.year}-W${iso.week}`];
     const hasFrozen = !!(st && Array.isArray(st.days) && st.days.length === 7);
     const useFrozen = wkPast && wkStable && hasFrozen && !prejoin && !preEnforce;
-    const statusForWeek = useFrozen ? st.status : m.participating;
+    const statusForWeek = useFrozen ? st.status : statusForWeekFE(m, iso);
     const state = getFineState(statusForWeek);
     const currLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
     const byDate = {};

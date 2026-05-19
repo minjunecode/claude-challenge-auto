@@ -1293,7 +1293,8 @@ function handleDashboard(params) {
     evalRankings: evalRankings,
     myEvalThisWeek: myEvalThisWeek,
     leagueTimeline: leagueTimeline,
-    depositLedger: loadDepositLedger_()
+    depositLedger: loadDepositLedger_(),
+    weeklyStatus: loadWeeklyStatus_()
   };
   // 캐시에 저장 (다음 30s 내 동일 요청은 시트 read 없이 즉시 반환)
   putCachedDashboard_(nickname, response);
@@ -2250,6 +2251,48 @@ function firstPaymentDate_(ledgerMap, nick) {
   return (l && l.length) ? l[0].date : '';
 }
 
+// ── 주차별 참여 status 이력 (single source of truth) ──
+// status(참여 중 / 주간 면제 / 참여 안 함)는 매주 바뀌는데 멤버 F열은
+// "현재 값" 하나뿐 → 과거 주차 재정산 시 현재 status로 오염.
+// 주차 키 (nickname, year, week)로 기록. 미기재 = 기본 '참여 중'.
+var WEEKLY_STATUS_SHEET_ = '주간상태';
+var WEEKLY_STATUS_HEADERS_ = ['nickname', 'year', 'week', 'status', 'memo'];
+var VALID_STATUSES_ = ['참여 중', '주간 면제', '참여 안 함'];
+
+function getWeeklyStatusSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(WEEKLY_STATUS_SHEET_);
+  if (!sh) {
+    sh = ss.insertSheet(WEEKLY_STATUS_SHEET_);
+    sh.appendRow(WEEKLY_STATUS_HEADERS_);
+  }
+  return sh;
+}
+
+// 로드 → { nick: { 'year-week': status } }. 잘못된 status는 제외.
+function loadWeeklyStatus_() {
+  var sh = getWeeklyStatusSheet_();
+  var map = {};
+  if (sh.getLastRow() < 2) return map;
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, WEEKLY_STATUS_HEADERS_.length).getValues();
+  vals.forEach(function(r) {
+    var nick = String(r[0] || '').trim();
+    var y = Number(r[1]), w = Number(r[2]);
+    var st = String(r[3] || '').trim();
+    if (!nick || !y || !w || VALID_STATUSES_.indexOf(st) < 0) return;
+    if (!map[nick]) map[nick] = {};
+    map[nick][y + '-' + w] = st;
+  });
+  return map;
+}
+
+// (nick, year, week)의 status. 미기재면 기본 '참여 중'.
+function statusForWeek_(wsMap, nick, year, week) {
+  var m = wsMap[nick];
+  if (m && m[year + '-' + week]) return m[year + '-' + week];
+  return '참여 중';
+}
+
 /**
  * [관리자] 원장이 비어있는 멤버를 위해 현재 G열 금액으로 시드 행 생성.
  * date는 비워둠 → admin이 각 멤버의 실제 납입일을 수기로 채워야 derivation에 반영됨.
@@ -2469,6 +2512,8 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
   // 납입 원장: 멤버 최초 납입일 이전 날짜는 벌금/X 미부과(미합류).
   // 원장 없는 멤버는 fpDate='' → 전부 '-' (온보딩 전 오부과 방지).
   var fineLedger = loadDepositLedger_();
+  // 주차별 status 단일 진실 (현재 F열 X — 과거 재정산 오염 방지)
+  var weeklyStatus = loadWeeklyStatus_();
 
   // 원자적 batch: 정산 row들을 메모리에 모았다가 한 번에 write.
   // (멤버별 setValue 반복 → 6분 한도 부분실패 방지)
@@ -2482,7 +2527,8 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
     if (!nick) continue;
     if (isAlreadySettled_(settled, nick, targetWeek, targetYear)) continue;
 
-    var statusRaw = String(members[mi][5] || '참여 중').trim();
+    // 그 주차의 status = 주간상태 시트 (미기재 = '참여 중'). 멤버 F열 무시.
+    var statusRaw = statusForWeek_(weeklyStatus, nick, targetYear, targetWeek);
     var curLeague = String(members[mi][4] || LEAGUE_1M).trim();
     if (curLeague !== LEAGUE_10M && curLeague !== LEAGUE_1M) curLeague = LEAGUE_1M;
 
@@ -2791,6 +2837,7 @@ function auditFineSettlements() {
   // 안정화 기준
   var nowKst = new Date(Date.now() + 9 * 3600 * 1000);
   var auditLedger = loadDepositLedger_();  // 최초 납입일 이전 게이트 동일 적용
+  var auditWeeklyStatus = loadWeeklyStatus_();  // 주차별 status 단일 진실
 
   var sCols = WEEKLY_SETTLEMENT_HEADERS_.length;
   var sVals = settlementSheet.getRange(2, 1, last - 1, sCols).getValues();
@@ -2813,7 +2860,8 @@ function auditFineSettlements() {
 
     var info = mInfo[nick] || { status: '참여 중', league: LEAGUE_1M };
     var curLeague = (info.league === LEAGUE_10M || info.league === LEAGUE_1M) ? info.league : LEAGUE_1M;
-    var statusRaw = info.status;
+    // 그 주차의 status = 주간상태 시트 (미기재 = '참여 중'). 현재 F열 무시.
+    var statusRaw = statusForWeek_(auditWeeklyStatus, nick, y, w);
     var isActive = (statusRaw === '참여 중' || statusRaw === '');
     var isExempt = (statusRaw === '주간 면제');
     var fpDate = firstPaymentDate_(auditLedger, nick);
