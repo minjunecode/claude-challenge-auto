@@ -1277,6 +1277,10 @@ function renderFineTab() {
   // 보증금 납입 원장 (단일 진실). { nick: [{date,amount}] } date 오름차순.
   // 멤버마다 합류·납입 시기가 달라 G열 수기값 대신 이 원장으로 도출.
   const depositLedger = (dashboardData && dashboardData.depositLedger) || {};
+  // 원장 데이터가 응답에 아예 없으면(=백엔드 미배포/캐시) 원장 게이트를 끄고
+  // 기존 50,000 기준 누적으로 동작 → 전원 '미합류' 오표시 방지(안전 폴백).
+  const ledgerAvailable = !!(dashboardData && dashboardData.depositLedger &&
+                             Object.keys(dashboardData.depositLedger).length > 0);
 
   // ── 한 주차의 일별 라벨 + 벌금 산출 (frozen 우선, 아니면 실시간) ──
   // renderFineTab의 기존 로직과 동일하되, 임의 주차에 대해 호출 가능하게 분리.
@@ -1297,9 +1301,10 @@ function renderFineTab() {
                    (iso.year === currentIso.year && iso.week < currentIso.week);
     const weekEnd = wkDates[6];  // 그 주 일요일
     // 납입 원장: 최초 납입일 이전(또는 미온보딩) 주차/날짜는 벌금 대상 아님.
-    const pays = depositLedger[m.nickname] || [];
+    // 원장 미수신 시(폴백)엔 게이트 비활성 — 기존 동작 유지.
+    const pays = ledgerAvailable ? (depositLedger[m.nickname] || []) : [];
     const fpDate = pays.length ? pays[0].date : '';
-    const prejoin = !fpDate || weekEnd < fpDate;  // 이 주 전체가 합류 전
+    const prejoin = ledgerAvailable && (!fpDate || weekEnd < fpDate);  // 이 주 전체가 합류 전
     const st = settlementByKey[`${m.nickname}__${iso.year}-W${iso.week}`];
     const hasFrozen = !!(st && Array.isArray(st.days) && st.days.length === 7);
     const useFrozen = wkPast && wkStable && hasFrozen && !prejoin;
@@ -1319,7 +1324,7 @@ function renderFineTab() {
     } else {
       wkDates.forEach(dateStr => {
         let label;
-        if (!fpDate || dateStr < fpDate) {
+        if (ledgerAvailable && (!fpDate || dateStr < fpDate)) {
           label = '-';  // 최초 납입일 이전 = 미합류
         } else if (state === 'inactive' || state === 'unknown') {
           label = '-';
@@ -1378,9 +1383,10 @@ function renderFineTab() {
     // ── 보증금 단일 진실: 납입 원장 + 벌금 이력 누적 도출 ──
     // running=0에서 시작, 각 주 일요일까지 납입액을 누적(재충전 포함)한 뒤
     // 그 주 벌금 차감. 멤버마다 합류·납입 시기가 달라도 일관·단조.
-    const mPays = depositLedger[m.nickname] || [];
-    let running = 0, pIdx = 0;
-    let dispWeek = null, depBefore = 0, depAfter = 0;
+    // 원장 수신 시: running=0에서 납입 누적. 미수신(폴백): 기존 50,000 기준.
+    const mPays = ledgerAvailable ? (depositLedger[m.nickname] || []) : [];
+    let running = ledgerAvailable ? 0 : FINE_DEPOSIT, pIdx = 0;
+    let dispWeek = null, depBefore = running, depAfter = running;
     for (let wi = 0; wi < chainMondays.length; wi++) {
       const wr = computeWeekFine(m, chainMondays[wi]);
       while (pIdx < mPays.length && mPays[pIdx].date <= wr.weekEnd) {
