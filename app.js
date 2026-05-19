@@ -1274,6 +1274,78 @@ function renderFineTab() {
   const thFine = document.createElement('th'); thFine.textContent = '벌금'; thFine.className = 'fine-th-summary'; headerRow.appendChild(thFine);
   const thRem  = document.createElement('th'); thRem.textContent  = '잔여'; thRem.className  = 'fine-th-summary'; headerRow.appendChild(thRem);
 
+  // ── 한 주차의 일별 라벨 + 벌금 산출 (frozen 우선, 아니면 실시간) ──
+  // renderFineTab의 기존 로직과 동일하되, 임의 주차에 대해 호출 가능하게 분리.
+  // 보증금은 여기서 계산하지 않음 — 호출부에서 주차순으로 누적 도출.
+  function computeWeekFine(m, mondayDate) {
+    const iso = fineIsoWeekFromDate(mondayDate);
+    const wkDates = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(mondayDate);
+      d.setDate(mondayDate.getDate() + i);
+      wkDates.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    }
+    const wkSun = new Date(mondayDate);
+    wkSun.setDate(mondayDate.getDate() + 6);
+    const wkSunD = new Date(wkSun.getFullYear(), wkSun.getMonth(), wkSun.getDate());
+    const wkStable = wkSunD.getTime() <= stableCutoffD.getTime();
+    const wkPast = (iso.year < currentIso.year) ||
+                   (iso.year === currentIso.year && iso.week < currentIso.week);
+    const st = settlementByKey[`${m.nickname}__${iso.year}-W${iso.week}`];
+    const hasFrozen = !!(st && Array.isArray(st.days) && st.days.length === 7);
+    const useFrozen = wkPast && wkStable && hasFrozen;
+    const statusForWeek = useFrozen ? st.status : m.participating;
+    const state = getFineState(statusForWeek);
+    const currLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
+    const byDate = {};
+    let missCount = 0, fineAmount, chargedDays;
+    if (useFrozen) {
+      st.days.forEach(fd => { byDate[fd.date] = fd.label; });
+      fineAmount = st.fineAmount;
+      chargedDays = st.chargedDays;
+      missCount = st.missCount;
+    } else {
+      wkDates.forEach(dateStr => {
+        let label;
+        if (state === 'inactive' || state === 'unknown') {
+          label = '-';
+        } else if (dateStr > today) {
+          label = '-';
+        } else {
+          const info = dailyMap[m.nickname] && dailyMap[m.nickname][dateStr];
+          const tokens = info ? info.tokens : 0;
+          const recordedLeague = leagueOnDate(m.nickname, dateStr, currLeague);
+          const t = getThresholdsFor(dateStr, recordedLeague);
+          if (tokens >= t[0]) {
+            label = 'O';
+          } else {
+            missCount += 1;
+            if (state === 'exempt') label = '면제';
+            else if (missCount <= FINE_FREE_DAYS) label = '면제';
+            else label = 'X';
+          }
+        }
+        byDate[dateStr] = label;
+      });
+      chargedDays = (state === 'active') ? Math.max(0, missCount - FINE_FREE_DAYS) : 0;
+      fineAmount = chargedDays * FINE_PER_DAY;
+    }
+    return { iso, byDate, missCount, fineAmount, chargedDays, state, statusForWeek };
+  }
+
+  // 표시 주차까지의 모든 주(월요일) 목록 — FINE_MIN_MONDAY부터 chronological.
+  // 보증금을 1주차부터 누적 도출 → 어느 주차를 봐도 단조 감소·일관.
+  const chainMondays = [];
+  {
+    let cur = new Date(FINE_MIN_MONDAY);
+    const dispMonD = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate());
+    while (cur.getTime() <= dispMonD.getTime()) {
+      chainMondays.push(new Date(cur));
+      cur.setDate(cur.getDate() + 7);
+    }
+    if (chainMondays.length === 0) chainMondays.push(new Date(dispMonD));
+  }
+
   // 본문
   const tbody = document.getElementById('fine-body-row');
   tbody.innerHTML = '';
@@ -1289,16 +1361,27 @@ function renderFineTab() {
     nameTd.appendChild(document.createTextNode(' ' + m.nickname));
     tr.appendChild(nameTd);
 
-    // 과거 주차 정산값 사용 조건: 정산 row가 있고 + daysJson(7일 freeze)이 유효할 때만.
-    // 옛 정산 row(daysJson 없음/불완전)는 신뢰 불가 → 요약·셀 모두 실시간으로 일관 처리.
-    // (요약은 옛 freeze, 셀은 실시간 → 모순되던 문제 차단)
-    const settlement = getSettlement(m.nickname);
-    const hasFrozen = !!(settlement && Array.isArray(settlement.days) && settlement.days.length === 7);
-    // 안정화(일요일+3일) 지난 과거 주 + 유효 frozen일 때만 freeze 신뢰.
-    // 안 지난 주는 stale 정산 무시 → 실시간(주간뷰와 동일 단일 진실).
-    const useFrozen = isPastWeek && weekIsStable && hasFrozen;
-    const statusForWeek = useFrozen ? settlement.status : m.participating;
-    const state = getFineState(statusForWeek);
+    // ── 보증금 단일 진실: 1주차부터 표시 주차까지 벌금 누적 도출 ──
+    // 백엔드 G열/정산 스냅샷에 의존하지 않고 프론트에서 직접 체이닝.
+    // → 어느 주차를 봐도 단조 감소·일관 (백엔드 정산 진행 여부와 무관).
+    let running = FINE_DEPOSIT;
+    let dispWeek = null, depBefore = FINE_DEPOSIT, depAfter = FINE_DEPOSIT;
+    for (let wi = 0; wi < chainMondays.length; wi++) {
+      const wr = computeWeekFine(m, chainMondays[wi]);
+      const before = running;
+      const after = Math.max(0, running - (wr.fineAmount || 0));
+      running = after;
+      if (wr.iso.year === displayedIso.year && wr.iso.week === displayedIso.week) {
+        dispWeek = wr; depBefore = before; depAfter = after;
+      }
+    }
+    if (!dispWeek) dispWeek = computeWeekFine(m, monday);  // 안전망
+
+    const state = dispWeek.state;
+    const statusForWeek = dispWeek.statusForWeek;
+    let missCount = dispWeek.missCount;
+    const fineAmount = dispWeek.fineAmount;
+    const remaining = depAfter;
 
     const partTd = document.createElement('td');
     partTd.className = 'fine-td-summary fine-td-participating';
@@ -1308,82 +1391,22 @@ function renderFineTab() {
       partTd.textContent = '주간 면제';
       partTd.classList.add('fine-td-exempt');
     } else {
-      // inactive 또는 unknown (임의 값도 회색 처리)
       partTd.textContent = state === 'inactive' ? '참여 안 함' : (statusForWeek || '참여 안 함');
       partTd.classList.add('fine-td-not-participating');
     }
     tr.appendChild(partTd);
 
-    const currLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
-    let missCount = 0;
-
-    // useFrozen일 때만 frozen 일별 라벨 사용 → 셀과 요약이 항상 같은 출처.
-    const frozenDays = useFrozen ? settlement.days : null;
-    const frozenByDate = {};
-    if (frozenDays) frozenDays.forEach(fd => { frozenByDate[fd.date] = fd.label; });
-
     days.forEach(d => {
       const td = document.createElement('td');
       td.className = 'fine-cell';
-
-      if (frozenByDate.hasOwnProperty(d.date)) {
-        // 정산 freeze 값 — 재계산 없이 그대로
-        const label = frozenByDate[d.date];
-        td.textContent = label;
-        if (label === 'O') td.classList.add('fine-cell-ok');
-        else if (label === '면제') td.classList.add('fine-cell-exempt');
-        else if (label === 'X') td.classList.add('fine-cell-fine');
-        else td.classList.add('fine-cell-pending');
-        tr.appendChild(td);
-        return;
-      }
-
-      const info = dailyMap[m.nickname][d.date];
-      const tokens = info ? info.tokens : 0;
-      // 그날 실제 소속 리그 = 타임라인 기준 (per-row stamp/현재리그 fallback 안 씀)
-      const recordedLeague = leagueOnDate(m.nickname, d.date, currLeague);
-      const t = getThresholdsFor(d.date, recordedLeague);
-
-      if (state === 'inactive' || state === 'unknown') {
-        td.textContent = '-';
-        td.classList.add('fine-cell-pending');
-      } else if (d.date > today) {
-        td.textContent = '-';
-        td.classList.add('fine-cell-pending');
-      } else if (tokens >= t[0]) {
-        td.textContent = 'O';
-        td.classList.add('fine-cell-ok');
-      } else {
-        missCount += 1;
-        if (state === 'exempt') {
-          // 주간 면제: 모든 미달이 '면제'
-          td.textContent = '면제';
-          td.classList.add('fine-cell-exempt');
-        } else if (missCount <= FINE_FREE_DAYS) {
-          td.textContent = '면제';
-          td.classList.add('fine-cell-exempt');
-        } else {
-          td.textContent = 'X';
-          td.classList.add('fine-cell-fine');
-        }
-      }
+      const label = dispWeek.byDate.hasOwnProperty(d.date) ? dispWeek.byDate[d.date] : '-';
+      td.textContent = label;
+      if (label === 'O') td.classList.add('fine-cell-ok');
+      else if (label === '면제') td.classList.add('fine-cell-exempt');
+      else if (label === 'X') td.classList.add('fine-cell-fine');
+      else td.classList.add('fine-cell-pending');
       tr.appendChild(td);
     });
-
-    // useFrozen일 때만 정산 freeze 값 사용. 옛/불완전 정산은 실시간 계산.
-    let fineAmount, chargedDays, remaining;
-    if (useFrozen) {
-      fineAmount = settlement.fineAmount;
-      chargedDays = settlement.chargedDays;
-      missCount = settlement.missCount;
-      remaining = settlement.depositAfter;
-    } else {
-      chargedDays = (state === 'active') ? Math.max(0, missCount - FINE_FREE_DAYS) : 0;
-      fineAmount = chargedDays * FINE_PER_DAY;
-      // 시트 deposit 값은 "이번 주 시작 보증금"으로 해석 → 여기서 벌금 차감
-      const baseDeposit = (typeof m.deposit === 'number') ? m.deposit : FINE_DEPOSIT;
-      remaining = Math.max(0, baseDeposit - fineAmount);
-    }
 
     const tdMiss = document.createElement('td');
     tdMiss.textContent = (state === 'inactive' || state === 'unknown') ? '-' : `${missCount}일`;
