@@ -1136,7 +1136,7 @@ function renderPodium(view) {
 let fineWeekOffset = 0;
 // 벌금 기록 조회 가능한 최소 주차의 월요일 (2026 4월 4주차 = 2026-04-20).
 // 그 이전 주차는 챌린지 시작 전 / 사전 운영 데이터라 노출하지 않음.
-const FINE_MIN_MONDAY = new Date(2026, 3, 20);  // month=3 → April
+const FINE_MIN_MONDAY = new Date(2026, 3, 27);  // 5월 1주차 월요일 (벌금 시행 시작주). 그 이전 주차 비노출
 // 벌금 전역 시행 시작일 (이 날짜 이전 = 전원 '-', 벌금/X 없음).
 // 5월 1주차 월요일. 백엔드 FINE_ENFORCEMENT_START_와 동일해야 함.
 const FINE_ENFORCEMENT_START = '2026-04-27';
