@@ -1292,7 +1292,8 @@ function handleDashboard(params) {
     settlements: settlements,
     evalRankings: evalRankings,
     myEvalThisWeek: myEvalThisWeek,
-    leagueTimeline: leagueTimeline
+    leagueTimeline: leagueTimeline,
+    depositLedger: loadDepositLedger_()
   };
   // 캐시에 저장 (다음 30s 내 동일 요청은 시트 read 없이 즉시 반환)
   putCachedDashboard_(nickname, response);
@@ -2202,6 +2203,86 @@ function getWeeklySettlementSheet_() {
   return sh;
 }
 
+// ── 보증금 납입 원장 (single source of truth) ──
+// 멤버마다 합류 시기·금액이 달라 G열 수기입력은 시스템이 덮어써 신뢰 불가.
+// append-only 원장: (nickname, date, amount, memo). 재충전 = 행 추가.
+// 보증금은 이 원장 + 벌금 이력의 순수 함수로 도출(멱등).
+var DEPOSIT_LEDGER_SHEET_ = '보증금납입';
+var DEPOSIT_LEDGER_HEADERS_ = ['nickname', 'date', 'amount', 'memo'];
+
+function getDepositLedgerSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(DEPOSIT_LEDGER_SHEET_);
+  if (!sh) {
+    sh = ss.insertSheet(DEPOSIT_LEDGER_SHEET_);
+    sh.appendRow(DEPOSIT_LEDGER_HEADERS_);
+  }
+  return sh;
+}
+
+// 원장 로드 → { nick: [{date:'YYYY-MM-DD', amount:int}] }  (date 오름차순).
+// date 비거나 형식 불량, amount<=0 인 행은 제외(=설정 미완료로 간주).
+function loadDepositLedger_() {
+  var sh = getDepositLedgerSheet_();
+  var map = {};
+  if (sh.getLastRow() < 2) return map;
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, DEPOSIT_LEDGER_HEADERS_.length).getValues();
+  vals.forEach(function(r) {
+    var nick = String(r[0] || '').trim();
+    var dt = toDateStr(r[1]);
+    var amt = safeInt(r[2]);
+    if (!nick || !/^\d{4}-\d{2}-\d{2}$/.test(dt) || amt <= 0) return;
+    if (!map[nick]) map[nick] = [];
+    map[nick].push({ date: dt, amount: amt });
+  });
+  Object.keys(map).forEach(function(nk) {
+    map[nk].sort(function(a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+  });
+  return map;
+}
+
+// 멤버의 최초 납입일 (벌금 적용 시작 기준). 원장 없으면 '' (= 아직 미온보딩).
+function firstPaymentDate_(ledgerMap, nick) {
+  var l = ledgerMap[nick];
+  return (l && l.length) ? l[0].date : '';
+}
+
+/**
+ * [관리자] 원장이 비어있는 멤버를 위해 현재 G열 금액으로 시드 행 생성.
+ * date는 비워둠 → admin이 각 멤버의 실제 납입일을 수기로 채워야 derivation에 반영됨.
+ * (날짜를 임의 가정하지 않음 — 합류 시기가 사람마다 다르므로.)
+ * Apps Script 에디터 → seedDepositLedgerFromMembers → ▶ 실행.
+ */
+function seedDepositLedgerFromMembers() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var memberSheet = ss.getSheetByName('멤버');
+  if (!memberSheet) return '멤버 시트 없음';
+  var sh = getDepositLedgerSheet_();
+  var existing = {};
+  if (sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().forEach(function(r) {
+      var n = String(r[0] || '').trim();
+      if (n) existing[n] = true;
+    });
+  }
+  var mV = memberSheet.getDataRange().getValues();
+  var added = [];
+  for (var i = 1; i < mV.length; i++) {
+    var nick = String(mV[i][0] || '').trim();
+    if (!nick || existing[nick]) continue;
+    var g = mV[i][6];
+    var amt = (g === '' || g === null || g === undefined) ? INITIAL_DEPOSIT_ : safeInt(g);
+    if (amt <= 0) amt = INITIAL_DEPOSIT_;
+    added.push([nick, '', amt, 'auto-seed: 납입일(2열) 수기 입력 필요']);
+  }
+  if (added.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, added.length, DEPOSIT_LEDGER_HEADERS_.length).setValues(added);
+  }
+  var msg = '원장 시드 ' + added.length + '명 추가. 각 행의 date 열에 실제 납입일(YYYY-MM-DD)을 입력한 뒤 repairAllDeposits 실행.';
+  Logger.log(msg);
+  return msg;
+}
+
 // 이미 정산된 (nickname, week, year)인지 확인.
 function isAlreadySettled_(settlementRows, nickname, week, year) {
   for (var i = 0; i < settlementRows.length; i++) {
@@ -2252,23 +2333,47 @@ function recomputeAllDeposits_() {
     byMember[nk].push({ ri: i, w: w, y: y, fine: safeInt(rows[i][6]) });
   }
 
-  // 멤버별 시간순 도출
-  var finalDeposit = {};  // nick → 최근 정산 후 잔여
+  // 납입 원장 (단일 진실). 보증금 = 납입 누적 − 벌금 누적, 0에서 clamp.
+  var ledger = loadDepositLedger_();
+
+  // 멤버별 시간순 도출 (납입을 주차 경계에서 누적, 그 주 벌금 차감)
+  var finalDeposit = {};   // nick → 최신 잔여
+  var configured = {};     // nick → 원장 보유 여부
   Object.keys(byMember).forEach(function(nk) {
+    var pays = ledger[nk] || [];
+    if (!pays.length) { configured[nk] = false; return; }  // 미온보딩 → G 유지
+    configured[nk] = true;
+
     var list = byMember[nk];
     list.sort(function(a, b) {
       if (a.y !== b.y) return a.y - b.y;
       return a.w - b.w;
     });
-    var running = INITIAL_DEPOSIT_;
+    var running = 0, pIdx = 0;
     list.forEach(function(item) {
+      var weekEnd = isoWeekDates_(item.w, item.y)[6];  // 그 주 일요일
+      // 이 주 일요일까지 납입된 금액 누적 (재충전 포함)
+      while (pIdx < pays.length && pays[pIdx].date <= weekEnd) {
+        running += pays[pIdx].amount; pIdx++;
+      }
       var before = running;
       var after = Math.max(0, before - item.fine);
       rows[item.ri][7] = before;  // depositBefore
       rows[item.ri][8] = after;   // depositAfter
       running = after;
     });
+    // 마지막 정산 이후의 납입(최근 재충전)도 현재 잔여에 반영
+    while (pIdx < pays.length) { running += pays[pIdx].amount; pIdx++; }
     finalDeposit[nk] = running;
+  });
+
+  // 정산 이력 없지만 원장 있는 멤버: 잔여 = 납입 누적 (벌금 없음)
+  Object.keys(ledger).forEach(function(nk) {
+    if (finalDeposit.hasOwnProperty(nk)) return;
+    var sum = 0;
+    ledger[nk].forEach(function(p) { sum += p.amount; });
+    finalDeposit[nk] = sum;
+    configured[nk] = true;
   });
 
   // 정산 시트 일괄 write-back
@@ -2276,13 +2381,15 @@ function recomputeAllDeposits_() {
     settlementSheet.getRange(2, 1, rows.length, cols).setValues(rows);
   }
 
-  // 멤버 G열 = 최근 정산 후 잔여 (정산 이력 없으면 INITIAL_DEPOSIT_)
+  // 멤버 G열: 원장 있는 멤버만 도출값으로 갱신.
+  // 원장 없는 멤버는 기존 G열 유지(시드/온보딩 전 데이터 보호).
   var mVals = memberSheet.getDataRange().getValues();
   var depCol = mVals.map(function(r, idx) {
     if (idx === 0) return [r[6]];  // header 보존
     var nick = String(r[0] || '').trim();
     if (!nick) return [r[6]];
-    return [ finalDeposit.hasOwnProperty(nick) ? finalDeposit[nick] : INITIAL_DEPOSIT_ ];
+    if (configured[nick] && finalDeposit.hasOwnProperty(nick)) return [ finalDeposit[nick] ];
+    return [r[6]];  // 미온보딩 → 수기값 유지
   });
   memberSheet.getRange(1, 7, depCol.length, 1).setValues(depCol);
 
@@ -2356,6 +2463,10 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
   var members = memberSheet.getDataRange().getValues();
   var nowStr = new Date().toISOString();
 
+  // 납입 원장: 멤버 최초 납입일 이전 날짜는 벌금/X 미부과(미합류).
+  // 원장 없는 멤버는 fpDate='' → 전부 '-' (온보딩 전 오부과 방지).
+  var fineLedger = loadDepositLedger_();
+
   // 원자적 batch: 정산 row들을 메모리에 모았다가 한 번에 write.
   // (멤버별 setValue 반복 → 6분 한도 부분실패 방지)
   // ※ 보증금은 여기서 차감하지 않는다 — 마지막에 recomputeAllDeposits_가
@@ -2374,11 +2485,14 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
 
     var isActive = (statusRaw === '참여 중' || statusRaw === '');
     var isExempt = (statusRaw === '주간 면제');
+    var fpDate = firstPaymentDate_(fineLedger, nick);  // 최초 납입일 ('' = 미온보딩)
 
     // 7일 일별 라벨 산출 (프론트 로직과 동일 — free-days 누적 면제 포함).
     // 라벨: 'O'(달성) / '면제'(주2회 면제 or 주간면제) / 'X'(벌금) / '-'(미참여)
     var missCount = 0;
     var days = weekDates.map(function(dStr) {
+      // 최초 납입일 이전(또는 원장 미설정)은 벌금 대상 아님 → '-'
+      if (!fpDate || dStr < fpDate) return { date: dStr, label: '-' };
       var tokens = (usageMap[nick] && usageMap[nick][dStr]) || 0;
       var league = leagueOnDate_(nick, dStr, curLeague);
       var threshold = (league === LEAGUE_10M) ? 10000000 : 1000000;
@@ -2671,6 +2785,7 @@ function auditFineSettlements() {
 
   // 안정화 기준
   var nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+  var auditLedger = loadDepositLedger_();  // 최초 납입일 이전 게이트 동일 적용
 
   var sCols = WEEKLY_SETTLEMENT_HEADERS_.length;
   var sVals = settlementSheet.getRange(2, 1, last - 1, sCols).getValues();
@@ -2696,9 +2811,11 @@ function auditFineSettlements() {
     var statusRaw = info.status;
     var isActive = (statusRaw === '참여 중' || statusRaw === '');
     var isExempt = (statusRaw === '주간 면제');
+    var fpDate = firstPaymentDate_(auditLedger, nick);
 
     var missCount = 0;
     var days = weekDates.map(function(dStr) {
+      if (!fpDate || dStr < fpDate) return { date: dStr, label: '-' };
       var tokens = (usageMap[nick] && usageMap[nick][dStr]) || 0;
       var league = lod_(nick, dStr, curLeague);
       var threshold = (league === LEAGUE_10M) ? 10000000 : 1000000;
