@@ -1137,6 +1137,9 @@ let fineWeekOffset = 0;
 // 벌금 기록 조회 가능한 최소 주차의 월요일 (2026 4월 4주차 = 2026-04-20).
 // 그 이전 주차는 챌린지 시작 전 / 사전 운영 데이터라 노출하지 않음.
 const FINE_MIN_MONDAY = new Date(2026, 3, 20);  // month=3 → April
+// 벌금 전역 시행 시작일 (이 날짜 이전 = 전원 '-', 벌금/X 없음).
+// 5월 1주차 월요일. 백엔드 FINE_ENFORCEMENT_START_와 동일해야 함.
+const FINE_ENFORCEMENT_START = '2026-04-27';
 const FINE_DEPOSIT = 50000;
 const FINE_PER_DAY = 10000;
 const FINE_FREE_DAYS = 2;
@@ -1305,15 +1308,16 @@ function renderFineTab() {
     const pays = ledgerAvailable ? (depositLedger[m.nickname] || []) : [];
     const fpDate = pays.length ? pays[0].date : '';
     const prejoin = ledgerAvailable && (!fpDate || weekEnd < fpDate);  // 이 주 전체가 합류 전
+    const preEnforce = weekEnd < FINE_ENFORCEMENT_START;  // 벌금 전역 시행 전 주
     const st = settlementByKey[`${m.nickname}__${iso.year}-W${iso.week}`];
     const hasFrozen = !!(st && Array.isArray(st.days) && st.days.length === 7);
-    const useFrozen = wkPast && wkStable && hasFrozen && !prejoin;
+    const useFrozen = wkPast && wkStable && hasFrozen && !prejoin && !preEnforce;
     const statusForWeek = useFrozen ? st.status : m.participating;
     const state = getFineState(statusForWeek);
     const currLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
     const byDate = {};
     let missCount = 0, fineAmount, chargedDays;
-    if (prejoin) {
+    if (prejoin || preEnforce) {
       wkDates.forEach(dateStr => { byDate[dateStr] = '-'; });
       fineAmount = 0; chargedDays = 0; missCount = 0;
     } else if (useFrozen) {
@@ -1324,7 +1328,9 @@ function renderFineTab() {
     } else {
       wkDates.forEach(dateStr => {
         let label;
-        if (ledgerAvailable && (!fpDate || dateStr < fpDate)) {
+        if (dateStr < FINE_ENFORCEMENT_START) {
+          label = '-';  // 벌금 전역 시행 전
+        } else if (ledgerAvailable && (!fpDate || dateStr < fpDate)) {
           label = '-';  // 최초 납입일 이전 = 미합류
         } else if (state === 'inactive' || state === 'unknown') {
           label = '-';
@@ -1349,7 +1355,7 @@ function renderFineTab() {
       chargedDays = (state === 'active') ? Math.max(0, missCount - FINE_FREE_DAYS) : 0;
       fineAmount = chargedDays * FINE_PER_DAY;
     }
-    return { iso, weekEnd, prejoin, byDate, missCount, fineAmount, chargedDays, state, statusForWeek };
+    return { iso, weekEnd, prejoin, preEnforce, byDate, missCount, fineAmount, chargedDays, state, statusForWeek };
   }
 
   // 표시 주차까지의 모든 주(월요일) 목록 — FINE_MIN_MONDAY부터 chronological.
@@ -1368,7 +1374,7 @@ function renderFineTab() {
   // 본문
   const tbody = document.getElementById('fine-body-row');
   tbody.innerHTML = '';
-  let myAmount = 0, myRemaining = FINE_DEPOSIT, myPrejoin = false;
+  let myAmount = 0, myRemaining = FINE_DEPOSIT, myNoFineLabel = '';
   members.forEach(m => {
     const tr = document.createElement('tr');
     const nameTd = document.createElement('td');
@@ -1402,15 +1408,20 @@ function renderFineTab() {
     if (!dispWeek) dispWeek = computeWeekFine(m, monday);  // 안전망
 
     const prejoin = dispWeek.prejoin;
+    const preEnforce = dispWeek.preEnforce;
+    const noFine = prejoin || preEnforce;  // 미합류 or 벌금 미시행 주
     const state = dispWeek.state;
     const statusForWeek = dispWeek.statusForWeek;
     let missCount = dispWeek.missCount;
-    const fineAmount = prejoin ? 0 : dispWeek.fineAmount;
+    const fineAmount = noFine ? 0 : dispWeek.fineAmount;
     const remaining = depAfter;
 
     const partTd = document.createElement('td');
     partTd.className = 'fine-td-summary fine-td-participating';
-    if (prejoin) {
+    if (preEnforce && !prejoin) {
+      partTd.textContent = '시행 전';
+      partTd.classList.add('fine-td-not-participating');
+    } else if (prejoin) {
       partTd.textContent = '미합류';
       partTd.classList.add('fine-td-not-participating');
     } else if (state === 'active') {
@@ -1437,12 +1448,12 @@ function renderFineTab() {
     });
 
     const tdMiss = document.createElement('td');
-    tdMiss.textContent = (prejoin || state === 'inactive' || state === 'unknown') ? '-' : `${missCount}일`;
+    tdMiss.textContent = (noFine || state === 'inactive' || state === 'unknown') ? '-' : `${missCount}일`;
     tdMiss.className = 'fine-td-summary';
     tr.appendChild(tdMiss);
 
     const tdFine = document.createElement('td');
-    if (prejoin || state === 'inactive' || state === 'unknown') {
+    if (noFine || state === 'inactive' || state === 'unknown') {
       tdFine.textContent = '-';
       tdFine.className = 'fine-td-summary';
     } else {
@@ -1452,28 +1463,28 @@ function renderFineTab() {
     tr.appendChild(tdFine);
 
     const tdRem = document.createElement('td');
-    tdRem.textContent = prejoin ? '-' : `${remaining.toLocaleString()}원`;
+    tdRem.textContent = noFine ? '-' : `${remaining.toLocaleString()}원`;
     tdRem.className = 'fine-td-summary fine-td-remaining';
     tr.appendChild(tdRem);
 
-    if (prejoin) tr.classList.add('fine-tr-inactive');
+    if (noFine) tr.classList.add('fine-tr-inactive');
     if (state === 'inactive' || state === 'unknown') tr.classList.add('fine-tr-inactive');
     if (state === 'exempt') tr.classList.add('fine-tr-exempt');
     if (currentUser && m.nickname === currentUser.nickname) {
       tr.classList.add('fine-tr-me');
-      myPrejoin = prejoin;
-      myAmount = (prejoin || state !== 'active') ? 0 : fineAmount;
+      myNoFineLabel = preEnforce && !prejoin ? '시행 전' : (prejoin ? '미합류' : '');
+      myAmount = (noFine || state !== 'active') ? 0 : fineAmount;
       myRemaining = remaining;
     }
 
     tbody.appendChild(tr);
   });
 
-  document.getElementById('fine-my-amount').innerHTML = myPrejoin
-    ? `<span class="fine-stat-unit">미합류</span>`
+  document.getElementById('fine-my-amount').innerHTML = myNoFineLabel
+    ? `<span class="fine-stat-unit">${myNoFineLabel}</span>`
     : `${myAmount.toLocaleString()}<span class="fine-stat-unit">원</span>`;
-  document.getElementById('fine-my-remaining').innerHTML = myPrejoin
-    ? `<span class="fine-stat-unit">미합류</span>`
+  document.getElementById('fine-my-remaining').innerHTML = myNoFineLabel
+    ? `<span class="fine-stat-unit">${myNoFineLabel}</span>`
     : `${myRemaining.toLocaleString()}<span class="fine-stat-unit">원</span>`;
 }
 

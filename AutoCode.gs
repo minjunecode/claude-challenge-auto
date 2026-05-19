@@ -2182,6 +2182,9 @@ var FINE_FREE_DAYS_ = 2;
 // 보증금은 "상태값"이 아니라 fineAmount 이력의 순수 함수로 도출 →
 // 멱등·순서무관. (이전: G열을 차감/롤백하는 상태 누적기 → 재정산 시 깨짐)
 var INITIAL_DEPOSIT_ = 50000;
+// 벌금 전역 시행 시작일 (이 날짜 이전 = 전원 벌금/X 없음).
+// 5월 1주차 월요일. 그 전엔 챌린지가 실제 운영 전 → 납입일·사용량 무관 '-'.
+var FINE_ENFORCEMENT_START_ = '2026-04-27';
 // 주간 데이터 안정화 버퍼: 일요일 종료 + 48h 리포트창 + 1일 = 3일.
 // 정산은 "마지막 일요일이 today-3 이하"인 가장 최근 주만 (idempotent).
 var SETTLEMENT_STABILITY_DAYS_ = 3;
@@ -2491,6 +2494,8 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
     // 라벨: 'O'(달성) / '면제'(주2회 면제 or 주간면제) / 'X'(벌금) / '-'(미참여)
     var missCount = 0;
     var days = weekDates.map(function(dStr) {
+      // 벌금 전역 시행 전 = '-' (4월 등 운영 전 기간)
+      if (dStr < FINE_ENFORCEMENT_START_) return { date: dStr, label: '-' };
       // 최초 납입일 이전(또는 원장 미설정)은 벌금 대상 아님 → '-'
       if (!fpDate || dStr < fpDate) return { date: dStr, label: '-' };
       var tokens = (usageMap[nick] && usageMap[nick][dStr]) || 0;
@@ -2815,6 +2820,7 @@ function auditFineSettlements() {
 
     var missCount = 0;
     var days = weekDates.map(function(dStr) {
+      if (dStr < FINE_ENFORCEMENT_START_) return { date: dStr, label: '-' };
       if (!fpDate || dStr < fpDate) return { date: dStr, label: '-' };
       var tokens = (usageMap[nick] && usageMap[nick][dStr]) || 0;
       var league = lod_(nick, dStr, curLeague);
