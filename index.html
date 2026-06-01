@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Max 챌린지</title>
-  <link rel="stylesheet" href="style.css?v=20260519g">
+  <link rel="stylesheet" href="style.css?v=20260601a">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -434,19 +434,19 @@
               <span class="info-icon">i</span> 토큰 산정 방식
             </span>
             <div class="score-info-detail" id="score-info-detail" style="display:none;">
-              <p class="score-desc">Claude(Anthropic) + Codex(OpenAI GPT-5.4) 양쪽 서비스의 공식 과금 단가를 달러 기준으로 정규화한 통합 가중 합산 방식입니다. 기준은 Claude Sonnet input $3/1M = 가중치 1.0.</p>
-              <div class="score-formula">W = &Sigma;<sub>cl</sub>(I &times; 1.0 + O &times; 5.0 + C<sub>w</sub> &times; 1.25 + C<sub>r</sub> &times; 0.1) + &Sigma;<sub>cx</sub>(I &times; 0.83 + O &times; 5.0 + C<sub>r</sub> &times; 0.083)</div>
+              <p class="score-desc">Claude(Anthropic) + Codex(OpenAI GPT-5.5) 양쪽 서비스의 공식 과금 단가를 정규화한 통합 가중 합산 방식입니다. 두 모델이 모두 플래그십 코딩 에이전트로서 사용자에게 제공하는 가치를 동등하게 보고, output 토큰을 같은 가중치 5.0에 anchor합니다. 각 서비스 내부의 토큰 종류 비율(input · cache)은 공식 단가 비율을 그대로 따릅니다.</p>
+              <div class="score-formula">W = &Sigma;<sub>cl</sub>(I &times; 1.0 + O &times; 5.0 + C<sub>w</sub> &times; 1.25 + C<sub>r</sub> &times; 0.1) + &Sigma;<sub>cx</sub>(I &times; 0.833 + O &times; 5.0 + C<sub>r</sub> &times; 0.083)</div>
               <table class="score-table">
                 <tr><th>서비스</th><th>토큰 유형</th><th>가중치</th><th>산정 근거</th></tr>
-                <tr class="score-group-claude"><td rowspan="4">Claude<br><span class="score-sub">Sonnet</span></td><td>Input</td><td>1.0</td><td>$3 / 1M (기준)</td></tr>
-                <tr class="score-group-claude"><td>Output</td><td>5.0</td><td>$15 / 1M</td></tr>
-                <tr class="score-group-claude"><td>Cache Write</td><td>1.25</td><td>$3.75 / 1M</td></tr>
-                <tr class="score-group-claude"><td>Cache Read</td><td>0.1</td><td>$0.30 / 1M</td></tr>
-                <tr class="score-group-codex"><td rowspan="3">Codex<br><span class="score-sub">GPT-5.4</span></td><td>Input</td><td>0.833</td><td>$2.50 / 1M</td></tr>
-                <tr class="score-group-codex"><td>Output</td><td>5.0</td><td>$15 / 1M</td></tr>
-                <tr class="score-group-codex"><td>Cache Read</td><td>0.083</td><td>$0.25 / 1M</td></tr>
+                <tr class="score-group-claude"><td rowspan="4">Claude<br><span class="score-sub">Opus 4.7</span></td><td>Input</td><td>1.0</td><td>$15 / 1M (기준 단위)</td></tr>
+                <tr class="score-group-claude"><td>Output</td><td>5.0</td><td>$75 / 1M (input 대비 &times;5)</td></tr>
+                <tr class="score-group-claude"><td>Cache Write</td><td>1.25</td><td>$18.75 / 1M (input 대비 &times;1.25)</td></tr>
+                <tr class="score-group-claude"><td>Cache Read</td><td>0.1</td><td>$1.50 / 1M (input 대비 &times;0.1)</td></tr>
+                <tr class="score-group-codex"><td rowspan="3">Codex<br><span class="score-sub">GPT-5.5</span></td><td>Input</td><td>0.833</td><td>output 대비 1/6 ($2.50 / $15)</td></tr>
+                <tr class="score-group-codex"><td>Output</td><td>5.0</td><td>Claude Opus 4.7 output과 동급 anchor</td></tr>
+                <tr class="score-group-codex"><td>Cache Read</td><td>0.083</td><td>output 대비 1/60 ($0.25 / $15)</td></tr>
               </table>
-              <p class="score-ref">* 단가 기준: <a href="https://www.anthropic.com/pricing" target="_blank" rel="noopener">anthropic.com/pricing</a> (Claude Sonnet) · <a href="https://openai.com/api/pricing" target="_blank" rel="noopener">openai.com/api/pricing</a> (GPT-5.4)</p>
+              <p class="score-ref">* Claude 측은 Opus 4.7 공식 단가 비율을 그대로 정규화(input = 1.0 기준). Codex 측은 output을 Claude와 동등한 가치로 anchor(5.0)한 뒤 GPT-5.5 공식 단가 비율을 적용.<br>* 단가 출처: <a href="https://www.anthropic.com/pricing" target="_blank" rel="noopener">anthropic.com/pricing</a> (Claude Opus 4.7) · <a href="https://openai.com/api/pricing" target="_blank" rel="noopener">openai.com/api/pricing</a> (GPT-5.5)</p>
               <div class="score-points-wrap">
                 <div class="score-points-title">포인트 획득 기준 (일간 가중 스코어 기준, 리그별)</div>
                 <table class="score-points-table">
@@ -758,6 +758,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260519g"></script>
+  <script src="app.js?v=20260601a"></script>
 </body>
 </html>

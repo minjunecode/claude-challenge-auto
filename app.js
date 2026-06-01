@@ -348,8 +348,10 @@ function formatTokens(n) {
 }
 
 // ── v2 가중치 (Claude + Codex 통합) ──
-// Claude Sonnet 기준 단가 $3/1M = weight 1.0
-// Codex (GPT-5.4): I=$2.50, O=$15, Cr=$0.25 per 1M
+// 기준: Claude Opus 4.7 input $15/1M = weight 1.0
+// Claude (Opus 4.7): I=$15, O=$75, Cw=$18.75, Cr=$1.50 per 1M (내부 비율 1/5/1.25/0.1)
+// Codex (GPT-5.5): output을 Claude output과 동등(5.0)에 anchor.
+//   내부 비율은 GPT-5.5 공식 단가($2.50/$15/$0.25) → I=0.833, O=5.0, Cr=0.083
 const W_CL_IN = 1.0, W_CL_OUT = 5.0, W_CL_CW = 1.25, W_CL_CR = 0.1;
 const W_CX_IN = 0.8333, W_CX_OUT = 5.0, W_CX_CR = 0.0833;
 

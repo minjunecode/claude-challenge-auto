@@ -5,17 +5,17 @@
 // ============================================
 
 // ── 가격 가중치 (v2.0) ──
-// 기준 단가: Claude Sonnet 4 input $3/1M = 가중치 1.0
-// Claude Sonnet: I=$3 / O=$15 / Cw=$3.75 / Cr=$0.30 per 1M
-// Codex (GPT-5.4):  I=$2.50 / O=$15 / Cr=$0.25 per 1M
-// 가중치 = price / 3.0
-var W_CL_IN = 1.0;        // Claude input
-var W_CL_OUT = 5.0;       // Claude output
-var W_CL_CW = 1.25;       // Claude cache write
-var W_CL_CR = 0.1;        // Claude cache read
-var W_CX_IN = 0.8333;     // Codex input  ($2.50 / $3)
-var W_CX_OUT = 5.0;       // Codex output ($15 / $3)
-var W_CX_CR = 0.0833;     // Codex cache read ($0.25 / $3)
+// 기준: Claude Opus 4.7 input $15/1M = 가중치 1.0
+// Claude (Opus 4.7): I=$15 / O=$75 / Cw=$18.75 / Cr=$1.50 per 1M (내부 비율 1/5/1.25/0.1)
+// Codex (GPT-5.5): output을 Claude output과 동등(5.0)에 anchor한 뒤,
+//   GPT-5.5 공식 단가 $2.50/$15/$0.25의 내부 비율을 그대로 적용 → I=0.833, O=5.0, Cr=0.083
+var W_CL_IN = 1.0;        // Claude Opus 4.7 input ($15 = 기준)
+var W_CL_OUT = 5.0;       // Claude Opus 4.7 output ($75)
+var W_CL_CW = 1.25;       // Claude Opus 4.7 cache write ($18.75)
+var W_CL_CR = 0.1;        // Claude Opus 4.7 cache read ($1.50)
+var W_CX_IN = 0.8333;     // Codex GPT-5.5 input  (output 대비 $2.50/$15)
+var W_CX_OUT = 5.0;       // Codex GPT-5.5 output (Claude output과 동급 anchor)
+var W_CX_CR = 0.0833;     // Codex GPT-5.5 cache read (output 대비 $0.25/$15)
 
 /** v2 통합 가중 스코어. 객체가 claude_ / codex_ 필드를 가지면 사용, 없으면 구 필드로 fallback */
 function calcScoreV2_(t) {
