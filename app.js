@@ -296,11 +296,16 @@ function renderAutoStatus() {
 
   // 내 사용량 데이터 찾기
   const myUsage = (dashboardData.usage || []).filter(u => u.nickname === currentUser.nickname);
-  const todayUsage = myUsage.find(u => normalizeDate(u.date) === today);
 
-  // 최근 보고 찾기 (가장 최근)
-  const sorted = [...myUsage].sort((a, b) => normalizeDate(b.reportedAt).localeCompare(normalizeDate(a.reportedAt)));
+  // 최근 보고 찾기 — reportedAt 풀 타임스탬프로 정렬 (기존엔 date만 비교 → 같은 날 여러 row가 있을 때
+  // 정렬이 unstable해서 오래된 row의 시각이 표시되는 사고 있었음. 백엔드에서도 닉네임 trim으로
+  // groupMap 중복을 차단했지만, 프론트도 풀 타임스탬프 비교로 방어).
+  const sorted = [...myUsage].sort((a, b) => String(b.reportedAt || '').localeCompare(String(a.reportedAt || '')));
   const lastReport = sorted[0];
+  // 일관성: lastReport가 오늘 데이터면 todayUsage도 동일 row로 통일 → 토큰/시각 미스매치 방지.
+  const todayUsage = (lastReport && normalizeDate(lastReport.date) === today)
+    ? lastReport
+    : myUsage.find(u => normalizeDate(u.date) === today);
 
   if (lastReport) {
     // 최근 3일 이내 보고가 있으면 "활성"

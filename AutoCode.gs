@@ -645,16 +645,15 @@ function handleLogin(params) {
   }
   if (!loginSuccess) return { success: false, error: '닉네임 또는 비밀번호가 틀렸습니다.' };
 
-  // 로그인 성공 → dashboard 데이터를 함께 반환 (API 1회로 통합)
-  var dashResult = handleDashboard(params);
+  // 로그인 성공 → 인증 결과만 즉시 반환. 대시보드는 프론트가 별도 fetch.
+  // (handleDashboard을 인라인하면 시트 read N회 + raw 스캔 2회로 5~15초 소요됨)
   var hasAutoReport = checkHasAutoReport(nickname);
 
   return {
     success: true,
     nickname: nickname,
     isAdmin: loginIsAdmin,
-    hasAutoReport: hasAutoReport,
-    dashboard: dashResult
+    hasAutoReport: hasAutoReport
   };
 }
 
@@ -740,6 +739,22 @@ function handleDashboard(params) {
   var members = [];
   var memberColors = {};
   var memberLeagues = {};
+
+  // ── hasAutoReport: 사용량 1회 스캔으로 "최근 3일 내 보고한 닉네임 Set" 구성.
+  // 기존엔 멤버 N명마다 checkHasAutoReport()가 사용량 시트를 통째로 다시 읽어 N×풀스캔이었음.
+  var hasAutoReportSet = {};
+  var _autoUsageSheet = ss.getSheetByName('사용량');
+  if (_autoUsageSheet && _autoUsageSheet.getLastRow() > 1) {
+    var _autoData = _autoUsageSheet.getDataRange().getValues();
+    var _threeDaysAgo = new Date(Date.now() - 3 * 86400 * 1000);
+    var _cutoffStr = Utilities.formatDate(_threeDaysAgo, 'Asia/Seoul', 'yyyy-MM-dd');
+    for (var _ai = 1; _ai < _autoData.length; _ai++) {
+      var _aNk = String(_autoData[_ai][0] || '').trim();
+      if (!_aNk) continue;
+      if (toDateStr(_autoData[_ai][1]) >= _cutoffStr) hasAutoReportSet[_aNk] = true;
+    }
+  }
+
   for (var i = 1; i < memberData.length; i++) {
     if (memberData[i][0]) {
       var mLeague = String(memberData[i][4] || '').trim() || LEAGUE_1M;
@@ -751,10 +766,11 @@ function handleDashboard(params) {
       mDeposit = (mDeposit === '' || mDeposit === null || mDeposit === undefined)
         ? null
         : safeInt(mDeposit);
+      var mNickTrim = String(memberData[i][0]).trim();
       members.push({
         nickname: memberData[i][0],
         isAdmin: memberData[i][2] === true || memberData[i][2] === 'TRUE',
-        hasAutoReport: checkHasAutoReport(memberData[i][0]),
+        hasAutoReport: !!hasAutoReportSet[mNickTrim],
         league: mLeague,
         participating: mParticipating,
         deposit: mDeposit  // null이면 프론트에서 자동 계산
@@ -829,7 +845,7 @@ function handleDashboard(params) {
         clCw = 0; clCr = 0; cxIn = 0; cxOut = 0; cxCr = 0;
         uSess = safeInt(row[5]); uAt = row[6]; mid = LEGACY_MACHINE_ID;
       }
-      var nk = String(row[0]);
+      var nk = String(row[0]).trim();  // trim 강제: 공백 차이로 같은 (nick,date)가 2개 그룹으로 갈리는 사고 방지
       var ds = toDateStr(row[1]);
       var key = nk + '|' + ds;
       if (!groupMap[key]) {
@@ -891,6 +907,83 @@ function handleDashboard(params) {
     });
   }
 
+  // ── 사용량_raw 1회 전체 스캔 (공유 캐시) ──
+  // 기존엔 personalStats용·memberLastActivity용으로 두 번 풀스캔 + 각각 hourly JSON.parse.
+  // 한 패스로 통합 → 약 50% 절감. 결과는 (nick|date|mid)별 최신 entry.
+  var rawCacheMap = null;
+  var rawSheetShared = ss.getSheetByName('사용량_raw');
+  if (rawSheetShared && rawSheetShared.getLastRow() > 1) {
+    var rawAll = rawSheetShared.getDataRange().getValues();
+    var rawHdrS = rawAll[0];
+    var isRawV2S = String(rawHdrS[2] || '').indexOf('claude_') === 0;
+    var rawHasV1S = rawHdrS.length >= 10;
+    var cAtS   = rawHdrS.indexOf('reportedAt');
+    var cMidS  = rawHdrS.indexOf('machine_id');
+    var cHourS = rawHdrS.indexOf('hourly');
+    if (cAtS < 0)   cAtS   = isRawV2S ? 11 : (rawHasV1S ? 8 : 6);
+    if (cHourS < 0) cHourS = isRawV2S ? 12 : (rawHasV1S ? 9 : 7);
+
+    rawCacheMap = {};
+    for (var sr = 1; sr < rawAll.length; sr++) {
+      var sNk = String(rawAll[sr][0] || '').trim();
+      if (!sNk) continue;
+      var sDs = toDateStr(rawAll[sr][1]);
+      if (!sDs) continue;
+      var sMid = cMidS >= 0 ? (String(rawAll[sr][cMidS] || '').trim() || LEGACY_MACHINE_ID) : LEGACY_MACHINE_ID;
+      var sAt = toDateTimeStr(rawAll[sr][cAtS]);
+      var sKey = sNk + '|' + sDs + '|' + sMid;
+      // 같은 (nick,date,mid)의 더 최신 행만 채택
+      if (rawCacheMap[sKey] && sAt <= rawCacheMap[sKey].at) continue;
+
+      var sClIn, sClOut, sClCw, sClCr, sCxIn, sCxOut, sCxCr, sSess;
+      if (isRawV2S) {
+        sClIn  = safeInt(rawAll[sr][2]);  sClOut = safeInt(rawAll[sr][3]);
+        sClCw  = safeInt(rawAll[sr][4]);  sClCr  = safeInt(rawAll[sr][5]);
+        sCxIn  = safeInt(rawAll[sr][6]);  sCxOut = safeInt(rawAll[sr][7]);
+        sCxCr  = safeInt(rawAll[sr][8]);
+        sSess  = safeInt(rawAll[sr][10]);
+      } else if (rawHasV1S) {
+        sClIn = safeInt(rawAll[sr][2]); sClOut = safeInt(rawAll[sr][3]);
+        sClCw = safeInt(rawAll[sr][4]); sClCr = safeInt(rawAll[sr][5]);
+        sCxIn = 0; sCxOut = 0; sCxCr = 0;
+        sSess = safeInt(rawAll[sr][7]);
+      } else {
+        sClIn = safeInt(rawAll[sr][2]); sClOut = safeInt(rawAll[sr][3]);
+        sClCw = 0; sClCr = 0; sCxIn = 0; sCxOut = 0; sCxCr = 0;
+        sSess = safeInt(rawAll[sr][5]);
+      }
+      var sHourlyStr = rawAll[sr][cHourS] || '';
+      var sHourly = null;
+      if (sHourlyStr) {
+        try {
+          sHourly = JSON.parse(sHourlyStr);
+          if (Array.isArray(sHourly)) {
+            sHourly = sHourly.map(function(b) {
+              if (b && b.cl) return b;
+              return {
+                h: b.h,
+                cl: { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 },
+                cx: { in: 0, out: 0, cr: 0 }
+              };
+            });
+          }
+        } catch(e) {}
+      }
+      var sScore = calcScoreV2_({
+        claude_input_tokens: sClIn, claude_output_tokens: sClOut,
+        claude_cache_creation_tokens: sClCw, claude_cache_read_tokens: sClCr,
+        codex_input_tokens: sCxIn, codex_output_tokens: sCxOut, codex_cache_read_tokens: sCxCr
+      });
+      rawCacheMap[sKey] = {
+        nick: sNk, date: sDs, mid: sMid, at: sAt, score: sScore,
+        clIn: sClIn, clOut: sClOut, clCw: sClCw, clCr: sClCr,
+        cxIn: sCxIn, cxOut: sCxOut, cxCr: sCxCr,
+        sess: sSess, hourly: sHourly,
+        dateMs: _toEpochMs_(rawAll[sr][1])
+      };
+    }
+  }
+
   // ── 요청자의 personalStats도 함께 반환 (API 호출 1회로 통합) ──
   var myStats = null;
   var reqNickname = (params.nickname || '').trim();
@@ -905,80 +998,16 @@ function handleDashboard(params) {
     }
     if (authenticated) {
       // 사용자의 raw 보고를 (date, machine_id)별 최신으로 dedup 후, date별 합산
+      // ── 공유 rawCacheMap (한 번 풀스캔 + 한 번 hourly 파싱) 에서 본인 행만 소비.
       var rawData = [];
-      var rawSheet = ss.getSheetByName('사용량_raw');
-      if (rawSheet && rawSheet.getLastRow() > 1) {
-        var rawRows = rawSheet.getDataRange().getValues();
-        var rawHdr0 = rawRows[0];
-        var isRawV2 = String(rawHdr0[2] || '').indexOf('claude_') === 0;
-        var rawHasV1 = rawHdr0.length >= 10;
-        // 컬럼 동적 탐지
-        var cAt   = rawHdr0.indexOf('reportedAt');
-        var cMid  = rawHdr0.indexOf('machine_id');
-        var cHour = rawHdr0.indexOf('hourly');
-        if (cAt < 0)   cAt   = isRawV2 ? 11 : (rawHasV1 ? 8 : 6);
-        if (cHour < 0) cHour = isRawV2 ? 12 : (rawHasV1 ? 9 : 7);
-
-        // 1) 사용자의 모든 raw 행 수집, (date, machine_id)별 최신만
-        var latestByDateMachine = {};  // "date|mid" -> parsed entry
-        for (var r = 1; r < rawRows.length; r++) {
-          if (String(rawRows[r][0]).trim() !== reqNickname) continue;
-          var rClIn, rClOut, rClCw, rClCr, rCxIn, rCxOut, rCxCr, rSess, rAt, rHourlyStr, rMid;
-          if (isRawV2) {
-            rClIn  = safeInt(rawRows[r][2]);  rClOut = safeInt(rawRows[r][3]);
-            rClCw  = safeInt(rawRows[r][4]);  rClCr  = safeInt(rawRows[r][5]);
-            rCxIn  = safeInt(rawRows[r][6]);  rCxOut = safeInt(rawRows[r][7]);
-            rCxCr  = safeInt(rawRows[r][8]);
-            rSess  = safeInt(rawRows[r][10]); rAt = rawRows[r][cAt];
-            rHourlyStr = rawRows[r][cHour] || '';
-            rMid = cMid >= 0 ? (String(rawRows[r][cMid] || '').trim() || LEGACY_MACHINE_ID) : LEGACY_MACHINE_ID;
-          } else if (rawHasV1) {
-            rClIn = safeInt(rawRows[r][2]); rClOut = safeInt(rawRows[r][3]);
-            rClCw = safeInt(rawRows[r][4]); rClCr = safeInt(rawRows[r][5]);
-            rCxIn = 0; rCxOut = 0; rCxCr = 0;
-            rSess = safeInt(rawRows[r][7]); rAt = rawRows[r][cAt]; rHourlyStr = rawRows[r][cHour] || '';
-            rMid = LEGACY_MACHINE_ID;
-          } else {
-            rClIn = safeInt(rawRows[r][2]); rClOut = safeInt(rawRows[r][3]);
-            rClCw = 0; rClCr = 0; rCxIn = 0; rCxOut = 0; rCxCr = 0;
-            rSess = safeInt(rawRows[r][5]); rAt = rawRows[r][cAt]; rHourlyStr = rawRows[r][cHour] || '';
-            rMid = LEGACY_MACHINE_ID;
-          }
-          var hourly = null;
-          if (rHourlyStr) {
-            try {
-              hourly = JSON.parse(rHourlyStr);
-              if (Array.isArray(hourly)) {
-                hourly = hourly.map(function(b) {
-                  if (b && b.cl) return b;
-                  return {
-                    h: b.h,
-                    cl: { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 },
-                    cx: { in: 0, out: 0, cr: 0 }
-                  };
-                });
-              }
-            } catch(e) {}
-          }
-          var dateStr = toDateStr(rawRows[r][1]);
-          var atStr = toDateTimeStr(rAt);
-          var key = dateStr + '|' + rMid;
-          if (!latestByDateMachine[key] || atStr > latestByDateMachine[key].at) {
-            // score도 함께 계산 (pickActiveRows_에서 사용)
-            var rowScore = calcScoreV2_({
-              claude_input_tokens: rClIn, claude_output_tokens: rClOut,
-              claude_cache_creation_tokens: rClCw, claude_cache_read_tokens: rClCr,
-              codex_input_tokens: rCxIn, codex_output_tokens: rCxOut,
-              codex_cache_read_tokens: rCxCr
-            });
-            latestByDateMachine[key] = {
-              date: dateStr, mid: rMid, at: atStr, score: rowScore,
-              clIn: rClIn, clOut: rClOut, clCw: rClCw, clCr: rClCr,
-              cxIn: rCxIn, cxOut: rCxOut, cxCr: rCxCr,
-              sess: rSess, hourly: hourly
-            };
-          }
-        }
+      if (rawCacheMap) {
+        // 1) 본인 entries 필터 → date|mid 키로 재인덱스
+        var latestByDateMachine = {};
+        Object.keys(rawCacheMap).forEach(function(k) {
+          var e = rawCacheMap[k];
+          if (e.nick !== reqNickname) return;
+          latestByDateMachine[e.date + '|' + e.mid] = e;
+        });
 
         // 2) date별로 그룹핑 후 pickActiveRows_로 필터, hourly 시간대별 SUM
         var rawByDate = {};
@@ -1061,69 +1090,18 @@ function handleDashboard(params) {
   }
 
   // ── 멤버별 최근 활동 + 최근 날짜의 다중-PC 합산 hourly ──
-  // (nickname, date, machine_id)별 "최신 raw 행"만 수집 → 각 멤버의 가장 최근 날짜를 찾아 그 날의 모든 PC hourly를 시간대별 합산.
+  // 공유 rawCacheMap에서 8주 윈도우 적용해 소비. 별도 풀스캔/재파싱 없음.
   var memberLastActivity = {};
   var memberAllHourly = {}; // nickname -> hourly 배열(v2 형식, 다중 PC 합산)
-  var rawSheet2 = ss.getSheetByName('사용량_raw');
-  if (rawSheet2 && rawSheet2.getLastRow() > 1) {
-    var rawRows2 = rawSheet2.getDataRange().getValues();
-    var rawHdr2 = rawRows2[0];
-    var rawHdrStr = rawHdr2.map(function(h){return String(h||'');}).join(',');
-    // 컬럼 위치를 헤더 기반으로 동적 탐지 (v1/v2/v2+machine 호환)
-    var colAt   = rawHdr2.indexOf('reportedAt');
-    var colMid  = rawHdr2.indexOf('machine_id');
-    var colHour = rawHdr2.indexOf('hourly');
-    var isRaw2V2 = rawHdrStr.indexOf('claude_input_tokens') >= 0;
-    // 레거시 v1/구형 fallback
-    if (colAt < 0)   colAt   = isRaw2V2 ? 11 : (rawHdr2.length >= 10 ? 8 : 6);
-    if (colHour < 0) colHour = isRaw2V2 ? 12 : (rawHdr2.length >= 10 ? 9 : 7);
-
-    // (nickname, date, machine_id) -> { at, hourly }
-    var latestPerPc = {};
-    for (var rr = 1; rr < rawRows2.length; rr++) {
-      var rNick = String(rawRows2[rr][0] || '').trim();
-      if (!rNick) continue;
-      // 8주 윈도우 필터 (대시보드 응답에서 옛 hourly 제외)
-      var rawDateMs = _toEpochMs_(rawRows2[rr][1]);
-      if (rawDateMs && rawDateMs < windowCutoffMs) continue;
-      var rDate = toDateStr(rawRows2[rr][1]);
-      var rAt2 = rawRows2[rr][colAt];
-      var rMid = colMid >= 0 ? (String(rawRows2[rr][colMid] || '').trim() || LEGACY_MACHINE_ID) : LEGACY_MACHINE_ID;
-      var rHourlyStr2 = rawRows2[rr][colHour] || '';
-      var rAtStr = toDateTimeStr(rAt2);
-      var key = rNick + '|' + rDate + '|' + rMid;
-      if (!latestPerPc[key] || rAtStr > latestPerPc[key].at) {
-        var rHourly2 = null;
-        if (rHourlyStr2) {
-          try {
-            rHourly2 = JSON.parse(rHourlyStr2);
-            if (Array.isArray(rHourly2)) {
-              rHourly2 = rHourly2.map(function(b) {
-                if (b && b.cl) return b;
-                return {
-                  h: b.h,
-                  cl: { in: b.in || 0, out: b.out || 0, cc: b.cc || 0, cr: b.cr || 0 },
-                  cx: { in: 0, out: 0, cr: 0 }
-                };
-              });
-            }
-          } catch(e) {}
-        }
-        // hourly 기반 score 계산 (pickActiveRows_에서 사용)
-        var pcScore = 0;
-        if (rHourly2 && Array.isArray(rHourly2)) {
-          rHourly2.forEach(function(b){ pcScore += calcBucketScoreV2_(b); });
-        }
-        latestPerPc[key] = { nick: rNick, date: rDate, mid: rMid, at: rAtStr, score: pcScore, hourly: rHourly2 };
-      }
-    }
-
+  if (rawCacheMap) {
     // 닉네임별로 가장 최근 date + 그 date의 machine 목록
     var latestDateByNick = {};  // nick -> { date, at }
     var pcsByNickDate = {};     // "nick|date" -> { items: [] }
-    Object.keys(latestPerPc).forEach(function(key) {
-      var e = latestPerPc[key];
+    Object.keys(rawCacheMap).forEach(function(key) {
+      var e = rawCacheMap[key];
       if (!e.date) return;
+      // 8주 윈도우 필터
+      if (e.dateMs && e.dateMs < windowCutoffMs) return;
       var cur = latestDateByNick[e.nick];
       if (!cur || e.date > cur.date || (e.date === cur.date && e.at > cur.at)) {
         latestDateByNick[e.nick] = { date: e.date, at: e.at };
@@ -1536,6 +1514,9 @@ function handleReportUsage(params) {
       }
     }
   }
+
+  // 새 보고가 시트에 반영됐으니 dashboard 캐시 무효화 (30s TTL이라도 다음 호출이 새 데이터 보장).
+  invalidateDashboardCache_();
 
   return {
     success: true, message: '사용량 보고 완료',
