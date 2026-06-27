@@ -2166,7 +2166,7 @@ var FINE_FREE_DAYS_ = 2;
 var INITIAL_DEPOSIT_ = 50000;
 // 벌금 전역 시행 시작일 (이 날짜 이전 = 전원 벌금/X 없음).
 // 5월 1주차 월요일. 그 전엔 챌린지가 실제 운영 전 → 납입일·사용량 무관 '-'.
-var FINE_ENFORCEMENT_START_ = '2026-04-27';
+var FINE_ENFORCEMENT_START_ = '2026-05-04';  // 5월 1주차 월요일 (5/4 Mon). 그 이전 주차는 - 처리.
 // 주간 데이터 안정화 버퍼: 일요일 종료 + 48h 리포트창 + 1일 = 3일.
 // 정산은 "마지막 일요일이 today-3 이하"인 가장 최근 주만 (idempotent).
 var SETTLEMENT_STABILITY_DAYS_ = 3;
