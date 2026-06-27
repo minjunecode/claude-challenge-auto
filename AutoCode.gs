@@ -927,6 +927,11 @@ function handleDashboard(params) {
     for (var sr = 1; sr < rawAll.length; sr++) {
       var sNk = String(rawAll[sr][0] || '').trim();
       if (!sNk) continue;
+      // ── 8주 윈도우 게이트 (EARLY) ──
+      // 옛 행은 toDateTimeStr/JSON.parse 등 비싼 작업 전에 통째로 skip.
+      // 사용량_raw가 수개월 누적되면 이 게이트 없이는 분 단위 지연.
+      var sRowMs = _toEpochMs_(rawAll[sr][1]);
+      if (sRowMs && sRowMs < windowCutoffMs) continue;
       var sDs = toDateStr(rawAll[sr][1]);
       if (!sDs) continue;
       var sMid = cMidS >= 0 ? (String(rawAll[sr][cMidS] || '').trim() || LEGACY_MACHINE_ID) : LEGACY_MACHINE_ID;
