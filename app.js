@@ -37,7 +37,7 @@ async function setMemberColor(n, c) {
     if (!dashboardData.memberColors) dashboardData.memberColors = {};
     dashboardData.memberColors[n] = c;
     // localStorage 캐시도 즉시 갱신 — 새로고침 시 옛 색상 플래시 방지
-    try { localStorage.setItem('dashboardCache', JSON.stringify(dashboardData)); } catch { /* ignore */ }
+    safeCacheDashboard(dashboardData);
   }
   // apiCall 경유 (Content-Type text/plain — CORS preflight 회피)
   const result = await apiCall('setColor', {
@@ -157,10 +157,55 @@ async function apiCall(action, params = {}) {
   if (API_URL === 'YOUR_APPS_SCRIPT_URL_HERE') { if (!dashboardData) dashboardData = getDemoData(); return null; }
   if (params.password != null) params.password = String(params.password);
   const body = { action, ...params };
+  // dashboard는 시트 read가 많아 최대 45초, 나머지는 20초.
+  const timeoutMs = action === 'dashboard' ? 45000 : 20000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const t0 = Date.now();
   try {
-    const response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body), redirect: 'follow' });
-    return JSON.parse(await response.text());
-  } catch { return { success: false, error: '서버 응답 오류' }; }
+    const response = await fetch(API_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(body), redirect: 'follow', signal: controller.signal
+    });
+    clearTimeout(timer);
+    const txt = await response.text();
+    const elapsed = Date.now() - t0;
+    if (elapsed > 5000 || txt.length > 200000) {
+      console.log(`[apiCall] ${action} → ${response.status} · ${txt.length}B · ${elapsed}ms`);
+    }
+    try { return JSON.parse(txt); }
+    catch (parseErr) {
+      return { success: false, error: `응답 파싱 실패 (HTTP ${response.status}, ${txt.length}B). 서버가 JSON 대신 HTML/오류를 반환. 첫 200자: ${txt.slice(0, 200)}` };
+    }
+  } catch (err) {
+    clearTimeout(timer);
+    if (err && err.name === 'AbortError') {
+      return { success: false, error: `요청 시간 초과 (${timeoutMs / 1000}초). 네트워크·프록시·Apps Script 상태 확인.` };
+    }
+    return { success: false, error: `네트워크 오류: ${(err && err.message) || err}. script.google.com 접근 가능 여부 확인.` };
+  }
+}
+
+// dashboardCache 저장 — 쿼터 초과 시 무거운 필드 제거 후 재시도.
+// 브라우저 localStorage는 origin당 보통 5~10MB. dashboardData가 커지면 setItem 실패.
+function safeCacheDashboard(data) {
+  try {
+    localStorage.setItem('dashboardCache', JSON.stringify(data));
+    return true;
+  } catch (e) {
+    try {
+      const slim = { ...data };
+      if (slim.memberHourly) delete slim.memberHourly;
+      if (slim.topUser && slim.topUser.hourly) slim.topUser = { ...slim.topUser, hourly: null };
+      if (slim.settlements) slim.settlements = slim.settlements.map(s => ({ ...s, days: null }));
+      localStorage.setItem('dashboardCache', JSON.stringify(slim));
+      console.warn('[cache] dashboardCache 쿼터 초과 → 무거운 필드 제거 후 저장 성공:', e.message);
+      return true;
+    } catch (e2) {
+      console.warn('[cache] dashboardCache 저장 완전 실패:', e2.message);
+      return false;
+    }
+  }
 }
 
 // ── 로그인 ──
@@ -204,7 +249,7 @@ async function handleLogin(e) {
         delete db.myStats;
       }
       dashboardData = db;
-      localStorage.setItem('dashboardCache', JSON.stringify(db));
+      safeCacheDashboard(db);
     }
 
     showMain();
@@ -376,7 +421,7 @@ function getScore(d) {
       cxIn * W_CX_IN + cxOut * W_CX_OUT + cxCr * W_CX_CR
     );
   }
-  if (d.score && typeof d.score === 'number' && d.score < 10000000000) {
+  if (d.score && typeof d.score === 'number' && d.score < 500000000000) {
     return d.score;
   }
   return 0;
@@ -545,7 +590,7 @@ async function loadDashboard(force) {
           delete result.myStats;
         }
         dashboardData = result;
-        localStorage.setItem('dashboardCache', JSON.stringify(result));
+        safeCacheDashboard(result);
         dashboardLastFetchAt = Date.now();
         if (personalStatsLoaded && document.getElementById('tab-stats').classList.contains('active')) {
           renderPersonalStats();

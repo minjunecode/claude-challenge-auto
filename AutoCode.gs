@@ -487,7 +487,9 @@ function safeInt(v) {
   if (!v) return 0;
   if (v instanceof Date) return 0;
   var n = Number(v);
-  if (isNaN(n) || n > 10000000000) return 0; // 10B 초과 = 비정상 (epoch 등)
+  // 500B 초과 = 비정상 (Date→epoch 오염 방지: 현대 epoch는 1.7T대라 안전 분리).
+  // 기존 10B는 극단 유저의 cumulative cache_read를 잘못 0 처리하는 문제 있었음.
+  if (isNaN(n) || n > 500000000000) return 0;
   return Math.round(n);
 }
 
