@@ -565,7 +565,7 @@ function handleRequest(e) {
 // ── 대시보드 응답 캐시 (Apps Script CacheService, 30s TTL + 버전 기반 무효화) ──
 // 키는 사용자별 (myEvalThisWeek 등 user-specific 필드 포함).
 // 쓰기 액션 발생 시 'dashboard:version'을 갱신 → 모든 캐시된 응답이 stale 판정됨.
-var DASHBOARD_CACHE_TTL_SEC_ = 30;
+var DASHBOARD_CACHE_TTL_SEC_ = 300;  // 5분. 쓰기 액션은 invalidateDashboardCache_로 즉시 무효화되므로 안전.
 
 function _dashboardCacheKey_(nickname) {
   return 'dashboard:' + (nickname || '_anon');
@@ -576,7 +576,17 @@ function getCachedDashboard_(nickname) {
     var cache = CacheService.getScriptCache();
     var raw = cache.get(_dashboardCacheKey_(nickname));
     if (!raw) return null;
-    var parsed = JSON.parse(raw);
+    var payloadStr;
+    // gz: prefix → gzip 압축본. 하위호환: 프리픽스 없으면 그냥 JSON 문자열.
+    if (raw.length > 3 && raw.substring(0, 3) === 'gz:') {
+      var gzBytes = Utilities.base64Decode(raw.substring(3));
+      var gzBlob = Utilities.newBlob(gzBytes, 'application/x-gzip');
+      var unBlob = Utilities.ungzip(gzBlob);
+      payloadStr = unBlob.getDataAsString();
+    } else {
+      payloadStr = raw;
+    }
+    var parsed = JSON.parse(payloadStr);
     var curVer = cache.get('dashboard:version') || '0';
     if (String(parsed.version) !== String(curVer)) return null;
     return parsed.data;
@@ -587,10 +597,14 @@ function putCachedDashboard_(nickname, data) {
   try {
     var cache = CacheService.getScriptCache();
     var curVer = cache.get('dashboard:version') || '0';
-    var payload = JSON.stringify({ version: curVer, data: data });
-    // CacheService 한도: value 100KB. 초과 시 silently throw → 캐싱 포기.
-    if (payload.length > 95000) return;
-    cache.put(_dashboardCacheKey_(nickname), payload, DASHBOARD_CACHE_TTL_SEC_);
+    var payloadStr = JSON.stringify({ version: curVer, data: data });
+    // CacheService value 한도: 100KB. gzip 압축(보통 5~10x)으로 큰 응답도 캐시 가능.
+    var blob = Utilities.newBlob(payloadStr, 'application/json', 'dashboard.json');
+    var gz = Utilities.gzip(blob);
+    var b64 = Utilities.base64Encode(gz.getBytes());
+    var encoded = 'gz:' + b64;
+    if (encoded.length > 95000) return;  // gzip 후에도 크면 캐싱 포기
+    cache.put(_dashboardCacheKey_(nickname), encoded, DASHBOARD_CACHE_TTL_SEC_);
   } catch (err) {}
 }
 
@@ -2139,6 +2153,39 @@ function installDailyLeagueBatchTrigger() {
 function manualRunDailyLeagueBatch() {
   runDailyLeagueBatch_();
   return '리그 배치 수동 실행 완료';
+}
+
+// ── 대시보드 캐시 pre-warm (첫 로그인 지연 대책) ──
+// 5분 트리거로 백그라운드에서 handleDashboard({})를 호출해 anon 캐시를 항상 hot 유지.
+// 첫 로그인한 사용자의 개인 요청도 shared 계산 결과가 캐시에 있으니 빠름 (단, 현재 아키텍처는
+// 사용자별 캐시라 anon 캐시 자체가 곧바로 사용자에게 재활용되진 않음. 대신 이 호출이 시트를
+// 최근에 열어놓아 Apps Script/Sheets 서비스가 warm 상태로 유지되는 부수효과가 큼).
+function prewarmDashboardCache_() {
+  try {
+    invalidateDashboardCache_();  // 강제 재계산 (stale 방지)
+    handleDashboard({});  // anon 요청. 사용자별 필드는 계산 안 됨.
+  } catch (e) {}
+}
+
+// Apps Script 에디터에서 ▶ prewarmDashboardCache_ 실행하면 즉시 캐시 warm.
+function manualPrewarmDashboardCache() {
+  prewarmDashboardCache_();
+  return 'dashboard cache prewarm 완료';
+}
+
+// 5분 트리거 설치. Apps Script 에디터에서 1회 실행.
+function installDashboardPrewarmTrigger() {
+  var existing = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getHandlerFunction() === 'prewarmDashboardCache_') {
+      ScriptApp.deleteTrigger(existing[i]);
+    }
+  }
+  ScriptApp.newTrigger('prewarmDashboardCache_')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+  return '대시보드 prewarm 트리거 설치 완료 (5분마다)';
 }
 
 // ════════════════════════════════════════════════════════

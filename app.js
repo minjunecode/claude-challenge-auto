@@ -392,8 +392,10 @@ function renderAutoStatus() {
 }
 
 function formatTokens(n) {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-  if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
+  if (n >= 1000000000000) return (n / 1000000000000).toFixed(2) + 'T';   // ≥1T (조)
+  if (n >= 1000000000)    return (n / 1000000000).toFixed(2) + 'B';       // ≥1B (십억)
+  if (n >= 1000000)       return (n / 1000000).toFixed(1) + 'M';          // ≥1M (백만)
+  if (n >= 1000)          return (n / 1000).toFixed(0) + 'K';             // ≥1K (천)
   return String(n);
 }
 
@@ -575,9 +577,21 @@ async function loadDashboard(force) {
   if (currentUser && currentUser.nickname) params.nickname = currentUser.nickname;
   if (currentUser && currentUser.password) params.password = currentUser.password;
 
+  // 5초 넘어가면 상단에 로딩 안내 배너 표시 (사용자에게 진행 중임을 알림)
+  let slowBanner = null;
+  const slowTimer = setTimeout(() => {
+    slowBanner = document.createElement('div');
+    slowBanner.id = 'dash-slow-banner';
+    slowBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:8px 16px;background:#fff8e1;border-bottom:1px solid #ffe082;color:#5f4300;text-align:center;font-size:13px;z-index:9999;';
+    slowBanner.textContent = '⏳ 서버에서 데이터 불러오는 중… 처음 로드는 5~15초 정도 걸릴 수 있어요.';
+    document.body.appendChild(slowBanner);
+  }, 5000);
+
   dashboardFetchPromise = (async () => {
     try {
       const result = await apiCall('dashboard', params);
+      clearTimeout(slowTimer);
+      if (slowBanner && slowBanner.parentNode) slowBanner.parentNode.removeChild(slowBanner);
       if (result && result.success) {
         if (result.myStats) {
           const ps = { success: true, raw: result.myStats.raw, daily: result.myStats.daily, points: result.myStats.points };
