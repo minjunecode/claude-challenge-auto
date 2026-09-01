@@ -523,14 +523,18 @@ var MUTATION_ACTIONS_ = {
 };
 
 function handleRequest(e) {
-  var params;
-  try {
-    params = JSON.parse(e.postData ? e.postData.contents : '{}');
-  } catch (err) {
-    params = e.parameter || {};
+  // ── GET/POST 통합 파라미터 처리 ──
+  // 버그(2026-09-02): POST body 없을 때(GET) 기존 코드는 JSON.parse('{}')로 빈 객체를 만들고
+  // catch(e.parameter 폴백)까지 오지 못해 query params를 무시. GET 액션들이 모두 실패.
+  var params = {};
+  if (e && e.postData && e.postData.contents) {
+    try { params = JSON.parse(e.postData.contents); } catch (err) { params = e.parameter || {}; }
+  } else if (e && e.parameter) {
+    // GET: query string → e.parameter. 모든 값이 String이라 필요 시 각 핸들러가 파싱.
+    params = e.parameter;
   }
 
-  var action = params.action || (e.parameter && e.parameter.action) || '';
+  var action = params.action || (e && e.parameter && e.parameter.action) || '';
   var result;
 
   switch (action) {
