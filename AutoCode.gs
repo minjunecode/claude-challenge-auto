@@ -1179,15 +1179,25 @@ function handleDashboard(params) {
   }
 
   // ── 주간 정산 audit log (벌금 탭의 과거 주차 freeze) ──
+  // 페이로드 슬림: 8주 이상 지난 주차의 days JSON은 drop (프론트 벌금 탭은 최근만 표시).
+  // 요약 필드(fineAmount 등)는 유지해서 통계·이력엔 지장 없음.
   var settlements = [];
   var settlementSh = ss.getSheetByName(WEEKLY_SETTLEMENT_SHEET_);
+  var currentIsoForSettle = isoWeekFromDate_(new Date());
+  var DAYS_KEEP_WEEKS = 8;
   if (settlementSh && settlementSh.getLastRow() > 1) {
     var sVals = settlementSh.getRange(2, 1, settlementSh.getLastRow() - 1, WEEKLY_SETTLEMENT_HEADERS_.length).getValues();
     for (var si = 0; si < sVals.length; si++) {
       var sr = sVals[si];
       if (!sr[0]) continue;
+      var _sWeek = Number(sr[1]) || 0;
+      var _sYear = Number(sr[2]) || 0;
+      var _weeksBack = (currentIsoForSettle.year - _sYear) * 52 + (currentIsoForSettle.week - _sWeek);
+      var _keepDays = _weeksBack <= DAYS_KEEP_WEEKS;
       var daysArr = null;
-      try { daysArr = sr[10] ? JSON.parse(String(sr[10])) : null; } catch (e) { daysArr = null; }
+      if (_keepDays && sr[10]) {
+        try { daysArr = JSON.parse(String(sr[10])); } catch (e) { daysArr = null; }
+      }
       settlements.push({
         nickname: String(sr[0]),
         week: Number(sr[1]) || 0,
@@ -1199,7 +1209,7 @@ function handleDashboard(params) {
         depositBefore: Number(sr[7]) || 0,
         depositAfter: Number(sr[8]) || 0,
         settledAt: toDateTimeStr(sr[9]),
-        days: daysArr   // [{date,label}] x7 — 과거 주차 셀 frozen 렌더용 (없으면 null)
+        days: daysArr   // 8주 이내만 non-null. 그 이전 주는 요약만.
       });
     }
   }
@@ -1240,14 +1250,18 @@ function handleDashboard(params) {
     var dashIso = getIsoWeek_(new Date());
     var dashCols = EVAL_HEADERS_.length;
     var evalDashVals = evalShDash.getRange(2, 1, evalShDash.getLastRow() - 1, dashCols).getValues();
-    // 역순(최근 행 우선)으로 검색 + lazy reveal flip 적용
+    // 역순(최근 행 우선). in-memory flip만 (시트 write는 flipRevealedEvalsBatch_ cron이 담당).
+    var flipNow2 = Date.now();
     for (var ei = evalDashVals.length - 1; ei >= 0; ei--) {
       var er = evalDashVals[ei];
       if (String(er[1]).trim() !== nickname) continue;
       if (Number(er[2]) !== dashIso.week) continue;
       if (Number(er[3]) !== dashIso.year) continue;
-      // 검색 도중에도 reveal flip 적용해 정확한 status 반영
-      maybeFlipReveal_(evalShDash, er, ei);
+      // in-memory flip (dashboard read 중엔 시트 write 안 함)
+      if (String(er[20]).trim() === 'evaluation_pending') {
+        var ra2 = Number(er[23]) || 0;
+        if (ra2 && flipNow2 >= ra2) { er[5] = new Date(ra2).toISOString(); er[20] = 'completed'; }
+      }
       var est = String(er[20]).trim();
       if (est === 'abandoned' || est === '') continue;
       myEvalThisWeek = {
@@ -1290,9 +1304,19 @@ function computeEvalRankings_() {
   if (!evalSh || evalSh.getLastRow() < 2) return null;
 
   var values = evalSh.getRange(2, 1, evalSh.getLastRow() - 1, EVAL_HEADERS_.length).getValues();
-  // Lazy reveal flip (시트 무결성 유지)
+  // ── READ-ONLY 화 ──
+  // 기존엔 maybeFlipReveal_로 시트 write까지 했음 → dashboard read 중 lock 경합.
+  // 이제 in-memory에서만 flip 판정 (시트에 반영은 flipRevealedEvalsBatch_ 크론이 담당).
+  var flipNow = Date.now();
   for (var fi = 0; fi < values.length; fi++) {
-    maybeFlipReveal_(evalSh, values[fi], fi);
+    var vr = values[fi];
+    if (String(vr[20]).trim() === 'evaluation_pending') {
+      var ra = Number(vr[23]) || 0;
+      if (ra && flipNow >= ra) {
+        vr[5] = new Date(ra).toISOString();  // in-memory만
+        vr[20] = 'completed';
+      }
+    }
   }
   var now = new Date();
   var iso = getIsoWeek_(now);
@@ -2135,6 +2159,41 @@ function installDailyLeagueBatchTrigger() {
 function manualRunDailyLeagueBatch() {
   runDailyLeagueBatch_();
   return '리그 배치 수동 실행 완료';
+}
+
+// ── 평가 reveal flip 배치 (dashboard read에서 write 제거하면서 필요) ──
+// dashboard 응답은 in-memory flip만 하므로 시트의 status 컬럼은 stale.
+// 이 크론이 5분마다 실제로 status/completedAt 컬럼을 실제 반영.
+function flipRevealedEvalsBatch_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(EVAL_SHEET_NAME_);
+  if (!sh || sh.getLastRow() < 2) return 'no eval sheet or empty';
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, EVAL_HEADERS_.length).getValues();
+  var now = Date.now();
+  var flipped = 0;
+  for (var i = 0; i < vals.length; i++) {
+    var r = vals[i];
+    if (String(r[20]).trim() !== 'evaluation_pending') continue;
+    var ra = Number(r[23]) || 0;
+    if (!ra || now < ra) continue;
+    var rowNum = i + 2;
+    sh.getRange(rowNum, 6).setValue(new Date(ra).toISOString());
+    sh.getRange(rowNum, 21).setValue('completed');
+    flipped++;
+  }
+  return 'flipped ' + flipped + ' pending → completed';
+}
+
+function installEvalRevealFlipTrigger() {
+  var existing = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getHandlerFunction() === 'flipRevealedEvalsBatch_') {
+      ScriptApp.deleteTrigger(existing[i]);
+    }
+  }
+  ScriptApp.newTrigger('flipRevealedEvalsBatch_')
+    .timeBased().everyMinutes(5).create();
+  return 'eval flip 트리거 설치 완료 (5분)';
 }
 
 // ── 사용량_raw 시트 정리 (12주 이전 행 삭제) ──
