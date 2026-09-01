@@ -3996,7 +3996,12 @@ function handleEvalSubmit(params) {
   var evalId = String(params.evalId || '').trim();
   if (!evalId) return { success: false, error: 'evalId가 필요합니다.' };
 
-  var answers = Array.isArray(params.answers) ? params.answers : [];
+  // GET 요청에서는 answers가 JSON 문자열로 옴 (URLSearchParams 인코딩) → 파싱.
+  var answers = params.answers;
+  if (typeof answers === 'string') {
+    try { answers = JSON.parse(answers); } catch (e) { answers = []; }
+  }
+  if (!Array.isArray(answers)) answers = [];
   if (answers.length < 3) return { success: false, error: '3개 답변이 모두 필요합니다.' };
 
   // 시트에서 row 찾기
