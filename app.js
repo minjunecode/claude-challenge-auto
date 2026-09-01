@@ -1059,8 +1059,8 @@ function renderDashboard() {
   const activeView = document.querySelector('.rank-toggle-btn.active')?.dataset.rank || 'dailyTokens';
   renderPodium(activeView);
 
-  // 1:1 피어 비교
-  const myRaw = personalStatsData ? personalStatsData.raw : [];
+  // 1:1 피어 비교 — personalStatsData 또는 .raw 없어도 안전
+  const myRaw = (personalStatsData && Array.isArray(personalStatsData.raw)) ? personalStatsData.raw : [];
   initPeerCompare(myRaw);
 
   // 최근 활동
@@ -1639,7 +1639,7 @@ function renderAdminTab() {
   if (!dashboardData) return;
   const list = document.getElementById('member-list');
   list.innerHTML = '';
-  dashboardData.members.forEach(m => {
+  (dashboardData.members || []).forEach(m => {
     const li = document.createElement('li');
     const lg = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
     const lgBadge = `<span class="my-league-badge ${lg === LEAGUE_10M ? 'league-10M' : ''}">${lg}</span>`;

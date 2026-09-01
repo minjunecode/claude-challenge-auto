@@ -537,23 +537,33 @@ function handleRequest(e) {
   var action = params.action || (e && e.parameter && e.parameter.action) || '';
   var result;
 
-  switch (action) {
-    case 'login':        result = handleLogin(params); break;
-    case 'register':     result = handleRegister(params); break;
-    case 'init':         result = handleInit(params); break;
-    case 'dashboard':    result = handleDashboard(params); break;
-    case 'reportUsage':  result = handleReportUsage(params); break;
-    case 'upload':       result = handleUpload(params); break;
-    case 'addMember':    result = handleAddMember(params); break;
-    case 'deleteMember': result = handleDeleteMember(params); break;
-    case 'setColor':     result = handleSetColor(params); break;
-    case 'personalStats': result = handlePersonalStats(params); break;
-    case 'evalStart':    result = handleEvalStart(params); break;
-    case 'evalSubmit':   result = handleEvalSubmit(params); break;
-    case 'evalFeed':     result = handleEvalFeed(params); break;
-    case 'evalStatus':   result = handleEvalStatus(params); break;
-    case 'evalDiscard':  result = handleEvalDiscard(params); break;
-    default: result = { success: false, error: '알 수 없는 action: ' + action };
+  // 안전망: 어느 핸들러가 throw해도 500 대신 구조화된 에러 반환.
+  // Apps Script는 예외 시 HTML 에러페이지를 보내 프론트가 파싱 실패 → 무한 로딩 원인이 됨.
+  try {
+    switch (action) {
+      case 'login':        result = handleLogin(params); break;
+      case 'register':     result = handleRegister(params); break;
+      case 'init':         result = handleInit(params); break;
+      case 'dashboard':    result = handleDashboard(params); break;
+      case 'reportUsage':  result = handleReportUsage(params); break;
+      case 'upload':       result = handleUpload(params); break;
+      case 'addMember':    result = handleAddMember(params); break;
+      case 'deleteMember': result = handleDeleteMember(params); break;
+      case 'setColor':     result = handleSetColor(params); break;
+      case 'personalStats': result = handlePersonalStats(params); break;
+      case 'evalStart':    result = handleEvalStart(params); break;
+      case 'evalSubmit':   result = handleEvalSubmit(params); break;
+      case 'evalFeed':     result = handleEvalFeed(params); break;
+      case 'evalStatus':   result = handleEvalStatus(params); break;
+      case 'evalDiscard':  result = handleEvalDiscard(params); break;
+      default: result = { success: false, error: '알 수 없는 action: ' + action };
+    }
+  } catch (handlerErr) {
+    result = {
+      success: false,
+      error: '서버 예외 (' + action + '): ' + (handlerErr && handlerErr.message ? handlerErr.message : String(handlerErr)),
+      stack: handlerErr && handlerErr.stack ? String(handlerErr.stack).slice(0, 500) : ''
+    };
   }
 
   // 쓰기 액션이 성공했으면 대시보드 캐시 무효화 (모든 사용자 대상)
@@ -575,12 +585,26 @@ function _dashboardCacheKey_(nickname) {
   return 'dashboard:' + (nickname || '_anon');
 }
 
+// gzip 접두사 — 압축본 판별. 옛 캐시(prefix 없음)와 하위호환.
+var _CACHE_GZIP_PREFIX_ = 'gz1:';
+
 function getCachedDashboard_(nickname) {
   try {
     var cache = CacheService.getScriptCache();
     var raw = cache.get(_dashboardCacheKey_(nickname));
     if (!raw) return null;
-    var parsed = JSON.parse(raw);
+    var payloadStr;
+    if (raw.length > 4 && raw.substring(0, 4) === _CACHE_GZIP_PREFIX_) {
+      // gzip 복원. 실패 시 캐시 무효로 처리.
+      try {
+        var bytes = Utilities.base64Decode(raw.substring(4));
+        var blob = Utilities.newBlob(bytes, 'application/x-gzip', 'c.gz');
+        payloadStr = Utilities.ungzip(blob).getDataAsString();
+      } catch (gzErr) { return null; }
+    } else {
+      payloadStr = raw;
+    }
+    var parsed = JSON.parse(payloadStr);
     var curVer = cache.get('dashboard:version') || '0';
     if (String(parsed.version) !== String(curVer)) return null;
     return parsed.data;
@@ -591,10 +615,20 @@ function putCachedDashboard_(nickname, data) {
   try {
     var cache = CacheService.getScriptCache();
     var curVer = cache.get('dashboard:version') || '0';
-    var payload = JSON.stringify({ version: curVer, data: data });
-    // CacheService value 한도: 100KB. 초과시 캐싱 포기.
-    if (payload.length > 95000) return;
-    cache.put(_dashboardCacheKey_(nickname), payload, DASHBOARD_CACHE_TTL_SEC_);
+    var payloadStr = JSON.stringify({ version: curVer, data: data });
+    // CacheService value 한도: 100KB. 응답이 340KB+ → 그냥 저장하면 항상 실패.
+    // gzip 후 base64로 캐시 (JSON은 보통 5~10x 압축).
+    var toStore = payloadStr;
+    if (payloadStr.length > 90000) {
+      try {
+        var blob = Utilities.newBlob(payloadStr, 'application/json', 'c.json');
+        var gz = Utilities.gzip(blob);
+        var b64 = Utilities.base64Encode(gz.getBytes());
+        toStore = _CACHE_GZIP_PREFIX_ + b64;
+      } catch (gzErr) { return; }  // gzip 실패 → 캐싱 포기 (조용히)
+    }
+    if (toStore.length > 95000) return;  // 압축 후에도 크면 캐싱 포기
+    cache.put(_dashboardCacheKey_(nickname), toStore, DASHBOARD_CACHE_TTL_SEC_);
   } catch (err) {}
 }
 
