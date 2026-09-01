@@ -516,8 +516,11 @@ function doGet(e) { return handleRequest(e); }
 function doPost(e) { return handleRequest(e); }
 
 // 데이터 쓰기 액션 — 성공 시 대시보드 캐시 무효화 대상.
+// reportUsage는 매시간 발생 → 매번 invalidate하면 다음 사용자 요청이 cold(70s+)로 감.
+// 대신 prewarm 크론이 5분마다 rebuild하므로 최대 5분 stale로 감수.
+// 관리자 액션(setColor/addMember 등)은 즉시 반영 원하니 invalidate 유지.
 var MUTATION_ACTIONS_ = {
-  'reportUsage': 1, 'upload': 1, 'register': 1, 'init': 1,
+  'upload': 1, 'register': 1, 'init': 1,
   'addMember': 1, 'deleteMember': 1, 'setColor': 1,
   'evalStart': 1, 'evalSubmit': 1, 'evalDiscard': 1
 };
@@ -582,7 +585,8 @@ function handleRequest(e) {
 var DASHBOARD_CACHE_TTL_SEC_ = 300;  // 5분. 쓰기 액션은 invalidateDashboardCache_로 즉시 무효화되므로 안전.
 
 function _dashboardCacheKey_(nickname) {
-  return 'dashboard:' + (nickname || '_anon');
+  // 이제는 모든 사용자가 하나의 공유 캐시. myStats/myEvalThisWeek는 요청마다 계산.
+  return 'dashboard:_shared';
 }
 
 // gzip 접두사 — 압축본 판별. 옛 캐시(prefix 없음)와 하위호환.
@@ -759,15 +763,22 @@ function handleInit(params) {
 }
 
 // ── 대시보드 ──
+// [10초 목표 아키텍처]
+// 캐시 키를 SHARED로 통합. myStats/myEvalThisWeek는 캐시 하지 않고 요청마다 계산.
+// 캐시 hit → 공유 데이터 + 사용자별 addons 계산 = 1~3초.
+// 캐시 miss (cold) → 풀 계산 70초 → 첫 사용자만 대기. 이후 5분 prewarm 크론이 유지.
 function handleDashboard(params) {
-  // 요청자 식별 (myEvalThisWeek 등 본인 전용 필드 계산용)
   var nickname = (params && params.nickname) ? String(params.nickname).trim() : '';
+  var reqPassword = String((params && params.password) || '').trim();
 
-  // 캐시 hit이면 즉시 반환 (30s TTL + 버전 무효화)
-  var cached = getCachedDashboard_(nickname);
-  if (cached) return cached;
+  // 1) 공유 캐시 hit이면 사용자 addons만 붙여서 즉시 반환
+  var sharedCached = getCachedDashboard_('');  // 항상 _anon 키
+  if (sharedCached) {
+    var addons = _computeUserAddons_(nickname, reqPassword, sharedCached);
+    return Object.assign({}, sharedCached, addons);
+  }
 
-  // 구형 시트 자동 마이그레이션 (1회성)
+  // 2) 풀 계산 진행 (cache miss)
   migrateSheetIfNeeded_();
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1312,26 +1323,182 @@ function handleDashboard(params) {
     }
   }
 
-  var response = {
+  // 공유 데이터 (모든 사용자 동일). 사용자별 필드는 캐시하지 않고 요청마다 addons로 붙임.
+  var shared = {
     success: true,
     members: members,
     submissions: submissions,
     usage: usage,
-    myStats: myStats,
     memberLastActivity: memberLastActivity,
     topUser: topUser,
     memberHourly: memberAllHourly,
     memberColors: memberColors,
     settlements: settlements,
     evalRankings: evalRankings,
-    myEvalThisWeek: myEvalThisWeek,
     leagueTimeline: leagueTimeline,
     depositLedger: loadDepositLedger_(),
     weeklyStatus: loadWeeklyStatus_()
   };
-  // 캐시에 저장 (다음 30s 내 동일 요청은 시트 read 없이 즉시 반환)
-  putCachedDashboard_(nickname, response);
-  return response;
+  // 공유 캐시에 저장 (다음 요청부터 캐시 hit → 1~3초).
+  putCachedDashboard_('', shared);
+  // 사용자별 addons 조합해서 반환 (현재 요청자용).
+  return Object.assign({}, shared, {
+    myStats: myStats,
+    myEvalThisWeek: myEvalThisWeek
+  });
+}
+
+// ── 캐시 hit 시 사용자별 필드 계산 (짧게 유지) ──
+// shared: 캐시된 공유 응답 (members/usage/submissions 등 포함)
+function _computeUserAddons_(nickname, password, shared) {
+  var out = { myStats: null, myEvalThisWeek: null };
+  if (!nickname || !password) return out;
+
+  // 인증 (멤버 시트 read — 이미 shared.members 있으니 그거로 확인)
+  var authed = false;
+  // 실제 password 검증은 시트에서 (shared.members엔 password 없음)
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var memberSheet = ss.getSheetByName('멤버');
+  if (!memberSheet) return out;
+  var mData = memberSheet.getDataRange().getValues();
+  for (var i = 1; i < mData.length; i++) {
+    if (String(mData[i][0]).trim() === nickname && String(mData[i][1]).trim() === password) {
+      authed = true; break;
+    }
+  }
+  if (!authed) return out;
+
+  // myStats: 사용자 raw 스캔 (본인 행만 → 빠름)
+  out.myStats = _computeMyStatsQuick_(nickname, shared);
+
+  // myEvalThisWeek: 평가 시트 read (본인 행만 필터)
+  out.myEvalThisWeek = _computeMyEvalThisWeekQuick_(nickname);
+
+  return out;
+}
+
+function _computeMyStatsQuick_(nickname, shared) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var rawSheet = ss.getSheetByName('사용량_raw');
+  var rawData = [];
+  if (rawSheet && rawSheet.getLastRow() > 1) {
+    var rawAll = rawSheet.getDataRange().getValues();
+    var hdr = rawAll[0];
+    var isV2 = String(hdr[2] || '').indexOf('claude_') === 0;
+    var hasV1 = hdr.length >= 10;
+    var cAt = hdr.indexOf('reportedAt'); if (cAt < 0) cAt = isV2 ? 11 : (hasV1 ? 8 : 6);
+    var cMid = hdr.indexOf('machine_id');
+    var cHour = hdr.indexOf('hourly'); if (cHour < 0) cHour = isV2 ? 12 : (hasV1 ? 9 : 7);
+    var latestByDateMachine = {};
+    for (var r = 1; r < rawAll.length; r++) {
+      if (String(rawAll[r][0] || '').trim() !== nickname) continue;
+      var dStr = toDateStr(rawAll[r][1]);
+      if (!dStr) continue;
+      var mid = cMid >= 0 ? (String(rawAll[r][cMid] || '').trim() || LEGACY_MACHINE_ID) : LEGACY_MACHINE_ID;
+      var at = toDateTimeStr(rawAll[r][cAt]);
+      var key = dStr + '|' + mid;
+      if (latestByDateMachine[key] && at <= latestByDateMachine[key].at) continue;
+      var clIn, clOut, clCw, clCr, cxIn, cxOut, cxCr, sess;
+      if (isV2) {
+        clIn = safeInt(rawAll[r][2]); clOut = safeInt(rawAll[r][3]);
+        clCw = safeInt(rawAll[r][4]); clCr = safeInt(rawAll[r][5]);
+        cxIn = safeInt(rawAll[r][6]); cxOut = safeInt(rawAll[r][7]);
+        cxCr = safeInt(rawAll[r][8]);
+        sess = safeInt(rawAll[r][10]);
+      } else if (hasV1) {
+        clIn = safeInt(rawAll[r][2]); clOut = safeInt(rawAll[r][3]);
+        clCw = safeInt(rawAll[r][4]); clCr = safeInt(rawAll[r][5]);
+        cxIn = 0; cxOut = 0; cxCr = 0; sess = safeInt(rawAll[r][7]);
+      } else {
+        clIn = safeInt(rawAll[r][2]); clOut = safeInt(rawAll[r][3]);
+        clCw = 0; clCr = 0; cxIn = 0; cxOut = 0; cxCr = 0; sess = safeInt(rawAll[r][5]);
+      }
+      var hStr = rawAll[r][cHour] || '';
+      var hourly = null;
+      if (hStr) { try {
+        hourly = JSON.parse(hStr);
+        if (Array.isArray(hourly)) hourly = hourly.map(function(b){ return (b && b.cl) ? b : { h: b.h, cl:{in:b.in||0,out:b.out||0,cc:b.cc||0,cr:b.cr||0}, cx:{in:0,out:0,cr:0} }; });
+      } catch(e) {} }
+      var sc = calcScoreV2_({
+        claude_input_tokens: clIn, claude_output_tokens: clOut,
+        claude_cache_creation_tokens: clCw, claude_cache_read_tokens: clCr,
+        codex_input_tokens: cxIn, codex_output_tokens: cxOut, codex_cache_read_tokens: cxCr
+      });
+      latestByDateMachine[key] = {
+        date: dStr, mid: mid, at: at, score: sc,
+        clIn: clIn, clOut: clOut, clCw: clCw, clCr: clCr,
+        cxIn: cxIn, cxOut: cxOut, cxCr: cxCr, sess: sess, hourly: hourly
+      };
+    }
+    var byDate = {};
+    Object.keys(latestByDateMachine).forEach(function(k) {
+      var e = latestByDateMachine[k];
+      if (!byDate[e.date]) byDate[e.date] = { items: [] };
+      byDate[e.date].items.push(e);
+    });
+    Object.keys(byDate).forEach(function(date) {
+      var items = pickActiveRows_(byDate[date].items);
+      if (!items.length) return;
+      var sClIn=0,sClOut=0,sClCw=0,sClCr=0,sCxIn=0,sCxOut=0,sCxCr=0,sSess=0,latestAt=null;
+      var buckets = {};
+      items.forEach(function(it) {
+        sClIn+=it.clIn; sClOut+=it.clOut; sClCw+=it.clCw; sClCr+=it.clCr;
+        sCxIn+=it.cxIn; sCxOut+=it.cxOut; sCxCr+=it.cxCr; sSess+=it.sess;
+        if (!latestAt || it.at > latestAt) latestAt = it.at;
+        if (it.hourly && Array.isArray(it.hourly)) {
+          it.hourly.forEach(function(b) {
+            if (!b || typeof b.h !== 'number') return;
+            if (!buckets[b.h]) buckets[b.h] = { h:b.h, cl:{in:0,out:0,cc:0,cr:0}, cx:{in:0,out:0,cr:0} };
+            var dst = buckets[b.h]; var cl = b.cl||{}, cx = b.cx||{};
+            dst.cl.in+=cl.in||0; dst.cl.out+=cl.out||0; dst.cl.cc+=cl.cc||0; dst.cl.cr+=cl.cr||0;
+            dst.cx.in+=cx.in||0; dst.cx.out+=cx.out||0; dst.cx.cr+=cx.cr||0;
+          });
+        }
+      });
+      var hMerged = Object.keys(buckets).map(function(h){return buckets[h];}).sort(function(a,b){return a.h-b.h;});
+      var rScore = calcScoreV2_({
+        claude_input_tokens: sClIn, claude_output_tokens: sClOut,
+        claude_cache_creation_tokens: sClCw, claude_cache_read_tokens: sClCr,
+        codex_input_tokens: sCxIn, codex_output_tokens: sCxOut, codex_cache_read_tokens: sCxCr
+      });
+      rawData.push({
+        date: date,
+        claude_input_tokens: sClIn, claude_output_tokens: sClOut,
+        claude_cache_creation_tokens: sClCw, claude_cache_read_tokens: sClCr,
+        codex_input_tokens: sCxIn, codex_output_tokens: sCxOut, codex_cache_read_tokens: sCxCr,
+        score: rScore, sessions: sSess, reportedAt: latestAt || '',
+        hourly: hMerged, machineCount: items.length
+      });
+    });
+    rawData.sort(function(a,b){ return a.date > b.date ? -1 : (a.date < b.date ? 1 : 0); });
+  }
+  var daily = (shared.usage || []).filter(function(u){ return u.nickname === nickname; });
+  var points = (shared.submissions || []).filter(function(s){ return s.nickname === nickname; })
+    .map(function(s){ return { date: s.resetsAt || s.submittedAt, points: s.points, source: s.source }; });
+  return { raw: rawData, daily: daily, points: points };
+}
+
+function _computeMyEvalThisWeekQuick_(nickname) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(EVAL_SHEET_NAME_);
+  if (!sh || sh.getLastRow() < 2) return null;
+  var iso = getIsoWeek_(new Date());
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, EVAL_HEADERS_.length).getValues();
+  var flipNow = Date.now();
+  for (var i = vals.length - 1; i >= 0; i--) {
+    var r = vals[i];
+    if (String(r[1]).trim() !== nickname) continue;
+    if (Number(r[2]) !== iso.week) continue;
+    if (Number(r[3]) !== iso.year) continue;
+    if (String(r[20]).trim() === 'evaluation_pending') {
+      var ra = Number(r[23]) || 0;
+      if (ra && flipNow >= ra) { r[5] = new Date(ra).toISOString(); r[20] = 'completed'; }
+    }
+    var st = String(r[20]).trim();
+    if (st === 'abandoned' || st === '') continue;
+    return { evalId: String(r[0]), status: st, projectName: String(r[6]), revealAt: Number(r[23]) || 0 };
+  }
+  return null;
 }
 
 // 평가 시트에서 주간/월간/누적 평가금액 1위를 계산 (handleEvalFeed의 로직과 동일).
@@ -1580,8 +1747,9 @@ function handleReportUsage(params) {
     }
   }
 
-  // 새 보고가 시트에 반영됐으니 dashboard 캐시 무효화 (30s TTL이라도 다음 호출이 새 데이터 보장).
-  invalidateDashboardCache_();
+  // 캐시 invalidate 하지 않음 — reportUsage는 매시간 발생.
+  // 매번 invalidate하면 다음 요청이 cold(70s) → 사용자 UX 크게 나빠짐.
+  // 5분 prewarm 크론이 자동으로 fresh하게 유지 (max 5분 stale 수용).
 
   return {
     success: true, message: '사용량 보고 완료',
@@ -2275,9 +2443,32 @@ function installRawPruneTrigger() {
   return 'raw prune 트리거 설치 (매주 월 03:00 KST)';
 }
 
-// ── 대시보드 캐시 prewarm 트리거 제거 헬퍼 ──
-// 이전에 installDashboardPrewarmTrigger로 설치된 트리거가 큐 폭발/lock 경합을 일으키는
-// 이슈 발견 → 설치 함수 자체는 폐기, 제거 함수만 남김. Apps Script 에디터에서 실행.
+// ── 대시보드 공유 캐시 prewarm (첫 로드 10초 목표 핵심) ──
+// 캐시가 shared라 사용자 무관 → 크론이 5분마다 rebuild하면 모든 사용자가 항상 hit.
+// invalidate는 mutation에만 발생 → 다음 prewarm이 즉시 채움.
+function prewarmDashboardCache_() {
+  try { handleDashboard({}); } catch (e) {}  // 결과는 자동으로 캐시됨
+}
+
+function manualPrewarmDashboardCache() {
+  var t0 = Date.now();
+  prewarmDashboardCache_();
+  return 'prewarm 완료 (' + (Date.now() - t0) + 'ms)';
+}
+
+// 매 5분 실행 트리거. Apps Script 에디터에서 1회만 실행.
+function installDashboardPrewarmTrigger() {
+  var existing = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getHandlerFunction() === 'prewarmDashboardCache_') {
+      ScriptApp.deleteTrigger(existing[i]);
+    }
+  }
+  ScriptApp.newTrigger('prewarmDashboardCache_')
+    .timeBased().everyMinutes(5).create();
+  return 'dashboard prewarm 트리거 설치 완료 (5분)';
+}
+
 function removeAllPrewarmTriggers() {
   var t = ScriptApp.getProjectTriggers();
   var n = 0;

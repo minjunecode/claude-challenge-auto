@@ -170,7 +170,9 @@ async function apiCall(action, params = {}) {
   // 쓰기 액션은 side effect 있으므로 retry X (중복 실행 방지).
   const isMutation = /^(reportUsage|setColor|addMember|deleteMember|upload|register|init|evalStart|evalSubmit|evalDiscard)$/.test(action);
   const maxAttempts = isMutation ? 1 : 2;
-  const perAttemptTimeoutMs = action === 'dashboard' ? 35000 : 15000;
+  // 서버가 5분 prewarm 크론으로 캐시 warm 유지 → cache hit이면 2~3초.
+  // cold(mutation 직후) 재발 시엔 첫 시도는 timeout, 재시도가 캐시 hit으로 성공.
+  const perAttemptTimeoutMs = action === 'dashboard' ? 10000 : 15000;
 
   // 단일 요청 실행자
   async function attempt(attemptNum) {
@@ -210,13 +212,17 @@ async function apiCall(action, params = {}) {
     }
   }
 
-  // Apps Script GET 응답이 불안정(3~4회에 1회만 성공) → 실패 시 자동 재시도.
+  // Apps Script cold 계산(70초+) 후엔 서버가 캐시를 채워둠 → 재시도가 cache hit으로 빠름.
   let lastErr = null;
   for (let i = 1; i <= maxAttempts; i++) {
     const r = await attempt(i);
     if (r.ok) return r.data;
     lastErr = r.error;
-    if (i < maxAttempts) await new Promise(rs => setTimeout(rs, 800 * i));
+    if (i < maxAttempts) {
+      // timeout이면 서버가 아직 계산 중일 수 있으니 5초 대기 후 (그땐 캐시 있음).
+      const waitMs = r.timedOut ? 5000 : 800;
+      await new Promise(rs => setTimeout(rs, waitMs));
+    }
   }
   return { success: false, error: lastErr || '요청 실패' };
 }
@@ -612,13 +618,13 @@ async function loadDashboard(force) {
   if (currentUser && currentUser.nickname) params.nickname = currentUser.nickname;
   if (currentUser && currentUser.password) params.password = currentUser.password;
 
-  // 5초 넘어가면 상단에 로딩 안내 배너 표시 (사용자에게 진행 중임을 알림)
+  // 5초 넘으면 진행 배너
   let slowBanner = null;
   const slowTimer = setTimeout(() => {
     slowBanner = document.createElement('div');
     slowBanner.id = 'dash-slow-banner';
     slowBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:8px 16px;background:#fff8e1;border-bottom:1px solid #ffe082;color:#5f4300;text-align:center;font-size:13px;z-index:9999;';
-    slowBanner.textContent = '⏳ 서버에서 데이터 불러오는 중… 처음 로드는 5~15초 정도 걸릴 수 있어요.';
+    slowBanner.textContent = '⏳ 데이터 불러오는 중…';
     document.body.appendChild(slowBanner);
   }, 5000);
 
