@@ -892,16 +892,14 @@ function handleDashboard(params) {
         codex_input_tokens: sCxIn, codex_output_tokens: sCxOut,
         codex_cache_read_tokens: sCxCr
       });
+      // 페이로드 슬림화: v1 호환 필드(input_tokens/output_tokens/cache_creation_tokens/cache_read_tokens)
+      // 제거. 프론트 getScore()는 claude_*/codex_* 필드에서 스스로 계산.
       usage.push({
         nickname: g.nickname, date: g.date,
         claude_input_tokens: sClIn, claude_output_tokens: sClOut,
         claude_cache_creation_tokens: sClCw, claude_cache_read_tokens: sClCr,
         codex_input_tokens: sCxIn, codex_output_tokens: sCxOut,
         codex_cache_read_tokens: sCxCr,
-        input_tokens: sClIn + sCxIn,
-        output_tokens: sClOut + sCxOut,
-        cache_creation_tokens: sClCw,
-        cache_read_tokens: sClCr + sCxCr,
         score: uScore, sessions: sSess,
         reportedAt: latestAt || '',
         machineCount: rows.length
@@ -1063,8 +1061,6 @@ function handleDashboard(params) {
             claude_cache_creation_tokens: sClCw, claude_cache_read_tokens: sClCr,
             codex_input_tokens: sCxIn, codex_output_tokens: sCxOut,
             codex_cache_read_tokens: sCxCr,
-            input_tokens: sClIn + sCxIn, output_tokens: sClOut + sCxOut,
-            cache_creation_tokens: sClCw, cache_read_tokens: sClCr + sCxCr,
             score: rScore, sessions: sSess,
             reportedAt: latestAt || '',
             hourly: hourlyMerged,
@@ -2139,6 +2135,47 @@ function installDailyLeagueBatchTrigger() {
 function manualRunDailyLeagueBatch() {
   runDailyLeagueBatch_();
   return '리그 배치 수동 실행 완료';
+}
+
+// ── 사용량_raw 시트 정리 (12주 이전 행 삭제) ──
+// 리포터가 매시간 append하는 raw 시트가 무제한 성장 → getDataRange가 점점 느려짐.
+// handleDashboard의 대부분 시간이 이 read에 소요됨.
+// 관리자가 주기적으로 실행하거나 트리거로 설치. 실측 데이터는 사용량(집계본)에 이미 있어 안전.
+function pruneOldRawRows() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('사용량_raw');
+  if (!sh || sh.getLastRow() < 2) return 'raw sheet empty';
+  var lastRow = sh.getLastRow();
+  var data = sh.getRange(2, 1, lastRow - 1, 2).getValues();  // nickname, date만 읽기
+  var cutoff = new Date(Date.now() - 12 * 7 * 86400 * 1000);
+  var cutoffStr = Utilities.formatDate(cutoff, 'Asia/Seoul', 'yyyy-MM-dd');
+  // 파일 위쪽부터 몇 개 행이 cutoff보다 오래됐는지 찾기 (append-only → 상단이 옛것)
+  var deleteCount = 0;
+  for (var i = 0; i < data.length; i++) {
+    var dStr = toDateStr(data[i][1]);
+    if (dStr && dStr < cutoffStr) deleteCount++;
+    else break;  // append-only라 여기서 stop
+  }
+  if (deleteCount === 0) return 'nothing to prune (cutoff=' + cutoffStr + ')';
+  sh.deleteRows(2, deleteCount);
+  return 'deleted ' + deleteCount + ' rows older than ' + cutoffStr;
+}
+
+// 매주 월요일 새벽 실행 트리거 설치
+function installRawPruneTrigger() {
+  var existing = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getHandlerFunction() === 'pruneOldRawRows') {
+      ScriptApp.deleteTrigger(existing[i]);
+    }
+  }
+  ScriptApp.newTrigger('pruneOldRawRows')
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY)
+    .atHour(3)
+    .inTimezone('Asia/Seoul')
+    .create();
+  return 'raw prune 트리거 설치 (매주 월 03:00 KST)';
 }
 
 // ── 대시보드 캐시 prewarm 트리거 제거 헬퍼 ──

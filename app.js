@@ -158,10 +158,7 @@ async function apiCall(action, params = {}) {
   if (params.password != null) params.password = String(params.password);
   const merged = { action, ...params };
 
-  // Google Apps Script의 POST가 현재 극도로 느림(302에 30~90초). GET은 즉시 응답.
-  // 원인: POST 요청은 doPost 라우팅 시 Google Frontend가 script.googleusercontent.com으로
-  // 리다이렉트하는데 그 hop이 최근 극단적으로 느려짐 (Google 측 이슈로 추정).
-  // 대응: 작은 파라미터는 GET(쿼리스트링), 큰 body(hourly JSON 등)는 POST 유지.
+  // 파라미터 URL 인코딩 (GET용)
   const query = new URLSearchParams();
   Object.keys(merged).forEach(k => {
     const v = merged[k];
@@ -169,41 +166,59 @@ async function apiCall(action, params = {}) {
     query.append(k, typeof v === 'string' ? v : JSON.stringify(v));
   });
   const qs = query.toString();
-  const canUseGet = qs.length < 6000;  // URL 길이 안전선 (일부 프록시가 8KB에서 자름)
+  const canUseGet = qs.length < 6000;
+  // 쓰기 액션은 side effect 있으므로 retry X (중복 실행 방지).
+  const isMutation = /^(reportUsage|setColor|addMember|deleteMember|upload|register|init|evalStart|evalSubmit|evalDiscard)$/.test(action);
+  const maxAttempts = isMutation ? 1 : 2;
+  const perAttemptTimeoutMs = action === 'dashboard' ? 35000 : 15000;
 
-  const timeoutMs = action === 'dashboard' ? 45000 : 20000;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const t0 = Date.now();
-  try {
-    let response;
-    if (canUseGet) {
-      response = await fetch(API_URL + '?' + qs, {
-        method: 'GET', redirect: 'follow', signal: controller.signal
-      });
-    } else {
-      response = await fetch(API_URL, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify(merged), redirect: 'follow', signal: controller.signal
-      });
+  // 단일 요청 실행자
+  async function attempt(attemptNum) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), perAttemptTimeoutMs);
+    const t0 = Date.now();
+    try {
+      let response;
+      if (canUseGet) {
+        response = await fetch(API_URL + '?' + qs, {
+          method: 'GET', redirect: 'follow', signal: controller.signal, cache: 'no-store'
+        });
+      } else {
+        response = await fetch(API_URL, {
+          method: 'POST', headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify(merged), redirect: 'follow', signal: controller.signal
+        });
+      }
+      clearTimeout(timer);
+      const txt = await response.text();
+      const elapsed = Date.now() - t0;
+      if (elapsed > 5000 || txt.length > 200000) {
+        console.log(`[apiCall#${attemptNum}] ${action} (${canUseGet ? 'GET' : 'POST'}) → ${response.status} · ${txt.length}B · ${elapsed}ms`);
+      }
+      try {
+        const parsed = JSON.parse(txt);
+        return { ok: true, data: parsed };
+      } catch (parseErr) {
+        return { ok: false, error: `응답 파싱 실패 (HTTP ${response.status}, ${txt.length}B). 첫 200자: ${txt.slice(0, 200)}` };
+      }
+    } catch (err) {
+      clearTimeout(timer);
+      if (err && err.name === 'AbortError') {
+        return { ok: false, error: `요청 시간 초과 (${perAttemptTimeoutMs / 1000}초, 시도 ${attemptNum}/${maxAttempts})`, timedOut: true };
+      }
+      return { ok: false, error: `네트워크 오류: ${(err && err.message) || err}` };
     }
-    clearTimeout(timer);
-    const txt = await response.text();
-    const elapsed = Date.now() - t0;
-    if (elapsed > 5000 || txt.length > 200000) {
-      console.log(`[apiCall] ${action} (${canUseGet ? 'GET' : 'POST'}) → ${response.status} · ${txt.length}B · ${elapsed}ms`);
-    }
-    try { return JSON.parse(txt); }
-    catch (parseErr) {
-      return { success: false, error: `응답 파싱 실패 (HTTP ${response.status}, ${txt.length}B). 첫 200자: ${txt.slice(0, 200)}` };
-    }
-  } catch (err) {
-    clearTimeout(timer);
-    if (err && err.name === 'AbortError') {
-      return { success: false, error: `요청 시간 초과 (${timeoutMs / 1000}초).` };
-    }
-    return { success: false, error: `네트워크 오류: ${(err && err.message) || err}` };
   }
+
+  // Apps Script GET 응답이 불안정(3~4회에 1회만 성공) → 실패 시 자동 재시도.
+  let lastErr = null;
+  for (let i = 1; i <= maxAttempts; i++) {
+    const r = await attempt(i);
+    if (r.ok) return r.data;
+    lastErr = r.error;
+    if (i < maxAttempts) await new Promise(rs => setTimeout(rs, 800 * i));
+  }
+  return { success: false, error: lastErr || '요청 실패' };
 }
 
 // dashboardCache 저장 — 쿼터 초과 시 무거운 필드 제거 후 재시도.
@@ -612,12 +627,16 @@ async function loadDashboard(force) {
       const result = await apiCall('dashboard', params);
       clearTimeout(slowTimer);
       if (slowBanner && slowBanner.parentNode) slowBanner.parentNode.removeChild(slowBanner);
+      // 기존 에러 배너가 있으면 제거
+      const oldErr = document.getElementById('dash-err-banner');
+      if (oldErr) oldErr.remove();
+
       if (result && result.success) {
         if (result.myStats) {
           const ps = { success: true, raw: result.myStats.raw, daily: result.myStats.daily, points: result.myStats.points };
           personalStatsData = ps;
           personalStatsLoaded = true;
-          localStorage.setItem('personalStatsCache', JSON.stringify(ps));
+          try { localStorage.setItem('personalStatsCache', JSON.stringify(ps)); } catch {}
           if (document.getElementById('tab-stats').classList.contains('active')) {
             renderPersonalStats();
           }
@@ -629,8 +648,17 @@ async function loadDashboard(force) {
         if (personalStatsLoaded && document.getElementById('tab-stats').classList.contains('active')) {
           renderPersonalStats();
         }
-      } else if (!dashboardData) {
-        dashboardData = getDemoData();
+      } else {
+        // 실패: 기존 캐시 있으면 그대로 유지, 없으면 데모. 사용자에게 에러 배너로 알림.
+        if (!dashboardData) dashboardData = getDemoData();
+        const errMsg = (result && result.error) || '알 수 없는 오류';
+        const errBanner = document.createElement('div');
+        errBanner.id = 'dash-err-banner';
+        errBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:10px 16px;background:#ffebee;border-bottom:1px solid #ef9a9a;color:#b71c1c;text-align:center;font-size:13px;z-index:9999;display:flex;align-items:center;justify-content:center;gap:12px;';
+        errBanner.innerHTML = `<span>⚠️ 데이터 불러오기 실패: ${errMsg}</span><button id="dash-err-retry" style="padding:4px 12px;background:#b71c1c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">다시 시도</button>`;
+        document.body.appendChild(errBanner);
+        const retryBtn = document.getElementById('dash-err-retry');
+        if (retryBtn) retryBtn.onclick = () => { errBanner.remove(); loadDashboard(true); };
       }
       renderDashboard();
     } finally {
