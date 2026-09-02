@@ -2681,6 +2681,53 @@ function loadWeeklyStatus_() {
 }
 
 // (nick, year, week)의 status. 미기재면 기본 '참여 중'.
+// ── 주간정산 시트의 status 이력 → 주간상태 시트로 일괄 이관 ──
+// 주간정산의 D열(status)에는 매 정산 시점의 각 멤버×주차 status가 이미 기록됨.
+// 이걸 주간상태 시트로 옮기면 미래 resettle에서도 이력이 그대로 preserve됨.
+// admin의 기존 주간상태 entry는 우선 유지 (upsert 아니라 append only).
+function snapshotSettlementsStatusToWeeklyStatus() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var settleSheet = ss.getSheetByName(WEEKLY_SETTLEMENT_SHEET_);
+  var wsSheet = getWeeklyStatusSheet_();
+  if (!settleSheet || settleSheet.getLastRow() < 2) return '주간정산 시트 비어있음';
+
+  // 기존 주간상태 인덱스 (덮어쓰기 방지)
+  var existing = {};
+  if (wsSheet.getLastRow() >= 2) {
+    var wsVals = wsSheet.getRange(2, 1, wsSheet.getLastRow() - 1, 3).getValues();
+    for (var i = 0; i < wsVals.length; i++) {
+      var k = String(wsVals[i][0] || '').trim() + '|' + Number(wsVals[i][1]) + '|' + Number(wsVals[i][2]);
+      existing[k] = true;
+    }
+  }
+
+  // 주간정산 read: nickname, week, year, status
+  var sVals = settleSheet.getRange(2, 1, settleSheet.getLastRow() - 1, 4).getValues();
+  var toAppend = [];
+  var counts = {};  // status별 count
+  var skippedExisting = 0;
+  for (var si = 0; si < sVals.length; si++) {
+    var nick = String(sVals[si][0] || '').trim();
+    var w = Number(sVals[si][1]);
+    var y = Number(sVals[si][2]);
+    var st = String(sVals[si][3] || '').trim();
+    if (!nick || !w || !y || !st) continue;
+    // VALID_STATUSES_만 이관 (알 수 없는 값은 무시)
+    if (VALID_STATUSES_.indexOf(st) < 0) continue;
+    var key = nick + '|' + y + '|' + w;
+    if (existing[key]) { skippedExisting++; continue; }
+    toAppend.push([nick, y, w, st, 'from 주간정산 snapshot']);
+    existing[key] = true;  // 같은 배치 내 중복 방지
+    counts[st] = (counts[st] || 0) + 1;
+  }
+  if (toAppend.length) {
+    wsSheet.getRange(wsSheet.getLastRow() + 1, 1, toAppend.length, 5).setValues(toAppend);
+  }
+  var summary = '이관 완료: ' + toAppend.length + '개 append (기존 유지 ' + skippedExisting + '개). status 분포: ' + JSON.stringify(counts);
+  Logger.log(summary);
+  return summary;
+}
+
 // ── 멤버 F열 → 주간상태 시트 자동 sync ──
 // 커밋 38b09b4에서 사라진 F열→주간상태 링크를 복구.
 // 특정 주에 대해 각 멤버의 현재 F열 값을 주간상태 시트에 upsert.
