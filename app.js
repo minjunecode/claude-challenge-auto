@@ -231,8 +231,10 @@ async function apiCall(action, params = {}) {
   return { success: false, error: lastErr || '요청 실패' };
 }
 
-// dashboardCache 저장 — 쿼터 초과 시 무거운 필드 제거 후 재시도.
-// 브라우저 localStorage는 origin당 보통 5~10MB. dashboardData가 커지면 setItem 실패.
+// dashboardCache 저장 — 쿼터 초과 시 무거운 시각화 필드만 제거 후 재시도.
+// ⚠️ settlements.days는 절대 trim 안 함 (벌금 frozen 계산의 진실 원본).
+// trim하면 hasFrozen=false → realtime 계산 → 사용자 현재 status로 재판정 →
+// '2주 면제'/'휴식' 사용자가 과거 주까지 모두 0원 처리되는 심각한 버그.
 function safeCacheDashboard(data) {
   try {
     localStorage.setItem('dashboardCache', JSON.stringify(data));
@@ -240,11 +242,12 @@ function safeCacheDashboard(data) {
   } catch (e) {
     try {
       const slim = { ...data };
+      // 시각화 전용 필드만 제거 (fine 계산 무관).
       if (slim.memberHourly) delete slim.memberHourly;
       if (slim.topUser && slim.topUser.hourly) slim.topUser = { ...slim.topUser, hourly: null };
-      if (slim.settlements) slim.settlements = slim.settlements.map(s => ({ ...s, days: null }));
+      // 절대 건드리지 않는 필드: settlements(days 포함), submissions, usage, weeklyStatus, depositLedger.
       localStorage.setItem('dashboardCache', JSON.stringify(slim));
-      console.warn('[cache] dashboardCache 쿼터 초과 → 무거운 필드 제거 후 저장 성공:', e.message);
+      console.warn('[cache] dashboardCache 쿼터 초과 → hourly만 제거 후 저장 성공:', e.message);
       return true;
     } catch (e2) {
       console.warn('[cache] dashboardCache 저장 완전 실패:', e2.message);
@@ -342,9 +345,19 @@ async function showMain() {
   document.querySelectorAll('.admin-only').forEach(el => { el.style.display = currentUser.isAdmin ? '' : 'none'; });
 
   // ② dashboardData 캐시를 먼저 복원 (switchTab에서 stats 렌더 시 필요)
+  //    옛 slim cache (settlements.days=null) 감지 시 폐기.
   if (!dashboardData) {
     const cached = localStorage.getItem('dashboardCache');
-    if (cached) { try { dashboardData = JSON.parse(cached); } catch { /* ignore */ } }
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        const settlements = parsed && parsed.settlements;
+        const hasStaleSlim = Array.isArray(settlements) && settlements.length > 0
+          && settlements.every(s => s.days === null);
+        if (hasStaleSlim) localStorage.removeItem('dashboardCache');
+        else dashboardData = parsed;
+      } catch { /* ignore */ }
+    }
   }
 
   // ③ 탭 전환 (즉시 UI 표시) → API는 백그라운드
@@ -594,7 +607,20 @@ async function loadDashboard(force) {
   if (!dashboardData) {
     const cached = localStorage.getItem('dashboardCache');
     if (cached) {
-      try { dashboardData = JSON.parse(cached); } catch { /* ignore */ }
+      try {
+        const parsed = JSON.parse(cached);
+        // 폐기된 slim(과거 버그) 감지: settlements가 있는데 days가 전부 null이면
+        // 벌금 표시가 무너지므로 캐시 폐기하고 refetch.
+        const settlements = parsed && parsed.settlements;
+        const hasStaleSlim = Array.isArray(settlements) && settlements.length > 0
+          && settlements.every(s => s.days === null);
+        if (hasStaleSlim) {
+          console.warn('[cache] 옛 slim cache 감지 (settlements.days=null) → 폐기');
+          localStorage.removeItem('dashboardCache');
+        } else {
+          dashboardData = parsed;
+        }
+      } catch { /* ignore */ }
     }
   }
   if (dashboardData) renderDashboard();
