@@ -2681,6 +2681,28 @@ function loadWeeklyStatus_() {
 }
 
 // (nick, year, week)의 status. 미기재면 기본 '참여 중'.
+// 진단: 스프레드시트의 모든 시트 이름 + row 수 + 헤더 나열.
+// '휴식이력' 등 코드가 모르는 시트를 admin이 만들어뒀는지 확인.
+function diagnoseAllSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var lines = ['총 ' + sheets.length + '개 시트'];
+  sheets.forEach(function(sh) {
+    var name = sh.getName();
+    var lastRow = sh.getLastRow();
+    var lastCol = sh.getLastColumn();
+    var headers = lastCol > 0 && lastRow >= 1
+      ? sh.getRange(1, 1, 1, Math.min(lastCol, 12)).getValues()[0].map(function(h){return String(h||'').trim();}).join(' | ')
+      : '(빈 시트)';
+    lines.push('');
+    lines.push('[' + name + '] rows=' + lastRow + ' cols=' + lastCol);
+    lines.push('  헤더: ' + headers);
+  });
+  var msg = lines.join('\n');
+  Logger.log(msg);
+  return msg;
+}
+
 // 진단: 주간상태 시트의 RAW rows 전체 덤프 (무효 status 포함).
 // admin이 '휴식' 등 미인식 status로 기입한 게 있는지 확인용.
 function diagnoseWeeklyStatusRaw() {
