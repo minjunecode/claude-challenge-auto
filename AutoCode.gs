@@ -584,9 +584,13 @@ function handleRequest(e) {
 // 쓰기 액션 발생 시 'dashboard:version'을 갱신 → 모든 캐시된 응답이 stale 판정됨.
 var DASHBOARD_CACHE_TTL_SEC_ = 300;  // 5분. 쓰기 액션은 invalidateDashboardCache_로 즉시 무효화되므로 안전.
 
+// 캐시 키에 코드 빌드 버전을 포함 → 재배포 시 자동으로 신규 키로 이동, 옛 캐시 자연 폐기.
+// 스키마 변경(days 트림 제거 등) 시 이 값 bump.
+var DASHBOARD_CACHE_KEY_VERSION_ = 'v4';
+
 function _dashboardCacheKey_(nickname) {
-  // 이제는 모든 사용자가 하나의 공유 캐시. myStats/myEvalThisWeek는 요청마다 계산.
-  return 'dashboard:_shared';
+  // 모든 사용자가 하나의 공유 캐시. myStats/myEvalThisWeek는 요청마다 계산.
+  return 'dashboard:_shared:' + DASHBOARD_CACHE_KEY_VERSION_;
 }
 
 // gzip 접두사 — 압축본 판별. 옛 캐시(prefix 없음)와 하위호환.
@@ -2621,10 +2625,12 @@ function loadWeeklyStatus_() {
 }
 
 // (nick, year, week)의 status. 미기재면 기본 '참여 중'.
-function statusForWeek_(wsMap, nick, year, week) {
+function statusForWeek_(wsMap, nick, year, week, memberFallback) {
   var m = wsMap[nick];
   if (m && m[year + '-' + week]) return m[year + '-' + week];
-  return '참여 중';
+  // 주간상태 시트에 미기재면 멤버 F열(participating) 사용.
+  // '휴식', '2주 면제' 같은 커스텀 상태도 존중됨 → getFineState에서 'unknown'→inactive.
+  return memberFallback || '참여 중';
 }
 
 /**
@@ -2861,8 +2867,10 @@ function runWeeklyFineSettlement_(targetWeek, targetYear) {
     if (!nick) continue;
     if (isAlreadySettled_(settled, nick, targetWeek, targetYear)) continue;
 
-    // 그 주차의 status = 주간상태 시트 (미기재 = '참여 중'). 멤버 F열 무시.
-    var statusRaw = statusForWeek_(weeklyStatus, nick, targetYear, targetWeek);
+    // 그 주차의 status = 주간상태 시트 우선, 미기재면 멤버 F열(participating) 사용.
+    // '휴식', '2주 면제' 같은 커스텀 상태도 존중 (isActive/isExempt에 안 걸려 fine=0).
+    var _memberF = String(members[mi][5] || '').trim();
+    var statusRaw = statusForWeek_(weeklyStatus, nick, targetYear, targetWeek, _memberF);
     var curLeague = String(members[mi][4] || LEAGUE_1M).trim();
     if (curLeague !== LEAGUE_10M && curLeague !== LEAGUE_1M) curLeague = LEAGUE_1M;
 
