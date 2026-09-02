@@ -5,6 +5,22 @@
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbys_MSZz16yoH9065nSLtsl4n9N0IMTYGECsvqzKIoD3EgZ30VlVxLjzOciq-8a6a8_KA/exec';
 
+// ── localStorage cache 버전 마커 ──
+// 구조/스키마 변경 시 bump하면 옛 캐시 자동 폐기 (사용자 수동 clear 불필요).
+// 최근에 settlements.days=null 스루 버그 있었음 → 안전 마진으로 강제 클리어.
+const CACHE_SCHEMA_VERSION = 3;
+(function _enforceCacheVersion() {
+  try {
+    const cur = parseInt(localStorage.getItem('dashboardCacheSchemaVersion') || '0', 10);
+    if (cur !== CACHE_SCHEMA_VERSION) {
+      localStorage.removeItem('dashboardCache');
+      localStorage.removeItem('personalStatsCache');
+      localStorage.setItem('dashboardCacheSchemaVersion', String(CACHE_SCHEMA_VERSION));
+      if (cur !== 0) console.log('[cache] schema v' + cur + '→v' + CACHE_SCHEMA_VERSION + ', 옛 캐시 자동 클리어');
+    }
+  } catch (e) {}
+})();
+
 let currentUser = null;
 let dashboardData = null;
 let dailyWeekOffset = 0;
