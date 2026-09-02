@@ -586,7 +586,62 @@ var DASHBOARD_CACHE_TTL_SEC_ = 300;  // 5분. 쓰기 액션은 invalidateDashboa
 
 // 캐시 키에 코드 빌드 버전을 포함 → 재배포 시 자동으로 신규 키로 이동, 옛 캐시 자연 폐기.
 // 스키마 변경(days 트림 제거 등) 시 이 값 bump.
-var DASHBOARD_CACHE_KEY_VERSION_ = 'v4';
+var DASHBOARD_CACHE_KEY_VERSION_ = 'v5';
+
+// ── 주간상태 시트 일괄 마킹 헬퍼 ──
+// 특정 멤버가 fromWeek~toWeek(같은 year) 동안 status였다고 주간상태 시트에 upsert.
+// 예: admin이 Ar가 W28부터 지금까지 휴식이었다고 표시:
+//   markMemberStatusRange('Ar', 2026, 28, 2026, 35, '휴식')
+// 이후 resettleAllSettledWeeks 실행하면 해당 주만 벌금 0으로 재계산됨.
+function markMemberStatusRange(nickname, fromYear, fromWeek, toYear, toWeek, status) {
+  if (VALID_STATUSES_.indexOf(status) < 0) {
+    return 'status는 다음 중 하나: ' + VALID_STATUSES_.join(', ');
+  }
+  var nk = String(nickname || '').trim();
+  if (!nk) return 'nickname 필요';
+  var fy = Number(fromYear), fw = Number(fromWeek);
+  var ty = Number(toYear), tw = Number(toWeek);
+  if (!fy || !fw || !ty || !tw) return '연/주차 숫자 필요';
+
+  var sh = getWeeklyStatusSheet_();
+  var existing = {};  // "y-w" → rowNum
+  if (sh.getLastRow() >= 2) {
+    var vals = sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0] || '').trim() === nk) {
+        existing[Number(vals[i][1]) + '-' + Number(vals[i][2])] = i + 2;
+      }
+    }
+  }
+
+  // 범위 생성 (year+week 순회, 52주 근사)
+  var pairs = [];
+  var cy = fy, cw = fw;
+  while (cy < ty || (cy === ty && cw <= tw)) {
+    pairs.push({ y: cy, w: cw });
+    cw++;
+    if (cw > 52) { cw = 1; cy++; }
+    if (pairs.length > 200) break;  // 안전 상한
+  }
+
+  var upserted = 0;
+  var appended = [];
+  pairs.forEach(function(p) {
+    var key = p.y + '-' + p.w;
+    var memo = 'admin bulk: ' + nk + ' → ' + status;
+    if (existing[key]) {
+      sh.getRange(existing[key], 4).setValue(status);
+      sh.getRange(existing[key], 5).setValue(memo);
+      upserted++;
+    } else {
+      appended.push([nk, p.y, p.w, status, memo]);
+    }
+  });
+  if (appended.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, appended.length, 5).setValues(appended);
+  }
+  return nk + ': ' + upserted + '개 update, ' + appended.length + '개 append (총 ' + pairs.length + '개 주차)';
+}
 
 function _dashboardCacheKey_(nickname) {
   // 모든 사용자가 하나의 공유 캐시. myStats/myEvalThisWeek는 요청마다 계산.
@@ -2595,7 +2650,8 @@ function firstPaymentDate_(ledgerMap, nick) {
 // 주차 키 (nickname, year, week)로 기록. 미기재 = 기본 '참여 중'.
 var WEEKLY_STATUS_SHEET_ = '주간상태';
 var WEEKLY_STATUS_HEADERS_ = ['nickname', 'year', 'week', 'status', 'memo'];
-var VALID_STATUSES_ = ['참여 중', '주간 면제', '참여 안 함'];
+// '휴식' 도 유효 status로 추가 (settlement/frontend 둘 다 inactive로 처리).
+var VALID_STATUSES_ = ['참여 중', '주간 면제', '참여 안 함', '휴식'];
 
 function getWeeklyStatusSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -2628,9 +2684,10 @@ function loadWeeklyStatus_() {
 function statusForWeek_(wsMap, nick, year, week, memberFallback) {
   var m = wsMap[nick];
   if (m && m[year + '-' + week]) return m[year + '-' + week];
-  // 주간상태 시트에 미기재면 멤버 F열(participating) 사용.
-  // '휴식', '2주 면제' 같은 커스텀 상태도 존중됨 → getFineState에서 'unknown'→inactive.
-  return memberFallback || '참여 중';
+  // 주간상태 시트에 미기재면 default '참여 중' (과거 소급 오염 방지).
+  // 휴식/면제 처리는 admin이 markMemberStatusRange로 주간상태 시트에 명시.
+  // (memberFallback 파라미터는 하위호환용, 사용 안 함)
+  return '참여 중';
 }
 
 /**

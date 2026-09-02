@@ -1319,7 +1319,7 @@ function getFineState(raw) {
   const s = String(raw || '').trim();
   if (s === '' || s === '참여 중') return 'active';
   if (s === '주간 면제') return 'exempt';
-  if (s === '참여 안 함') return 'inactive';
+  if (s === '참여 안 함' || s === '휴식') return 'inactive';
   return 'unknown';
 }
 
