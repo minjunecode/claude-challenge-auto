@@ -1349,18 +1349,19 @@ function handleDashboard(params) {
 }
 
 // ── 캐시 hit 시 사용자별 필드 계산 (짧게 유지) ──
-// shared: 캐시된 공유 응답 (members/usage/submissions 등 포함)
+// myStats는 raw 시트 풀스캔이 필요해 무거움 → dashboard에서 완전 제외.
+// 프론트가 personalStats 액션을 별도로 lazy 호출 (내 분석 탭 열 때).
+// myEvalThisWeek만 이 addons에 포함 (평가 시트 read는 작아서 빠름).
 function _computeUserAddons_(nickname, password, shared) {
   var out = { myStats: null, myEvalThisWeek: null };
   if (!nickname || !password) return out;
 
-  // 인증 (멤버 시트 read — 이미 shared.members 있으니 그거로 확인)
-  var authed = false;
-  // 실제 password 검증은 시트에서 (shared.members엔 password 없음)
+  // 인증 (멤버 시트 read)
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var memberSheet = ss.getSheetByName('멤버');
   if (!memberSheet) return out;
   var mData = memberSheet.getDataRange().getValues();
+  var authed = false;
   for (var i = 1; i < mData.length; i++) {
     if (String(mData[i][0]).trim() === nickname && String(mData[i][1]).trim() === password) {
       authed = true; break;
@@ -1368,12 +1369,8 @@ function _computeUserAddons_(nickname, password, shared) {
   }
   if (!authed) return out;
 
-  // myStats: 사용자 raw 스캔 (본인 행만 → 빠름)
-  out.myStats = _computeMyStatsQuick_(nickname, shared);
-
-  // myEvalThisWeek: 평가 시트 read (본인 행만 필터)
+  // myEvalThisWeek만 (작은 sheet read).
   out.myEvalThisWeek = _computeMyEvalThisWeekQuick_(nickname);
-
   return out;
 }
 
@@ -2027,16 +2024,31 @@ function handleDeleteMember(params) {
 
 // ── 개인 통계 ──
 function handlePersonalStats(params) {
-  // handleDashboard가 이미 requester의 myStats를 합산 로직으로 계산하므로 위임.
-  // (중복 코드 제거 + 다중-PC 합산 로직이 자동 적용됨)
-  var full = handleDashboard(params);
-  if (!full || !full.success) return full || { success: false, error: 'failed' };
-  if (!full.myStats) return { success: false, error: '인증 실패 또는 데이터 없음' };
+  // myStats는 dashboard에서 분리됐음 (raw 시트 풀스캔 비용 큼).
+  // 이 endpoint는 사용자가 '내 분석' 탭 열 때만 lazy 호출됨.
+  var nickname = (params.nickname || '').trim();
+  var password = String(params.password || '').trim();
+  if (!nickname || !password) return { success: false, error: '인증 정보가 필요합니다.' };
+  // 인증
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var memberSheet = ss.getSheetByName('멤버');
+  if (!memberSheet) return { success: false, error: '멤버 시트 없음' };
+  var mData = memberSheet.getDataRange().getValues();
+  var authed = false;
+  for (var i = 1; i < mData.length; i++) {
+    if (String(mData[i][0]).trim() === nickname && String(mData[i][1]).trim() === password) {
+      authed = true; break;
+    }
+  }
+  if (!authed) return { success: false, error: '인증 실패' };
+  // shared 응답에서 usage/submissions를 얻기 위해 dashboard 캐시 참조 (shared는 항상 warm).
+  var shared = getCachedDashboard_('') || {};
+  var stats = _computeMyStatsQuick_(nickname, shared);
   return {
     success: true,
-    raw:    full.myStats.raw    || [],
-    daily:  full.myStats.daily  || [],
-    points: full.myStats.points || []
+    raw:    stats.raw    || [],
+    daily:  stats.daily  || [],
+    points: stats.points || []
   };
 }
 
