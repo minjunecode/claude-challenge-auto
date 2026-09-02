@@ -1228,23 +1228,18 @@ function handleDashboard(params) {
   }
 
   // ── 주간 정산 audit log (벌금 탭의 과거 주차 freeze) ──
-  // 페이로드 슬림: 8주 이상 지난 주차의 days JSON은 drop (프론트 벌금 탭은 최근만 표시).
-  // 요약 필드(fineAmount 등)는 유지해서 통계·이력엔 지장 없음.
+  // ⚠️ days는 절대 trim 금지. 프론트가 hasFrozen=false로 판정하면 realtime 재계산으로
+  // 폴백하는데, 8주 이전 usage 데이터는 응답에 없어서 tokens=0 → 매일 miss → 50000원
+  // max fine으로 전 과거 주차가 폭발함. days 유지가 벌금 무결성의 마지노선.
   var settlements = [];
   var settlementSh = ss.getSheetByName(WEEKLY_SETTLEMENT_SHEET_);
-  var currentIsoForSettle = isoWeekFromDate_(new Date());
-  var DAYS_KEEP_WEEKS = 8;
   if (settlementSh && settlementSh.getLastRow() > 1) {
     var sVals = settlementSh.getRange(2, 1, settlementSh.getLastRow() - 1, WEEKLY_SETTLEMENT_HEADERS_.length).getValues();
     for (var si = 0; si < sVals.length; si++) {
       var sr = sVals[si];
       if (!sr[0]) continue;
-      var _sWeek = Number(sr[1]) || 0;
-      var _sYear = Number(sr[2]) || 0;
-      var _weeksBack = (currentIsoForSettle.year - _sYear) * 52 + (currentIsoForSettle.week - _sWeek);
-      var _keepDays = _weeksBack <= DAYS_KEEP_WEEKS;
       var daysArr = null;
-      if (_keepDays && sr[10]) {
+      if (sr[10]) {
         try { daysArr = JSON.parse(String(sr[10])); } catch (e) { daysArr = null; }
       }
       settlements.push({
