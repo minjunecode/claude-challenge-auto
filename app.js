@@ -1491,9 +1491,12 @@ function renderFineTab() {
     const prejoin = ledgerAvailable && (!fpDate || weekEnd < fpDate);  // 이 주 전체가 합류 전
     const preEnforce = weekEnd < FINE_ENFORCEMENT_START;  // 벌금 전역 시행 전 주
     const st = settlementByKey[`${m.nickname}__${iso.year}-W${iso.week}`];
-    const hasFrozen = !!(st && Array.isArray(st.days) && st.days.length === 7);
-    const useFrozen = wkPast && wkStable && hasFrozen && !prejoin && !preEnforce;
-    const statusForWeek = useFrozen ? st.status : statusForWeekFE(m, iso);
+    // 주간정산 시트에 row가 있으면 무조건 그 데이터를 진실로 사용 (fineAmount/status/days 등).
+    // days JSON이 없어도(옛 응답 slim 등) 요약 필드는 신뢰. 사용자 데이터가 최상위.
+    const hasSettlement = !!st;
+    const hasFrozenDays = !!(st && Array.isArray(st.days) && st.days.length === 7);
+    const useSettlement = wkPast && wkStable && hasSettlement && !prejoin && !preEnforce;
+    const statusForWeek = useSettlement ? st.status : statusForWeekFE(m, iso);
     const state = getFineState(statusForWeek);
     const currLeague = (m.league === LEAGUE_10M || m.league === LEAGUE_1M) ? m.league : LEAGUE_1M;
     const byDate = {};
@@ -1501,11 +1504,17 @@ function renderFineTab() {
     if (prejoin || preEnforce) {
       wkDates.forEach(dateStr => { byDate[dateStr] = '-'; });
       fineAmount = 0; chargedDays = 0; missCount = 0;
-    } else if (useFrozen) {
-      st.days.forEach(fd => { byDate[fd.date] = fd.label; });
-      fineAmount = st.fineAmount;
-      chargedDays = st.chargedDays;
-      missCount = st.missCount;
+    } else if (useSettlement) {
+      // 주간정산 데이터 그대로 사용 — 벌금/미달/보증금은 서버 값이 진실.
+      if (hasFrozenDays) {
+        st.days.forEach(fd => { byDate[fd.date] = fd.label; });
+      } else {
+        // days JSON 없으면 셀은 '-'로 표시하되 요약 값은 서버 정산 그대로.
+        wkDates.forEach(dateStr => { byDate[dateStr] = '-'; });
+      }
+      fineAmount = st.fineAmount || 0;
+      chargedDays = st.chargedDays || 0;
+      missCount = st.missCount || 0;
     } else {
       wkDates.forEach(dateStr => {
         let label;
