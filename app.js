@@ -191,8 +191,11 @@ async function apiCall(action, params = {}) {
           body: JSON.stringify(merged), redirect: 'follow', signal: controller.signal
         });
       }
-      clearTimeout(timer);
+      // ⚠️ clearTimeout은 response.text() **후** 호출.
+      // 이전엔 fetch resolve 직후 clear → body 다운로드 도중 timeout이 사라져
+      // 큰 응답(350KB) 다운로드가 hang → 실제 10초 timeout이 무의미해짐.
       const txt = await response.text();
+      clearTimeout(timer);
       const elapsed = Date.now() - t0;
       if (elapsed > 5000 || txt.length > 200000) {
         console.log(`[apiCall#${attemptNum}] ${action} (${canUseGet ? 'GET' : 'POST'}) → ${response.status} · ${txt.length}B · ${elapsed}ms`);
