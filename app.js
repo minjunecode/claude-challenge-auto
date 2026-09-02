@@ -170,12 +170,13 @@ async function apiCall(action, params = {}) {
   // 쓰기 액션은 side effect 있으므로 retry X (중복 실행 방지).
   const isMutation = /^(reportUsage|setColor|addMember|deleteMember|upload|register|init|evalStart|evalSubmit|evalDiscard)$/.test(action);
   const maxAttempts = isMutation ? 1 : 2;
-  // 서버가 5분 prewarm 크론으로 캐시 warm 유지 → cache hit이면 2~3초.
-  // cold(mutation 직후) 재발 시엔 첫 시도는 timeout, 재시도가 캐시 hit으로 성공.
-  const perAttemptTimeoutMs = action === 'dashboard' ? 10000 : 15000;
+  // 시도별 타임아웃 — 첫 시도 빠르게(cache hit이면 여기서 끝), 두 번째는 넉넉하게(느린 네트워크 커버).
+  // dashboard: 8s / 25s. 기타: 12s / 20s.
+  const timeoutForAttempt = (n) => (action === 'dashboard' ? [8000, 25000] : [12000, 20000])[n - 1] || 20000;
 
   // 단일 요청 실행자
   async function attempt(attemptNum) {
+    const perAttemptTimeoutMs = timeoutForAttempt(attemptNum);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), perAttemptTimeoutMs);
     const t0 = Date.now();
