@@ -2681,6 +2681,66 @@ function loadWeeklyStatus_() {
 }
 
 // (nick, year, week)의 status. 미기재면 기본 '참여 중'.
+// ── 멤버 F열 → 주간상태 시트 자동 sync ──
+// 커밋 38b09b4에서 사라진 F열→주간상태 링크를 복구.
+// 특정 주에 대해 각 멤버의 현재 F열 값을 주간상태 시트에 upsert.
+// runWeeklyFineSettlement_ 시작할 때 호출하면 이력이 자동 축적.
+function syncMembersFtoWeeklyStatus_(year, week) {
+  var y = Number(year), w = Number(week);
+  if (!y || !w) return;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var memberSheet = ss.getSheetByName('멤버');
+  if (!memberSheet) return;
+  var wsSheet = getWeeklyStatusSheet_();
+
+  // 기존 주간상태 entry 인덱스: nick|y|w → rowNum
+  var existing = {};
+  if (wsSheet.getLastRow() >= 2) {
+    var wsVals = wsSheet.getRange(2, 1, wsSheet.getLastRow() - 1, 3).getValues();
+    for (var i = 0; i < wsVals.length; i++) {
+      var k = String(wsVals[i][0] || '').trim() + '|' + Number(wsVals[i][1]) + '|' + Number(wsVals[i][2]);
+      existing[k] = i + 2;
+    }
+  }
+
+  var mData = memberSheet.getDataRange().getValues();
+  var toAppend = [];
+  for (var mi = 1; mi < mData.length; mi++) {
+    var nk = String(mData[mi][0] || '').trim();
+    if (!nk) continue;
+    var fVal = String(mData[mi][5] || '참여 중').trim();
+    if (VALID_STATUSES_.indexOf(fVal) < 0) continue;  // 알 수 없는 값은 skip
+    var key = nk + '|' + y + '|' + w;
+    if (existing[key]) {
+      // 이미 있으면 admin의 수동 입력 우선 — 덮어쓰지 않음.
+      continue;
+    }
+    toAppend.push([nk, y, w, fVal, 'auto: F열 snapshot']);
+  }
+  if (toAppend.length) {
+    wsSheet.getRange(wsSheet.getLastRow() + 1, 1, toAppend.length, 5).setValues(toAppend);
+  }
+}
+
+// 특정 주 범위 [fy,fw] ~ [ty,tw] 에 현재 F열 값을 일괄 snapshot.
+// 예: syncMembersFtoWeeklyStatus_range(2026, 30, 2026, 35)
+// 과거 주에 F열을 backfill 필요할 때 (한 시점의 F열이 모든 대상 주에 적용됨).
+function syncMembersFtoWeeklyStatus_range(fromYear, fromWeek, toYear, toWeek) {
+  var fy = Number(fromYear), fw = Number(fromWeek);
+  var ty = Number(toYear), tw = Number(toWeek);
+  if (!fy || !fw || !ty || !tw) return '연/주차 인자 필요';
+  var count = 0, safety = 0;
+  var cy = fy, cw = fw;
+  while (cy < ty || (cy === ty && cw <= tw)) {
+    syncMembersFtoWeeklyStatus_(cy, cw);
+    count++;
+    cw++;
+    if (cw > 52) { cw = 1; cy++; }
+    if (++safety > 200) break;
+  }
+  return 'sync 완료: ' + count + '개 주차';
+}
+
 // 진단: 스프레드시트의 모든 시트 이름 + row 수 + 헤더 나열.
 // '휴식이력' 등 코드가 모르는 시트를 admin이 만들어뒀는지 확인.
 function diagnoseAllSheets() {
@@ -2906,6 +2966,10 @@ function repairAllDeposits() {
 // 특정 주차(targetWeek, targetYear)의 모든 멤버를 정산.
 // 이미 정산된 멤버는 skip. 정산된 row 수를 반환.
 function runWeeklyFineSettlement_(targetWeek, targetYear) {
+  // 정산 시작 시 현재 F열을 그 주차의 주간상태에 auto-snapshot (미기재만).
+  // 이력 자동 축적. admin 수동 입력이 있으면 그건 유지.
+  try { syncMembersFtoWeeklyStatus_(targetYear, targetWeek); } catch (e) {}
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var memberSheet = ss.getSheetByName('멤버');
   if (!memberSheet) throw new Error('멤버 시트 없음');
