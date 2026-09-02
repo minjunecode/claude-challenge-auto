@@ -2681,6 +2681,36 @@ function loadWeeklyStatus_() {
 }
 
 // (nick, year, week)의 status. 미기재면 기본 '참여 중'.
+// 진단: 주간상태 시트의 RAW rows 전체 덤프 (무효 status 포함).
+// admin이 '휴식' 등 미인식 status로 기입한 게 있는지 확인용.
+function diagnoseWeeklyStatusRaw() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('주간상태');
+  if (!sh || sh.getLastRow() < 2) return '주간상태 시트 비어있음';
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues();
+  var lines = ['총 ' + vals.length + '행. VALID_STATUSES_ = ' + VALID_STATUSES_.join(', ')];
+  var counts = {};
+  var invalidRows = [];
+  vals.forEach(function(r, i) {
+    var st = String(r[3] || '').trim();
+    counts[st] = (counts[st] || 0) + 1;
+    if (VALID_STATUSES_.indexOf(st) < 0) {
+      invalidRows.push('  row ' + (i+2) + ': nick=' + r[0] + ' ' + r[1] + '-W' + r[2] + ' status="' + r[3] + '" ← 무효(무시됨)');
+    }
+  });
+  lines.push('');
+  lines.push('status 별 카운트:');
+  Object.keys(counts).forEach(function(k) { lines.push('  "' + k + '": ' + counts[k]); });
+  if (invalidRows.length) {
+    lines.push('');
+    lines.push('── 무효 status로 무시된 행 (VALID_STATUSES_에 추가 필요) ──');
+    invalidRows.slice(0, 30).forEach(function(l) { lines.push(l); });
+    if (invalidRows.length > 30) lines.push('  ... 외 ' + (invalidRows.length - 30) + '개');
+  }
+  var msg = lines.join('\n');
+  Logger.log(msg);
+  return msg;
+}
+
 function statusForWeek_(wsMap, nick, year, week, memberFallback) {
   var m = wsMap[nick];
   if (m && m[year + '-' + week]) return m[year + '-' + week];
